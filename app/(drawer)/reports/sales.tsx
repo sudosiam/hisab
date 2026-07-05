@@ -1,16 +1,19 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, FlatList, StyleSheet } from 'react-native';
+import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getSalesReport } from '../../../src/services/reports';
-import { getCurrentMonthKey } from '../../../src/utils/date';
+import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { formatCurrency } from '../../../src/utils/format';
 import { StatusBadge } from '../../../src/components/StatusBadge';
-import { useScreenStyles } from '../../../src/components/ui';
+import { ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { useTheme } from '../../../src/context/ThemeContext';
+import { formatSqliteError } from '../../../src/db/database';
 import { radius, spacing } from '../../../src/constants/theme';
 
 export default function SalesReportScreen() {
+  const { refreshKey } = useDatabase();
   const styles = useScreenStyles();
   const { colors } = useTheme();
   const localStyles = useMemo(
@@ -35,16 +38,33 @@ export default function SalesReportScreen() {
       }),
     [colors]
   );
-  const [monthKey, setMonthKey] = useState(getCurrentMonthKey());
+  const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [rows, setRows] = useState<Awaited<ReturnType<typeof getSalesReport>>>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useFocusEffect(
-    useCallback(() => {
-      getSalesReport(monthKey).then(setRows);
-    }, [monthKey])
-  );
+  const load = useCallback(async () => {
+    try {
+      setRows(await getSalesReport(monthKey));
+      setError(null);
+    } catch (e) {
+      setError(formatSqliteError(e));
+    }
+  }, [monthKey]);
+
+  useFocusEffect(useCallback(() => { load(); }, [load, refreshKey]));
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
 
   const total = rows.reduce((s, r) => s + r.total_amount, 0);
+
+  if (error) {
+    return <ErrorState message={error} onRetry={load} />;
+  }
 
   return (
     <View style={styles.container}>
@@ -56,6 +76,10 @@ export default function SalesReportScreen() {
         data={rows}
         keyExtractor={(item) => item.invoice_no}
         contentContainerStyle={styles.list}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+        }
+        ListEmptyComponent={<Text style={styles.empty}>No sales in this month</Text>}
         renderItem={({ item }) => (
           <View style={localStyles.row}>
             <View>

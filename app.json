@@ -2,30 +2,29 @@
   "expo": {
     "name": "Hisab",
     "slug": "hisab",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "hisab",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#DED7CE"
+      "backgroundColor": "#F3F5F9"
     },
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.hisab.app"
+      "bundleIdentifier": "com.hisab.app",
+      "buildNumber": "2"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#DED7CE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#F3F5F9",
+        "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "package": "com.hisab.app",
-      "versionCode": 1,
+      "versionCode": 2,
       "predictiveBackGestureEnabled": true
     },
     "web": {
@@ -34,7 +33,14 @@
     },
     "plugins": [
       "expo-router",
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow Hisab to use Face ID to unlock your business data."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

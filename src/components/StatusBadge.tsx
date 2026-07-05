@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { spacing, radius } from '../constants/theme';
+import { radius } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { getPaymentStatusLabel } from '../utils/format';
 

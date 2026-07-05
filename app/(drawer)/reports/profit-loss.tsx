@@ -1,15 +1,26 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, ViewStyle, TextStyle } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  ActivityIndicator,
+  RefreshControl,
+  ViewStyle,
+  TextStyle,
+} from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getProfitLossReport } from '../../../src/services/reports';
-import { getCurrentMonthKey } from '../../../src/utils/date';
+import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { formatCurrency } from '../../../src/utils/format';
-import { useScreenStyles } from '../../../src/components/ui';
+import { ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { radius, spacing } from '../../../src/constants/theme';
 
 export default function ProfitLossReportScreen() {
+  const { refreshKey } = useDatabase();
   const styles = useScreenStyles();
   const { colors } = useTheme();
   const localStyles = useMemo(
@@ -31,20 +42,60 @@ export default function ProfitLossReportScreen() {
       }),
     [colors]
   );
-  const [monthKey, setMonthKey] = useState(getCurrentMonthKey());
+  const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [data, setData] = useState<Awaited<ReturnType<typeof getProfitLossReport>> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useFocusEffect(useCallback(() => { getProfitLossReport(monthKey).then(setData); }, [monthKey]));
+  const load = useCallback(async () => {
+    try {
+      setData(await getProfitLossReport(monthKey));
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load report');
+    }
+  }, [monthKey]);
 
-  if (!data) return null;
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load, refreshKey])
+  );
+
+  if (error && !data) {
+    return <ErrorState message={error} onRetry={load} />;
+  }
+
+  if (!data) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true);
+            load().finally(() => setRefreshing(false));
+          }}
+          colors={[colors.primary]}
+          tintColor={colors.primary}
+        />
+      }
+    >
       <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
       <View style={localStyles.card}>
         <Line localStyles={localStyles} label="Revenue (Sales)" value={data.revenue} />
         <Line localStyles={localStyles} label="Cost of Goods Sold" value={-data.cogs} negative />
         <Line localStyles={localStyles} label="Gross Profit" value={data.grossProfit} bold />
+        <Line localStyles={localStyles} label="Other Income" value={data.otherIncome} />
         <Line localStyles={localStyles} label="Operating Expenses" value={-data.expenses} negative />
         <Line localStyles={localStyles} label="Net Profit" value={data.netProfit} bold highlight />
       </View>

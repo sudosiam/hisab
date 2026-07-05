@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   StyleSheet,
   ActivityIndicator,
   Alert,
@@ -17,15 +16,24 @@ import {
   deletePurchase,
 } from '../../../src/services/purchases';
 import { formatSqliteError } from '../../../src/db/database';
-import { getAccounts } from '../../../src/services/banking';
+import { getSelectableAccounts } from '../../../src/services/banking';
 import { StatusBadge } from '../../../src/components/StatusBadge';
-import { FormInput, PrimaryButton, SectionHeader, useScreenStyles } from '../../../src/components/ui';
-import { formatCurrency } from '../../../src/utils/format';
+import { StatCard } from '../../../src/components/StatCard';
+import { AccountPicker } from '../../../src/components/AccountPicker';
+import {
+  FormInput,
+  FormScreen,
+  PrimaryButton,
+  SectionHeader,
+  useScreenStyles,
+} from '../../../src/components/ui';
+import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
+import { roundMoney } from '../../../src/utils/money';
 import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { todayISO } from '../../../src/utils/date';
-import { radius, spacing } from '../../../src/constants/theme';
+import { spacing } from '../../../src/constants/theme';
 import type { Account, Purchase, PurchaseItem, PurchasePayment } from '../../../src/types';
 
 export default function PurchaseDetailScreen() {
@@ -41,16 +49,12 @@ export default function PurchaseDetailScreen() {
         invoice: { fontSize: 20, fontWeight: '700', color: colors.text },
         party: { color: colors.textSecondary, marginTop: 4 },
         date: { fontSize: 13, color: colors.textSecondary },
-        summary: {
-          backgroundColor: colors.surface,
-          padding: spacing.md,
-          borderRadius: radius.md,
+        kpiRow: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: spacing.sm,
           marginVertical: spacing.md,
-          gap: 4,
-          borderWidth: 1,
-          borderColor: colors.border,
         },
-        due: { color: colors.danger, fontWeight: '600' },
         itemRow: {
           flexDirection: 'row',
           justifyContent: 'space-between',
@@ -58,19 +62,11 @@ export default function PurchaseDetailScreen() {
           borderBottomWidth: 1,
           borderBottomColor: colors.border,
         },
+        itemName: { fontWeight: '500', color: colors.text },
+        itemMeta: { fontSize: 12, color: colors.textSecondary },
+        itemTotal: { fontWeight: '600', color: colors.text },
+        muted: { color: colors.textSecondary, fontSize: 13 },
         paySection: { marginTop: spacing.md },
-        chip: {
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.xs,
-          backgroundColor: colors.chip,
-          borderRadius: radius.sm,
-          marginRight: spacing.xs,
-          borderWidth: 1,
-          borderColor: colors.border,
-        },
-        chipActive: { backgroundColor: colors.chipActive, borderColor: colors.chipActive },
-        chipText: { color: colors.chipText, fontSize: 13 },
-        chipTextActive: { color: colors.chipTextActive, fontWeight: '600' },
       }),
     [colors]
   );
@@ -96,13 +92,17 @@ export default function PurchaseDetailScreen() {
         getPurchaseById(purchaseId),
         getPurchaseItems(purchaseId),
         getPurchasePayments(purchaseId),
-        getAccounts(),
+        getSelectableAccounts(),
       ]);
       setPurchase(p);
       setItems(i);
       setPayments(pay);
       setAccounts(a);
       if (a.length > 0) setSelectedAccount(a[0].id);
+      if (p) {
+        const dueAmt = p.total_amount - p.paid_amount;
+        if (dueAmt > 0) setPayAmount(formatAmountInput(dueAmt));
+      }
       setError(p ? null : 'Purchase not found');
     } catch (e) {
       setError(formatSqliteError(e));
@@ -115,8 +115,16 @@ export default function PurchaseDetailScreen() {
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
 
   const handleAddPayment = async () => {
-    const amount = parseFloat(payAmount);
-    if (!amount || !purchase) return;
+    if (!purchase || saving) return;
+    const amount = parsePositiveAmount(payAmount);
+    if (amount === null) {
+      Alert.alert('Error', 'Enter an amount greater than zero');
+      return;
+    }
+    if (!selectedAccount) {
+      Alert.alert('Error', 'Select a payment account');
+      return;
+    }
     const due = purchase.total_amount - purchase.paid_amount;
     if (amount > due + 0.01) {
       Alert.alert('Error', `Amount exceeds due (${formatCurrency(due)})`);
@@ -178,60 +186,91 @@ export default function PurchaseDetailScreen() {
     );
   }
 
-  const due = purchase.total_amount - purchase.paid_amount;
+  const due = roundMoney(purchase.total_amount - purchase.paid_amount);
+  const itemsCost = roundMoney(items.reduce((sum, item) => sum + item.total, 0));
+  const totalQty = roundMoney(items.reduce((sum, item) => sum + item.qty, 0));
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <FormScreen>
       <View style={localStyles.header}>
         <Text style={localStyles.invoice}>{purchase.invoice_no}</Text>
         <StatusBadge status={purchase.status} />
       </View>
       <Text style={localStyles.party}>{purchase.supplier_name}</Text>
       <Text style={localStyles.date}>{purchase.date}</Text>
+      {purchase.vendor_invoice_no ? (
+        <Text style={localStyles.date}>Vendor invoice: {purchase.vendor_invoice_no}</Text>
+      ) : null}
 
-      <View style={localStyles.summary}>
-        <Text style={styles.value}>Total: {formatCurrency(purchase.total_amount)}</Text>
-        <Text style={styles.value}>Paid: {formatCurrency(purchase.paid_amount)}</Text>
-        <Text style={[styles.value, due > 0 && localStyles.due]}>Due: {formatCurrency(due)}</Text>
+      <View style={localStyles.kpiRow}>
+        <StatCard label="Total" value={purchase.total_amount} color={colors.primary} />
+        <StatCard
+          label="Due"
+          value={due}
+          color={due > 0 ? colors.danger : colors.success}
+          subtitle={`Paid ${formatCurrency(purchase.paid_amount)}`}
+        />
+        <StatCard
+          label="Items"
+          displayValue={String(items.length)}
+          color={colors.accent}
+          subtitle={`${totalQty} units · ${formatCurrency(itemsCost)} cost`}
+        />
       </View>
 
       <SectionHeader title="Items" />
       {items.map((item) => (
         <View key={item.id} style={localStyles.itemRow}>
-          <Text style={styles.value}>{item.product_name} — {item.qty} × {formatCurrency(item.unit_cost)}</Text>
-          <Text style={styles.amount}>{formatCurrency(item.total)}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={localStyles.itemName}>{item.product_name}</Text>
+            <Text style={localStyles.itemMeta}>
+              {item.qty} × {formatCurrency(item.unit_cost)}
+            </Text>
+          </View>
+          <Text style={localStyles.itemTotal}>{formatCurrency(item.total)}</Text>
         </View>
       ))}
 
       <SectionHeader title="Payments" />
-      {payments.map((p) => (
-        <View key={p.id} style={localStyles.itemRow}>
-          <Text style={styles.value}>{p.account_name}</Text>
-          <Text style={styles.amount}>{formatCurrency(p.amount)}</Text>
-        </View>
-      ))}
+      {payments.length === 0 ? (
+        <Text style={localStyles.muted}>No payments recorded</Text>
+      ) : (
+        payments.map((p) => (
+          <View key={p.id} style={localStyles.itemRow}>
+            <Text style={styles.value}>{p.account_name}</Text>
+            <Text style={styles.amount}>{formatCurrency(p.amount)}</Text>
+          </View>
+        ))
+      )}
 
       {due > 0 && (
         <View style={localStyles.paySection}>
-          <ScrollView horizontal>
-            {accounts.map((a) => (
-              <TouchableOpacity
-                key={a.id}
-                style={[localStyles.chip, selectedAccount === a.id && localStyles.chipActive]}
-                onPress={() => setSelectedAccount(a.id)}
-              >
-                <Text style={selectedAccount === a.id ? localStyles.chipTextActive : localStyles.chipText}>
-                  {a.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+          <SectionHeader title="Add Payment" />
+          <AccountPicker
+            label="Payment Account"
+            accounts={accounts}
+            value={selectedAccount}
+            onChange={setSelectedAccount}
+          />
           <FormInput label="Amount" value={payAmount} onChangeText={setPayAmount} keyboardType="decimal-pad" placeholder="Amount" />
+          <TouchableOpacity
+            onPress={() => setPayAmount(formatAmountInput(due))}
+            style={{ marginBottom: spacing.sm }}
+          >
+            <Text style={styles.link}>Fill remaining ({formatCurrency(due)})</Text>
+          </TouchableOpacity>
           <PrimaryButton title="Record Payment" onPress={handleAddPayment} loading={saving} />
         </View>
       )}
 
+      {purchase.notes ? (
+        <>
+          <SectionHeader title="Notes" />
+          <Text style={localStyles.muted}>{purchase.notes}</Text>
+        </>
+      ) : null}
+
       <PrimaryButton title="Delete Purchase" onPress={handleDelete} variant="danger" />
-    </ScrollView>
+    </FormScreen>
   );
 }

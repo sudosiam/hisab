@@ -7,23 +7,39 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  Switch,
 } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
-import { useScreenStyles, SectionHeader, SearchField } from '../../../src/components/ui';
 import {
+  FormInput,
+  PrimaryButton,
+  SectionHeader,
+  SearchField,
+  useScreenStyles,
+} from '../../../src/components/ui';
+import { StatCard } from '../../../src/components/StatCard';
+import {
+  deleteAccount,
   deleteTransaction,
   getAccountById,
   getTransactions,
+  updateAccount,
+  updateOpeningBalance,
 } from '../../../src/services/banking';
-import { formatCurrency } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
 import { parseRouteId } from '../../../src/utils/route';
-import { spacing, radius, typography } from '../../../src/constants/theme';
+import { roundMoney } from '../../../src/utils/money';
+import { spacing, radius } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import type { Account, Transaction } from '../../../src/types';
+
+function roundTwo(value: number): number {
+  return Math.round(value * 100) / 100;
+}
 
 export default function AccountDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -35,12 +51,27 @@ export default function AccountDetailScreen() {
     () =>
       StyleSheet.create({
         header: {
-          ...cardSurface(colors, isDark),
-          margin: spacing.md,
-          padding: spacing.lg,
+          paddingHorizontal: spacing.md,
+          paddingTop: spacing.md,
         },
-        name: { ...typography.title, color: colors.text },
-        balance: { ...typography.display, color: colors.primary, marginTop: spacing.sm },
+        name: { fontSize: 20, fontWeight: '700', color: colors.text },
+        badge: {
+          alignSelf: 'flex-start',
+          marginTop: spacing.xs,
+          paddingHorizontal: spacing.sm,
+          paddingVertical: 2,
+          borderRadius: radius.full,
+          backgroundColor: colors.chip,
+          borderWidth: 1,
+          borderColor: colors.border,
+        },
+        badgeText: { fontSize: 11, fontWeight: '600', color: colors.textSecondary },
+        kpiRow: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: spacing.sm,
+          marginVertical: spacing.md,
+        },
         txRow: {
           ...cardSurface(colors, isDark),
           flexDirection: 'row',
@@ -79,6 +110,33 @@ export default function AccountDetailScreen() {
         },
         actionText: { color: colors.onPrimary, fontWeight: '700', fontSize: 13 },
         actionTextAlt: { color: colors.danger, fontWeight: '700', fontSize: 13 },
+        chip: {
+          padding: spacing.sm,
+          backgroundColor: colors.surface,
+          borderRadius: radius.sm,
+          marginBottom: spacing.xs,
+          borderWidth: 1,
+          borderColor: colors.border,
+        },
+        chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+        chipText: { color: colors.text, fontSize: 14 },
+        chipTextActive: { color: colors.onPrimary, fontWeight: '600' },
+        excludeRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginHorizontal: spacing.md,
+          marginBottom: spacing.md,
+          padding: spacing.md,
+          ...cardSurface(colors, isDark),
+        },
+        excludeLabel: { fontWeight: '600', fontSize: 14, color: colors.text },
+        excludeHint: { fontSize: 12, color: colors.textSecondary, marginTop: 2, maxWidth: '85%' },
+        accountActions: {
+          paddingHorizontal: spacing.md,
+          gap: spacing.sm,
+          marginBottom: spacing.md,
+        },
       }),
     [colors, isDark]
   );
@@ -87,6 +145,12 @@ export default function AccountDetailScreen() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState('');
+  const [type, setType] = useState<'cash' | 'bank'>('cash');
+  const [openingBalance, setOpeningBalance] = useState('0');
+  const [isExcluded, setIsExcluded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const accountId = useMemo(() => parseRouteId(id), [id]);
 
@@ -98,6 +162,13 @@ export default function AccountDetailScreen() {
     [transactions, search]
   );
 
+  const fillForm = (a: Account) => {
+    setName(a.name);
+    setType(a.type);
+    setOpeningBalance(formatAmountInput(a.opening_balance ?? 0));
+    setIsExcluded(!!a.is_excluded);
+  };
+
   const load = useCallback(async () => {
     if (!accountId) {
       setError('Invalid account');
@@ -108,6 +179,7 @@ export default function AccountDetailScreen() {
       const [a, t] = await Promise.all([getAccountById(accountId), getTransactions(accountId)]);
       setAccount(a);
       setTransactions(t);
+      if (a) fillForm(a);
       setError(a ? null : 'Account not found');
     } catch (e) {
       setError(formatSqliteError(e));
@@ -117,10 +189,88 @@ export default function AccountDetailScreen() {
     }
   }, [accountId]);
 
+  const editingRef = React.useRef(false);
+  editingRef.current = editing;
+
   useFocusEffect(useCallback(() => {
+    // Don't reload over an open edit form — it would wipe unsaved changes.
+    if (editingRef.current) return;
     setLoading(true);
     load();
   }, [load]));
+
+  const handleSaveEdit = async () => {
+    if (!account || saving) return;
+    if (!name.trim()) {
+      Alert.alert('Error', 'Account name is required');
+      return;
+    }
+    const opening = parseFloat(openingBalance);
+    if (!Number.isFinite(opening)) {
+      Alert.alert('Error', 'Enter a valid opening balance');
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateAccount(account.id, {
+        name: name.trim(),
+        type,
+        is_excluded: isExcluded,
+      });
+      if (roundTwo(opening) !== roundTwo(account.opening_balance ?? 0)) {
+        await updateOpeningBalance(account.id, opening);
+      }
+      refresh();
+      setEditing(false);
+      await load();
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleExcludeToggle = async (value: boolean) => {
+    if (!account) return;
+    const prev = isExcluded;
+    setIsExcluded(value);
+    try {
+      await updateAccount(account.id, {
+        name: account.name,
+        type: account.type,
+        is_excluded: value,
+      });
+      refresh();
+      await load();
+    } catch (e) {
+      setIsExcluded(prev);
+      Alert.alert('Error', formatSqliteError(e));
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    if (!account) return;
+    Alert.alert(
+      'Delete Account',
+      `Delete "${account.name}"?\nThis cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteAccount(account.id);
+              refresh();
+              router.back();
+            } catch (e) {
+              Alert.alert('Error', formatSqliteError(e));
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const handleDelete = (tx: Transaction) => {
     Alert.alert(
@@ -165,27 +315,115 @@ export default function AccountDetailScreen() {
     );
   }
 
-  return (
-    <View style={styles.container}>
+  let totalIn = 0;
+  let totalOut = 0;
+  for (const t of transactions) {
+    if (t.amount >= 0) totalIn = roundMoney(totalIn + t.amount);
+    else totalOut = roundMoney(totalOut + Math.abs(t.amount));
+  }
+
+  const listHeader = (
+    <>
       <View style={localStyles.header}>
-        <Text style={localStyles.name}>{account.name}</Text>
-        <Text style={{ color: colors.textSecondary, textTransform: 'capitalize' }}>{account.type} account</Text>
-        <Text style={localStyles.balance}>{formatCurrency(account.current_balance)}</Text>
+        {!editing ? (
+          <>
+            <Text style={localStyles.name}>{account.name}</Text>
+            <Text style={{ color: colors.textSecondary, textTransform: 'capitalize' }}>
+              {account.type} account
+            </Text>
+            {account.is_excluded ? (
+              <View style={localStyles.badge}>
+                <Text style={localStyles.badgeText}>Excluded from totals</Text>
+              </View>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <FormInput label="Account Name" value={name} onChangeText={setName} />
+            <Text style={styles.label}>Account Type</Text>
+            {(['cash', 'bank'] as const).map((t) => (
+              <TouchableOpacity
+                key={t}
+                style={[localStyles.chip, type === t && localStyles.chipActive]}
+                onPress={() => setType(t)}
+              >
+                <Text style={type === t ? localStyles.chipTextActive : localStyles.chipText}>
+                  {t === 'cash' ? 'Cash' : 'Bank'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <FormInput
+              label="Opening Balance (₹)"
+              value={openingBalance}
+              onChangeText={setOpeningBalance}
+              keyboardType="decimal-pad"
+            />
+            <PrimaryButton title="Save Changes" onPress={handleSaveEdit} loading={saving} />
+          </>
+        )}
+
+        {!editing ? (
+          <View style={localStyles.kpiRow}>
+            <StatCard label="Balance" value={account.current_balance} color={colors.primary} />
+            <StatCard
+              label="Money In"
+              value={totalIn}
+              color={colors.success}
+              subtitle={`Opening ${formatCurrency(account.opening_balance)}`}
+            />
+            <StatCard
+              label="Money Out"
+              value={totalOut}
+              color={colors.danger}
+              subtitle={`${transactions.length} transactions`}
+            />
+          </View>
+        ) : null}
       </View>
 
-      <View style={localStyles.actions}>
-        <TouchableOpacity
-          style={localStyles.actionBtn}
-          onPress={() => router.push(`/(drawer)/banking/cash?mode=deposit&accountId=${account.id}` as never)}
-        >
-          <Text style={localStyles.actionText}>Deposit</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={localStyles.actionBtnAlt}
-          onPress={() => router.push(`/(drawer)/banking/cash?mode=withdraw&accountId=${account.id}` as never)}
-        >
-          <Text style={localStyles.actionTextAlt}>Withdraw</Text>
-        </TouchableOpacity>
+      {!editing ? (
+        <View style={localStyles.excludeRow}>
+          <View style={{ flex: 1, marginRight: spacing.sm }}>
+            <Text style={localStyles.excludeLabel}>Exclude from everywhere</Text>
+            <Text style={localStyles.excludeHint}>
+              Hidden from pickers and excluded from balance totals
+            </Text>
+          </View>
+          <Switch
+            value={isExcluded}
+            onValueChange={handleExcludeToggle}
+            trackColor={{ false: colors.border, true: colors.primary }}
+          />
+        </View>
+      ) : null}
+
+      {!editing ? (
+        <View style={localStyles.actions}>
+          <TouchableOpacity
+            style={localStyles.actionBtn}
+            onPress={() => router.push(`/(drawer)/banking/cash?mode=deposit&accountId=${account.id}` as never)}
+          >
+            <Text style={localStyles.actionText}>Deposit</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={localStyles.actionBtnAlt}
+            onPress={() => router.push(`/(drawer)/banking/cash?mode=withdraw&accountId=${account.id}` as never)}
+          >
+            <Text style={localStyles.actionTextAlt}>Withdraw</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      <View style={localStyles.accountActions}>
+        <PrimaryButton
+          title={editing ? 'Cancel Edit' : 'Edit Account'}
+          onPress={() => {
+            if (editing && account) fillForm(account);
+            setEditing(!editing);
+          }}
+          variant="secondary"
+        />
+        <PrimaryButton title="Delete Account" onPress={handleDeleteAccount} variant="danger" />
       </View>
 
       <SectionHeader title="Transaction History" />
@@ -195,10 +433,15 @@ export default function AccountDetailScreen() {
         onChangeText={setSearch}
         placeholder="Search description, date, type..."
       />
+    </>
+  );
 
+  return (
+    <View style={styles.container}>
       <FlatList
         data={filteredTransactions}
         keyExtractor={(item) => String(item.id)}
+        ListHeaderComponent={listHeader}
         contentContainerStyle={{ paddingBottom: spacing.xl }}
         ListEmptyComponent={
           <Text style={styles.empty}>
@@ -214,7 +457,11 @@ export default function AccountDetailScreen() {
             <Text style={[localStyles.txAmount, item.amount < 0 && localStyles.neg]}>
               {item.amount >= 0 ? '+' : ''}{formatCurrency(item.amount)}
             </Text>
-            <TouchableOpacity style={localStyles.deleteBtn} onPress={() => handleDelete(item)}>
+            <TouchableOpacity
+              style={localStyles.deleteBtn}
+              onPress={() => handleDelete(item)}
+              accessibilityLabel={`Delete transaction ${item.description}`}
+            >
               <Text style={localStyles.deleteText}>Delete</Text>
             </TouchableOpacity>
           </View>

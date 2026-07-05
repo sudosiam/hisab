@@ -2,6 +2,8 @@ import 'react-native-reanimated';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { DatabaseProvider } from '../src/context/DatabaseContext';
+import { FinancialYearProvider } from '../src/context/FinancialYearContext';
+import { AppLockProvider } from '../src/context/AppLockContext';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { StatusBar } from 'expo-status-bar';
@@ -18,8 +20,12 @@ export default function RootLayout() {
       <ErrorBoundary>
         <ThemeProvider>
           <DatabaseProvider>
-            <ThemedStatusBar />
-            <Stack screenOptions={{ headerShown: false }} />
+            <FinancialYearProvider>
+              <AppLockProvider>
+                <ThemedStatusBar />
+                <Stack screenOptions={{ headerShown: false }} />
+              </AppLockProvider>
+            </FinancialYearProvider>
           </DatabaseProvider>
         </ThemeProvider>
       </ErrorBoundary>

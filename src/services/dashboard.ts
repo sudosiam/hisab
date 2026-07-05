@@ -1,56 +1,81 @@
 import { getDatabase } from '../db/database';
 import { getInventoryValue } from './inventory';
-import { getMonthRange } from '../utils/date';
+import { roundMoney } from '../utils/money';
+import { resolvePeriodRange } from '../utils/period';
 import type { DashboardStats } from '../types';
 
-export async function getDashboardStats(monthKey: string): Promise<DashboardStats> {
+export async function getDashboardStats(periodKey: string): Promise<DashboardStats> {
   const db = await getDatabase();
-  const { start, end } = getMonthRange(monthKey);
+  const { start, end } = await resolvePeriodRange(periodKey);
 
-  const sold = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(total_amount), 0) as total FROM sales WHERE date >= ? AND date <= ?`,
-    [start, end]
-  );
+  const [
+    sold,
+    purchased,
+    grossProfit,
+    serviceCharges,
+    expense,
+    otherIncome,
+    liquid,
+    receivable,
+    inventoryValue,
+  ] = await Promise.all([
+    db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(total_amount), 0) as total FROM sales WHERE date >= ? AND date <= ?`,
+      [start, end]
+    ),
+    // Accrual basis by purchase date — matches how `sold` is computed.
+    db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(total_amount), 0) as total FROM purchases WHERE date >= ? AND date <= ?`,
+      [start, end]
+    ),
+    db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(
+         (si.unit_price - si.unit_cost) * si.qty *
+         CASE WHEN s.subtotal > 0 THEN (s.subtotal - s.discount_amount) / s.subtotal ELSE 1 END
+       ), 0) as total
+       FROM sale_items si
+       JOIN sales s ON s.id = si.sale_id
+       WHERE s.date >= ? AND s.date <= ?`,
+      [start, end]
+    ),
+    // Service charges are pure margin (no COGS) and belong in gross profit.
+    db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(service_charges), 0) as total FROM sales WHERE date >= ? AND date <= ?`,
+      [start, end]
+    ),
+    db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE date >= ? AND date <= ?`,
+      [start, end]
+    ),
+    // Match otherIncome service semantics: excluded accounts stay out.
+    db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(oi.amount), 0) as total FROM other_income oi
+       JOIN accounts a ON a.id = oi.account_id
+       WHERE oi.date >= ? AND oi.date <= ? AND COALESCE(a.is_excluded, 0) = 0`,
+      [start, end]
+    ),
+    db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(current_balance), 0) as total FROM accounts WHERE COALESCE(is_excluded, 0) = 0`
+    ),
+    db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(total_amount - paid_amount), 0) as total FROM sales WHERE paid_amount < total_amount`
+    ),
+    getInventoryValue(),
+  ]);
 
-  const purchased = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(total_amount), 0) as total FROM purchases WHERE date >= ? AND date <= ?`,
-    [start, end]
-  );
-
-  const grossProfit = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM((si.unit_price - si.unit_cost) * si.qty), 0) as total
-     FROM sale_items si
-     JOIN sales s ON s.id = si.sale_id
-     WHERE s.date >= ? AND s.date <= ?`,
-    [start, end]
-  );
-
-  const expense = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE date >= ? AND date <= ?`,
-    [start, end]
-  );
-
-  const liquid = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(current_balance), 0) as total FROM accounts`
-  );
-
-  const receivable = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(total_amount - paid_amount), 0) as total FROM sales WHERE paid_amount < total_amount`
-  );
-
-  const inventoryValue = await getInventoryValue();
-
-  const gross = grossProfit?.total ?? 0;
-  const exp = expense?.total ?? 0;
+  const gross = roundMoney((grossProfit?.total ?? 0) + (serviceCharges?.total ?? 0));
+  const exp = roundMoney(expense?.total ?? 0);
+  const other = roundMoney(otherIncome?.total ?? 0);
 
   return {
-    sold: sold?.total ?? 0,
-    purchased: purchased?.total ?? 0,
+    sold: roundMoney(sold?.total ?? 0),
+    purchased: roundMoney(purchased?.total ?? 0),
     grossProfit: gross,
-    netProfit: gross - exp,
+    otherIncome: other,
+    netProfit: roundMoney(gross + other - exp),
     expense: exp,
-    totalLiquid: liquid?.total ?? 0,
-    receivable: receivable?.total ?? 0,
-    inventoryValue,
+    totalLiquid: roundMoney(liquid?.total ?? 0),
+    receivable: roundMoney(receivable?.total ?? 0),
+    inventoryValue: roundMoney(inventoryValue),
   };
 }

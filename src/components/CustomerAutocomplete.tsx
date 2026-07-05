@@ -74,7 +74,7 @@ export function CustomerAutocomplete({
               onPressIn={() => onChange(value.trim())}
             >
               <Text style={styles.createText}>
-                Create new {partyLabel}: "{value.trim()}"
+                Create new {partyLabel}: &ldquo;{value.trim()}&rdquo;
               </Text>
             </TouchableOpacity>
           ) : null}

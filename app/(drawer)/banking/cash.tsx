@@ -1,15 +1,20 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { ScrollView, Alert, Text, StyleSheet, View } from 'react-native';
+import { Alert, Text, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
-import { FormInput, PrimaryButton, useScreenStyles } from '../../../src/components/ui';
+import {
+  FormInput,
+  FormScreen,
+  PrimaryButton,
+  useScreenStyles,
+} from '../../../src/components/ui';
 import { AccountPicker } from '../../../src/components/AccountPicker';
-import { getAccounts, recordDeposit, recordWithdrawal } from '../../../src/services/banking';
+import { getSelectableAccounts, recordDeposit, recordWithdrawal } from '../../../src/services/banking';
 import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
-import { formatCurrency } from '../../../src/utils/format';
-import { todayISO } from '../../../src/utils/date';
-import { spacing, radius } from '../../../src/constants/theme';
+import { formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
+import { todayISO, isValidISODate } from '../../../src/utils/date';
+import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import type { Account } from '../../../src/types';
 
@@ -51,23 +56,41 @@ export default function CashMovementScreen() {
   }, [mode, navigation]);
 
   useEffect(() => {
-    getAccounts().then((a) => {
-      setAccounts(a);
-      const preselected = accountIdParam ? parseInt(accountIdParam, 10) : 0;
-      if (preselected && a.some((acc) => acc.id === preselected)) {
-        setAccountId(preselected);
-      } else if (a.length > 0) {
-        setAccountId(a[0].id);
-      }
-    });
+    let cancelled = false;
+    getSelectableAccounts()
+      .then((a) => {
+        if (cancelled) return;
+        setAccounts(a);
+        const preselected = accountIdParam ? parseInt(accountIdParam, 10) : 0;
+        if (preselected && a.some((acc) => acc.id === preselected)) {
+          setAccountId(preselected);
+        } else if (a.length > 0) {
+          setAccountId(a[0].id);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) Alert.alert('Error', formatSqliteError(e));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [accountIdParam]);
 
   const selected = accounts.find((a) => a.id === accountId);
 
   const handleSave = async () => {
-    const amt = parseFloat(amount);
-    if (!amt) {
-      Alert.alert('Error', 'Enter a valid amount');
+    if (loading) return;
+    const amt = parsePositiveAmount(amount);
+    if (amt === null) {
+      Alert.alert('Error', 'Enter an amount greater than zero');
+      return;
+    }
+    if (!isValidISODate(date)) {
+      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
+      return;
+    }
+    if (!accountId) {
+      Alert.alert('Error', 'Select an account');
       return;
     }
     setLoading(true);
@@ -93,7 +116,7 @@ export default function CashMovementScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <FormScreen>
       <View style={localStyles.info}>
         <Text style={localStyles.infoText}>
           {mode === 'deposit'
@@ -126,6 +149,6 @@ export default function CashMovementScreen() {
         onPress={handleSave}
         loading={loading}
       />
-    </ScrollView>
+    </FormScreen>
   );
 }

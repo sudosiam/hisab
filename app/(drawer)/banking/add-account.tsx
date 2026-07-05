@@ -1,7 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, Alert, TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { Alert, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { FormInput, PrimaryButton, useScreenStyles } from '../../../src/components/ui';
+import {
+  FormInput,
+  FormScreen,
+  PrimaryButton,
+  useScreenStyles,
+} from '../../../src/components/ui';
 import { createAccount } from '../../../src/services/banking';
 import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -36,8 +41,14 @@ export default function AddAccountScreen() {
   const [loading, setLoading] = useState(false);
 
   const handleSave = async () => {
+    if (loading) return;
     if (!name.trim()) {
       Alert.alert('Error', 'Account name is required');
+      return;
+    }
+    const openingValue = opening.trim() ? parseFloat(opening) : 0;
+    if (!Number.isFinite(openingValue)) {
+      Alert.alert('Error', 'Enter a valid opening balance');
       return;
     }
     setLoading(true);
@@ -45,7 +56,7 @@ export default function AddAccountScreen() {
       await createAccount({
         name: name.trim(),
         type,
-        opening_balance: parseFloat(opening) || 0,
+        opening_balance: openingValue,
       });
       refresh();
       router.back();
@@ -57,7 +68,7 @@ export default function AddAccountScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <FormScreen>
       <FormInput label="Account Name" value={name} onChangeText={setName} placeholder="Petty Cash, HDFC..." />
       <Text style={styles.label}>Account Type</Text>
       {(['cash', 'bank'] as const).map((t) => (
@@ -78,6 +89,6 @@ export default function AddAccountScreen() {
         keyboardType="decimal-pad"
       />
       <PrimaryButton title="Save Account" onPress={handleSave} loading={loading} />
-    </ScrollView>
+    </FormScreen>
   );
 }

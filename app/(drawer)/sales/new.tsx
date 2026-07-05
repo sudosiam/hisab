@@ -2,32 +2,66 @@ import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
   StyleSheet,
   Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { FormInput, PrimaryButton, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import {
+  FormInput,
+  FormScreen,
+  PrimaryButton,
+  SectionHeader,
+  useScreenStyles,
+} from '../../../src/components/ui';
 import { CustomerAutocomplete } from '../../../src/components/CustomerAutocomplete';
 import { ProductPicker } from '../../../src/components/ProductPicker';
 import { PaymentSplitForm, PaymentRow } from '../../../src/components/PaymentSplitForm';
+import { DraftBanner } from '../../../src/components/DraftBanner';
 import { getProducts, getProductSellPrice } from '../../../src/services/inventory';
-import { getAccounts } from '../../../src/services/banking';
+import { getSelectableAccounts } from '../../../src/services/banking';
 import { createSale } from '../../../src/services/sales';
+import { getNextSaleInvoiceNo } from '../../../src/services/invoiceNumbers';
+import { DRAFT_KEYS, loadDraft, type SaleFormDraft } from '../../../src/services/formDrafts';
+import { useFormDraft } from '../../../src/hooks/useFormDraft';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
-import { formatCurrency } from '../../../src/utils/format';
-import { todayISO } from '../../../src/utils/date';
-import { spacing, radius } from '../../../src/constants/theme';
+import { formatAmountInput, formatCurrency } from '../../../src/utils/format';
+import { todayISO, isValidISODate } from '../../../src/utils/date';
+import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import type { Account, Product } from '../../../src/types';
 
 interface LineItem {
+  key: string;
   product_id: number;
   qty: string;
   unit_price: string;
+}
+
+let lineItemCounter = 0;
+function createLineItem(product: Product): LineItem {
+  lineItemCounter += 1;
+  return {
+    key: `sale-item-${Date.now()}-${lineItemCounter}`,
+    product_id: product.id,
+    qty: '1',
+    unit_price: formatAmountInput(getProductSellPrice(product)),
+  };
+}
+
+function isSaleDraftEmpty(d: SaleFormDraft): boolean {
+  const hasText =
+    d.partyName.trim() ||
+    d.notes.trim() ||
+    d.serviceCharges.trim() ||
+    (parseFloat(d.discount) || 0) > 0 ||
+    d.payments.length > 0;
+  if (hasText) return false;
+  if (d.items.length === 0) return true;
+  if (d.items.length > 1) return false;
+  return d.items[0].qty === '1';
 }
 
 export default function NewSaleScreen() {
@@ -67,44 +101,129 @@ export default function NewSaleScreen() {
   const [partyName, setPartyName] = useState(
     () => (typeof partyNameParam === 'string' ? decodeURIComponent(partyNameParam) : '')
   );
+  const [invoiceNo, setInvoiceNo] = useState('');
   const [date, setDate] = useState(todayISO());
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState('0');
+  const [serviceCharges, setServiceCharges] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [items, setItems] = useState<LineItem[]>([]);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const draftPayload = useMemo<SaleFormDraft>(
+    () => ({
+      partyName,
+      invoiceNo,
+      date,
+      notes,
+      discount,
+      serviceCharges,
+      items,
+      payments,
+    }),
+    [partyName, invoiceNo, date, notes, discount, serviceCharges, items, payments]
+  );
+
+  const { markReady, discardDraft, clearDraftOnSave, hasDraft, noteDraftLoaded } = useFormDraft(
+    DRAFT_KEYS.saleNew,
+    draftPayload,
+    { isEmpty: isSaleDraftEmpty }
+  );
+
+  const resetForm = async (productList: Product[]) => {
+    setPartyName('');
+    setInvoiceNo(await getNextSaleInvoiceNo());
+    setDate(todayISO());
+    setNotes('');
+    setDiscount('0');
+    setServiceCharges('');
+    setPayments([]);
+    if (productList.length > 0) {
+      setItems([createLineItem(productList[0])]);
+    } else {
+      setItems([]);
+    }
+  };
+
+  const handleDiscardDraft = () => {
+    Alert.alert('Discard draft?', 'Your unsaved sale will be cleared.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: async () => {
+          await discardDraft();
+          await resetForm(products);
+        },
+      },
+    ]);
+  };
+
   React.useEffect(() => {
-    Promise.all([getProducts(), getAccounts()]).then(([p, a]) => {
-      setProducts(p);
-      setAccounts(a);
-      if (p.length > 0) {
-        setItems([{ product_id: p[0].id, qty: '1', unit_price: String(getProductSellPrice(p[0]).toFixed(2)) }]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [p, a] = await Promise.all([getProducts(), getSelectableAccounts()]);
+        if (cancelled) return;
+        setProducts(p);
+        setAccounts(a);
+        const draft = await loadDraft<SaleFormDraft>(DRAFT_KEYS.saleNew);
+        const nextInvoice = await getNextSaleInvoiceNo();
+        if (cancelled) return;
+        if (draft && !isSaleDraftEmpty(draft)) {
+          setPartyName(draft.partyName || '');
+          setInvoiceNo(draft.invoiceNo || nextInvoice);
+          setDate(isValidISODate(draft.date) ? draft.date : todayISO());
+          setNotes(draft.notes || '');
+          setDiscount(Number.isFinite(parseFloat(draft.discount)) ? draft.discount : '0');
+          setServiceCharges(draft.serviceCharges || '');
+          const validItems = (draft.items ?? []).filter((i) =>
+            p.some((prod) => prod.id === i.product_id)
+          );
+          setItems(validItems.length ? validItems : p.length > 0 ? [createLineItem(p[0])] : []);
+          setPayments(draft.payments || []);
+          noteDraftLoaded();
+        } else if (typeof partyNameParam === 'string' && partyNameParam) {
+          setPartyName(decodeURIComponent(partyNameParam));
+          setInvoiceNo(nextInvoice);
+          if (p.length > 0) setItems([createLineItem(p[0])]);
+        } else {
+          setInvoiceNo(nextInvoice);
+          if (p.length > 0) setItems([createLineItem(p[0])]);
+        }
+      } catch (e) {
+        if (!cancelled) Alert.alert('Error', formatSqliteError(e));
+      } finally {
+        if (!cancelled) markReady();
       }
-    });
-  }, []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [markReady, noteDraftLoaded, partyNameParam]);
 
   const subtotal = items.reduce(
     (sum, item) => sum + (parseFloat(item.qty) || 0) * (parseFloat(item.unit_price) || 0),
     0
   );
   const discountAmount = Math.max(0, parseFloat(discount) || 0);
-  const total = Math.max(0, subtotal - discountAmount);
+  const serviceChargesAmount = Math.max(0, parseFloat(serviceCharges) || 0);
+  const total = Math.max(0, subtotal - discountAmount + serviceChargesAmount);
 
   const addItem = () => {
     if (products.length === 0) return;
-    setItems([...items, { product_id: products[0].id, qty: '1', unit_price: String(getProductSellPrice(products[0]).toFixed(2)) }]);
+    setItems([...items, createLineItem(products[0])]);
   };
 
-  const updateItem = (index: number, field: keyof LineItem, value: string | number) => {
+  const updateItem = (index: number, field: 'product_id' | 'qty' | 'unit_price', value: string | number) => {
     const updated = [...items];
     updated[index] = { ...updated[index], [field]: value };
     if (field === 'product_id') {
       const product = products.find((p) => p.id === value);
       if (product) {
-        updated[index].unit_price = String(getProductSellPrice(product).toFixed(2));
+        updated[index].unit_price = formatAmountInput(getProductSellPrice(product));
       }
     }
     setItems(updated);
@@ -115,8 +234,13 @@ export default function NewSaleScreen() {
   };
 
   const handleSave = async () => {
+    if (loading) return;
     if (!partyName.trim()) {
       Alert.alert('Error', 'Customer name is required');
+      return;
+    }
+    if (!invoiceNo.trim()) {
+      Alert.alert('Error', 'Invoice number is required');
       return;
     }
     if (items.length === 0) {
@@ -127,14 +251,51 @@ export default function NewSaleScreen() {
       Alert.alert('Error', 'Discount cannot exceed subtotal');
       return;
     }
+    if (!isValidISODate(date)) {
+      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
+      return;
+    }
+    for (const p of payments) {
+      if (parseFloat(p.amount) > 0 && !isValidISODate(p.date)) {
+        Alert.alert('Error', 'Enter a valid payment date as YYYY-MM-DD');
+        return;
+      }
+    }
+    // Aggregate quantities per product so split lines are validated together.
+    const qtyByProduct = new Map<number, number>();
+    for (const item of items) {
+      const qty = parseFloat(item.qty);
+      const price = parseFloat(item.unit_price);
+      if (!qty || qty <= 0) {
+        Alert.alert('Error', 'Each item must have quantity greater than zero');
+        return;
+      }
+      if (!price || price <= 0) {
+        Alert.alert('Error', 'Each item must have unit price greater than zero');
+        return;
+      }
+      qtyByProduct.set(item.product_id, (qtyByProduct.get(item.product_id) ?? 0) + qty);
+    }
+    for (const [productId, qty] of qtyByProduct) {
+      const product = products.find((p) => p.id === productId);
+      if (product && product.current_qty < qty) {
+        Alert.alert(
+          'Insufficient stock',
+          `${product.name} has only ${product.current_qty} in stock (need ${qty}).`
+        );
+        return;
+      }
+    }
 
     setLoading(true);
     try {
       const saleId = await createSale({
         party_name: partyName.trim(),
+        invoice_no: invoiceNo.trim(),
         date,
         notes: notes.trim() || undefined,
         discount_amount: discountAmount,
+        service_charges: serviceChargesAmount > 0 ? serviceChargesAmount : undefined,
         items: items.map((i) => ({
           product_id: i.product_id,
           qty: parseFloat(i.qty) || 0,
@@ -149,6 +310,7 @@ export default function NewSaleScreen() {
             notes: p.notes || undefined,
           })),
       });
+      await clearDraftOnSave();
       refresh();
       router.replace(`/(drawer)/sales/${saleId}`);
     } catch (e) {
@@ -159,11 +321,14 @@ export default function NewSaleScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
+    <FormScreen>
+      <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
+      <FormInput
+        label="Invoice No"
+        value={invoiceNo}
+        onChangeText={setInvoiceNo}
+        placeholder="Auto-generated"
+      />
       <CustomerAutocomplete value={partyName} onChange={setPartyName} />
       <FormInput label="Date (YYYY-MM-DD)" value={date} onChangeText={setDate} />
       <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
@@ -180,7 +345,7 @@ export default function NewSaleScreen() {
           <Text style={localStyles.hint}>Add products in Inventory first.</Text>
         ) : (
           items.map((item, index) => (
-            <View key={index} style={localStyles.itemCard}>
+            <View key={item.key} style={localStyles.itemCard}>
               <ProductPicker
                 products={products}
                 value={item.product_id}
@@ -203,7 +368,11 @@ export default function NewSaleScreen() {
                     keyboardType="decimal-pad"
                   />
                 </View>
-                <TouchableOpacity onPress={() => removeItem(index)} style={localStyles.removeBtn}>
+                <TouchableOpacity
+                  onPress={() => removeItem(index)}
+                  style={localStyles.removeBtn}
+                  accessibilityLabel="Remove item"
+                >
                   <Text style={localStyles.removeText}>✕</Text>
                 </TouchableOpacity>
               </View>
@@ -222,6 +391,13 @@ export default function NewSaleScreen() {
             onChangeText={setDiscount}
             keyboardType="decimal-pad"
           />
+          <FormInput
+            label="Service Charges (₹, optional)"
+            value={serviceCharges}
+            onChangeText={setServiceCharges}
+            keyboardType="decimal-pad"
+            placeholder="0"
+          />
           <View style={[localStyles.totalRow, { marginTop: spacing.sm }]}>
             <Text style={localStyles.totalLabel}>Grand Total</Text>
             <Text style={localStyles.grandTotal}>{formatCurrency(total)}</Text>
@@ -235,9 +411,10 @@ export default function NewSaleScreen() {
         payments={payments}
         onChange={setPayments}
         totalDue={total}
+        defaultDate={isValidISODate(date) ? date : undefined}
       />
 
       <PrimaryButton title="Save Sale" onPress={handleSave} loading={loading} />
-    </ScrollView>
+    </FormScreen>
   );
 }

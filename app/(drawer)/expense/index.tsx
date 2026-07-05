@@ -2,22 +2,25 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
-import { SearchField, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import { ErrorState, SearchField, SectionHeader, useScreenStyles } from '../../../src/components/ui';
 import { getExpenses } from '../../../src/services/banking';
 import { formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
-import { getCurrentMonthKey } from '../../../src/utils/date';
+import { getPeriodTotalLabel } from '../../../src/utils/date';
+import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { spacing, radius } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
+import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 import type { Expense } from '../../../src/types';
 
 export default function ExpenseListScreen() {
@@ -64,17 +67,27 @@ export default function ExpenseListScreen() {
     [colors, isDark]
   );
 
-  const [monthKey, setMonthKey] = useState(getCurrentMonthKey());
+  const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setExpenses(await getExpenses(monthKey));
-    setLoading(false);
+    try {
+      setExpenses(await getExpenses(monthKey));
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load expenses');
+    } finally {
+      setLoading(false);
+    }
   }, [monthKey]);
 
+  // refreshKey re-runs the loader whenever the global data version changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useFocusEffect(useCallback(() => { load(); }, [load, refreshKey]));
 
   const filteredExpenses = useMemo(
@@ -104,80 +117,120 @@ export default function ExpenseListScreen() {
       .sort((a, b) => b.total - a.total);
   }, [filteredExpenses]);
 
+  const renderItem = useCallback(
+    ({ item }: { item: Expense }) => (
+      <TouchableOpacity
+        style={localStyles.expenseRow}
+        onPress={() => router.push(`/(drawer)/expense/${item.id}` as never)}
+        activeOpacity={0.75}
+      >
+        <View style={styles.row}>
+          <Text style={styles.cardTitle} numberOfLines={1}>
+            {item.category}
+          </Text>
+          <Text style={styles.amount}>{formatCurrency(item.amount)}</Text>
+        </View>
+        <Text style={styles.cardSub} numberOfLines={2}>
+          {item.description}
+        </Text>
+        <Text style={styles.cardSub}>
+          {item.date} · {item.account_name}
+        </Text>
+        {item.is_recurring ? (
+          <Text style={localStyles.recurring}>Recurring · {item.recurrence ?? 'Monthly'}</Text>
+        ) : null}
+      </TouchableOpacity>
+    ),
+    [localStyles, router, styles]
+  );
+
+  if (error && expenses.length === 0) {
+    return <ErrorState message={error} onRetry={load} />;
+  }
+
+  const header = (
+    <View>
+      <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
+
+      <SearchField
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Search category, description, account..."
+      />
+
+      <View style={styles.row}>
+        <Text style={styles.cardTitle}>
+          {search.trim() ? 'Filtered Total' : getPeriodTotalLabel(monthKey)}
+        </Text>
+        <Text style={styles.amount}>{formatCurrency(monthTotal)}</Text>
+      </View>
+
+      {!loading && categoryTotals.length > 0 ? (
+        <>
+          <SectionHeader title="By Category" />
+          <View style={localStyles.categoryCard}>
+            {categoryTotals.map((row, index) => {
+              const pct = monthTotal > 0 ? (row.total / monthTotal) * 100 : 0;
+              return (
+                <View
+                  key={row.category}
+                  style={[
+                    localStyles.categoryRow,
+                    index === categoryTotals.length - 1 && localStyles.categoryRowLast,
+                  ]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>
+                      {row.category}
+                    </Text>
+                    <Text style={localStyles.categoryPct}>{pct.toFixed(0)}% of month</Text>
+                  </View>
+                  <Text style={styles.amount}>{formatCurrency(row.total)}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </>
+      ) : null}
+
+      <SectionHeader title="Expenses" />
+      {loading ? <ActivityIndicator color={colors.primary} /> : null}
+    </View>
+  );
+
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
-
-        <SearchField
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search category, description, account..."
-        />
-
-        <View style={styles.row}>
-          <Text style={styles.cardTitle}>{search.trim() ? 'Filtered Total' : 'Month Total'}</Text>
-          <Text style={styles.amount}>{formatCurrency(monthTotal)}</Text>
-        </View>
-
-        {!loading && categoryTotals.length > 0 ? (
-          <>
-            <SectionHeader title="By Category" />
-            <View style={localStyles.categoryCard}>
-              {categoryTotals.map((row, index) => {
-                const pct = monthTotal > 0 ? (row.total / monthTotal) * 100 : 0;
-                return (
-                  <View
-                    key={row.category}
-                    style={[
-                      localStyles.categoryRow,
-                      index === categoryTotals.length - 1 && localStyles.categoryRowLast,
-                    ]}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.cardTitle}>{row.category}</Text>
-                      <Text style={localStyles.categoryPct}>{pct.toFixed(0)}% of month</Text>
-                    </View>
-                    <Text style={styles.amount}>{formatCurrency(row.total)}</Text>
-                  </View>
-                );
-              })}
-            </View>
-          </>
-        ) : null}
-
-        <SectionHeader title="Expenses" />
-        {loading ? (
-          <ActivityIndicator color={colors.primary} />
-        ) : filteredExpenses.length === 0 ? (
-          <Text style={styles.empty}>
-            {search.trim() ? 'No expenses match your search.' : 'No expenses this month'}
-          </Text>
-        ) : (
-          filteredExpenses.map((item) => (
-            <TouchableOpacity
-              key={item.id}
-              style={localStyles.expenseRow}
-              onPress={() => router.push(`/(drawer)/expense/${item.id}` as never)}
-              activeOpacity={0.75}
-            >
-              <View style={styles.row}>
-                <Text style={styles.cardTitle}>{item.category}</Text>
-                <Text style={styles.amount}>{formatCurrency(item.amount)}</Text>
-              </View>
-              <Text style={styles.cardSub}>{item.description}</Text>
-              <Text style={styles.cardSub}>{item.date} · {item.account_name}</Text>
-              {item.is_recurring ? (
-                <Text style={localStyles.recurring}>Recurring · {item.recurrence ?? 'Monthly'}</Text>
-              ) : null}
-            </TouchableOpacity>
-          ))
-        )}
-      </ScrollView>
+      <FlatList
+        data={loading ? [] : filteredExpenses}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={renderItem}
+        contentContainerStyle={styles.content}
+        ListHeaderComponent={header}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              load().finally(() => setRefreshing(false));
+            }}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
+        }
+        {...FLATLIST_PERF}
+        ListEmptyComponent={
+          loading ? null : (
+            <Text style={styles.empty}>
+              {search.trim() ? 'No expenses match your search.' : 'No expenses this month'}
+            </Text>
+          )
+        }
+      />
 
       <TouchableOpacity
         style={localStyles.fab}
         onPress={() => router.push('/(drawer)/expense/new' as never)}
+        accessibilityLabel="Add expense"
       >
         <Text style={localStyles.fabText}>+ Add Expense</Text>
       </TouchableOpacity>

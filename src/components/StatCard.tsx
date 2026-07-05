@@ -7,20 +7,23 @@ import { formatCurrency } from '../utils/format';
 
 interface Props {
   label: string;
-  value: number;
+  value?: number;
+  /** Override formatted currency (e.g. qty, count, text). */
+  displayValue?: string;
   color?: string;
   subtitle?: string;
 }
 
-export function StatCard({ label, value, color, subtitle }: Props) {
+export function StatCard({ label, value, displayValue, color, subtitle }: Props) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const accent = color ?? colors.primary;
+  const formatted = displayValue ?? formatCurrency(value ?? 0);
 
   return (
     <View style={styles.card}>
       <Text style={styles.label}>{label}</Text>
-      <Text style={[styles.value, { color: accent }]}>{formatCurrency(value)}</Text>
+      <Text style={[styles.value, { color: accent }]}>{formatted}</Text>
       {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
     </View>
   );

@@ -12,8 +12,11 @@ import { cardSurface } from '../constants/shadows';
 import { AccountPicker } from './AccountPicker';
 import type { Account } from '../types';
 import { todayISO } from '../utils/date';
+import { formatAmountInput, formatCurrency } from '../utils/format';
 
 export interface PaymentRow {
+  /** Stable render key; older drafts may not have one. */
+  key?: string;
   account_id: number;
   amount: string;
   date: string;
@@ -25,22 +28,32 @@ interface Props {
   payments: PaymentRow[];
   onChange: (payments: PaymentRow[]) => void;
   totalDue: number;
+  /** Default payment date for new rows (usually the invoice date). */
+  defaultDate?: string;
 }
 
-export function PaymentSplitForm({ accounts, payments, onChange, totalDue }: Props) {
+let paymentRowCounter = 0;
+function nextRowKey(): string {
+  paymentRowCounter += 1;
+  return `payment-${Date.now()}-${paymentRowCounter}`;
+}
+
+export function PaymentSplitForm({ accounts, payments, onChange, totalDue, defaultDate }: Props) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const paidTotal = payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-  const remaining = Math.max(0, totalDue - paidTotal);
+  const remaining = totalDue - paidTotal;
+  const overpaid = remaining < -0.009;
 
   const addPayment = (prefill?: number) => {
     if (accounts.length === 0) return;
     onChange([
       ...payments,
       {
+        key: nextRowKey(),
         account_id: accounts[0].id,
-        amount: prefill && prefill > 0 ? prefill.toFixed(2) : '',
-        date: todayISO(),
+        amount: prefill && prefill > 0 ? formatAmountInput(prefill) : '',
+        date: defaultDate || todayISO(),
         notes: '',
       },
     ]);
@@ -64,12 +77,17 @@ export function PaymentSplitForm({ accounts, payments, onChange, totalDue }: Pro
     <View>
       <View style={styles.header}>
         <Text style={styles.title}>Received Payment</Text>
-        <TouchableOpacity onPress={() => addPayment(remaining > 0 ? remaining : undefined)}>
+        <TouchableOpacity
+          onPress={() => addPayment(remaining > 0 ? remaining : undefined)}
+          accessibilityLabel="Add payment"
+        >
           <Text style={styles.addBtn}>+ Add</Text>
         </TouchableOpacity>
       </View>
-      <Text style={styles.summary}>
-        Received: ₹{paidTotal.toFixed(2)} · Balance: ₹{remaining.toFixed(2)}
+      <Text style={[styles.summary, overpaid && styles.summaryOver]}>
+        {overpaid
+          ? `Received: ${formatCurrency(paidTotal)} · Overpaid by ${formatCurrency(Math.abs(remaining))}`
+          : `Received: ${formatCurrency(paidTotal)} · Balance: ${formatCurrency(Math.max(0, remaining))}`}
       </Text>
 
       {payments.length === 0 ? (
@@ -78,7 +96,7 @@ export function PaymentSplitForm({ accounts, payments, onChange, totalDue }: Pro
         </TouchableOpacity>
       ) : (
         payments.map((payment, index) => (
-          <View key={index} style={styles.row}>
+          <View key={payment.key ?? `row-${index}`} style={styles.row}>
             <AccountPicker
               label="Payment Account"
               accounts={accounts}
@@ -93,23 +111,41 @@ export function PaymentSplitForm({ accounts, payments, onChange, totalDue }: Pro
                 keyboardType="decimal-pad"
                 value={payment.amount}
                 onChangeText={(v) => updatePayment(index, 'amount', v)}
+                accessibilityLabel="Payment amount"
               />
               <TouchableOpacity
                 style={styles.fillBtn}
+                accessibilityLabel="Fill remaining amount"
                 onPress={() => {
                   const otherPaid = payments.reduce(
                     (sum, p, i) => (i === index ? sum : sum + (parseFloat(p.amount) || 0)),
                     0
                   );
                   const due = Math.max(0, totalDue - otherPaid);
-                  updatePayment(index, 'amount', due.toFixed(2));
+                  updatePayment(index, 'amount', formatAmountInput(due));
                 }}
               >
                 <Text style={styles.fillText}>Full</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => removePayment(index)}>
+              <TouchableOpacity
+                onPress={() => removePayment(index)}
+                accessibilityLabel="Remove payment"
+              >
                 <Text style={styles.remove}>✕</Text>
               </TouchableOpacity>
+            </View>
+            <View style={styles.dateRow}>
+              <Text style={styles.dateLabel}>Date</Text>
+              <TextInput
+                style={[styles.input, styles.dateInput]}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={colors.textMuted}
+                value={payment.date}
+                onChangeText={(v) => updatePayment(index, 'date', v)}
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityLabel="Payment date"
+              />
             </View>
           </View>
         ))
@@ -129,12 +165,21 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     title: { fontSize: 15, fontWeight: '700', color: colors.text },
     addBtn: { color: colors.accent, fontWeight: '700', fontSize: 14 },
     summary: { fontSize: 13, color: colors.textSecondary, marginBottom: spacing.sm },
+    summaryOver: { color: colors.danger, fontWeight: '600' },
     row: {
       ...cardSurface(colors, isDark),
       padding: spacing.md,
       marginBottom: spacing.sm,
     },
     inputRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+    dateRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginTop: spacing.sm,
+    },
+    dateLabel: { fontSize: 12, color: colors.textSecondary, width: 34 },
+    dateInput: { flex: 1, paddingVertical: 8 },
     input: {
       borderWidth: 1,
       borderColor: colors.border,

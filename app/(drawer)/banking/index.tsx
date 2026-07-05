@@ -6,9 +6,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { SearchField, useScreenStyles } from '../../../src/components/ui';
+import { ErrorState, SearchField, useScreenStyles } from '../../../src/components/ui';
+import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 import { getAccounts, getTotalBalance } from '../../../src/services/banking';
 import { formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
@@ -33,6 +35,7 @@ export default function BankingScreen() {
           alignItems: 'center',
         },
         totalLabel: { ...typography.section, color: colors.textMuted, textTransform: 'uppercase' },
+        totalHint: { fontSize: 11, color: colors.textMuted, marginTop: spacing.xs },
         totalValue: { ...typography.display, color: colors.primary, marginTop: spacing.sm },
         actions: {
           flexDirection: 'row',
@@ -64,7 +67,19 @@ export default function BankingScreen() {
         },
         accountName: { fontSize: 16, fontWeight: '600', color: colors.text },
         accountType: { fontSize: 12, color: colors.textSecondary, marginTop: 2, textTransform: 'capitalize' },
+        excludedBadge: {
+          alignSelf: 'flex-start',
+          marginTop: 4,
+          paddingHorizontal: 6,
+          paddingVertical: 1,
+          borderRadius: radius.full,
+          backgroundColor: colors.chip,
+          borderWidth: 1,
+          borderColor: colors.border,
+        },
+        excludedText: { fontSize: 10, fontWeight: '600', color: colors.textMuted },
         accountBalance: { fontSize: 17, fontWeight: '700', color: colors.text },
+        balanceMuted: { color: colors.textMuted },
       }),
     [colors, isDark]
   );
@@ -72,6 +87,8 @@ export default function BankingScreen() {
   const [totalBalance, setTotalBalance] = useState(0);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const filteredAccounts = useMemo(
     () => accounts.filter((item) => matchesSearch(search, [item.name, item.type])),
@@ -80,18 +97,31 @@ export default function BankingScreen() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [a, total] = await Promise.all([getAccounts(), getTotalBalance()]);
-    setAccounts(a);
-    setTotalBalance(total);
-    setLoading(false);
+    try {
+      const [a, total] = await Promise.all([getAccounts(), getTotalBalance()]);
+      setAccounts(a);
+      setTotalBalance(total);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load accounts');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
+  // refreshKey re-runs the loader whenever the global data version changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useFocusEffect(useCallback(() => { load(); }, [load, refreshKey]));
+
+  if (error && accounts.length === 0) {
+    return <ErrorState message={error} onRetry={load} />;
+  }
 
   return (
     <View style={styles.container}>
       <View style={localStyles.totalCard}>
         <Text style={localStyles.totalLabel}>Total Balance</Text>
+        <Text style={localStyles.totalHint}>Active accounts only</Text>
         <Text style={localStyles.totalValue}>{formatCurrency(totalBalance)}</Text>
       </View>
 
@@ -137,6 +167,18 @@ export default function BankingScreen() {
           data={filteredAccounts}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={{ paddingBottom: spacing.xl }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                load().finally(() => setRefreshing(false));
+              }}
+              colors={[colors.primary]}
+              tintColor={colors.primary}
+            />
+          }
+          {...FLATLIST_PERF}
           ListEmptyComponent={
             <Text style={styles.empty}>
               {search.trim() ? 'No accounts match your search.' : 'No accounts yet'}
@@ -151,8 +193,20 @@ export default function BankingScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={localStyles.accountName}>{item.name}</Text>
                 <Text style={localStyles.accountType}>{item.type}</Text>
+                {item.is_excluded ? (
+                  <View style={localStyles.excludedBadge}>
+                    <Text style={localStyles.excludedText}>Excluded</Text>
+                  </View>
+                ) : null}
               </View>
-              <Text style={localStyles.accountBalance}>{formatCurrency(item.current_balance)}</Text>
+              <Text
+                style={[
+                  localStyles.accountBalance,
+                  item.is_excluded ? localStyles.balanceMuted : null,
+                ]}
+              >
+                {formatCurrency(item.current_balance)}
+              </Text>
             </TouchableOpacity>
           )}
         />

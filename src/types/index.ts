@@ -5,6 +5,7 @@ export type TransactionType =
   | 'sale_payment'
   | 'purchase_payment'
   | 'expense'
+  | 'other_income'
   | 'transfer'
   | 'deposit'
   | 'withdrawal'
@@ -17,6 +18,7 @@ export interface Account {
   type: AccountType;
   opening_balance: number;
   current_balance: number;
+  is_excluded: number;
   created_at: string;
 }
 
@@ -24,6 +26,7 @@ export interface Product {
   id: number;
   name: string;
   sku: string | null;
+  category: string | null;
   unit: string;
   opening_qty: number;
   opening_cost: number;
@@ -53,6 +56,7 @@ export interface Sale {
   date: string;
   subtotal: number;
   discount_amount: number;
+  service_charges: number;
   total_amount: number;
   paid_amount: number;
   status: PaymentStatus;
@@ -85,6 +89,7 @@ export interface Purchase {
   id: number;
   invoice_no: string;
   supplier_name: string;
+  vendor_invoice_no: string | null;
   date: string;
   total_amount: number;
   paid_amount: number;
@@ -126,6 +131,17 @@ export interface Expense {
   account_name?: string;
 }
 
+export interface OtherIncome {
+  id: number;
+  category: string;
+  description: string;
+  amount: number;
+  account_id: number;
+  date: string;
+  created_at: string;
+  account_name?: string;
+}
+
 export interface Transaction {
   id: number;
   account_id: number;
@@ -133,6 +149,7 @@ export interface Transaction {
   amount: number;
   reference_type: string | null;
   reference_id: number | null;
+  payment_id: number | null;
   description: string;
   date: string;
   created_at: string;
@@ -143,6 +160,7 @@ export interface DashboardStats {
   sold: number;
   purchased: number;
   grossProfit: number;
+  otherIncome: number;
   netProfit: number;
   expense: number;
   totalLiquid: number;

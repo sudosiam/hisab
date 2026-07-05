@@ -1,27 +1,34 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   StyleSheet,
   ActivityIndicator,
   Alert,
   TouchableOpacity,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { FormInput, PrimaryButton, SearchField, SectionHeader, useScreenStyles } from '../../src/components/ui';
+import {
+  ErrorState,
+  FormInput,
+  FormScreen,
+  PrimaryButton,
+  SearchField,
+  SectionHeader,
+  useScreenStyles,
+} from '../../src/components/ui';
 import {
   addFixedAsset,
   deleteFixedAsset,
   getFixedAssets,
   updateFixedAsset,
 } from '../../src/services/banking';
-import { formatCurrency } from '../../src/utils/format';
+import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../src/utils/format';
 import { matchesSearch } from '../../src/utils/search';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useDatabase } from '../../src/context/DatabaseContext';
 import { formatSqliteError } from '../../src/db/database';
-import { spacing, radius, typography } from '../../src/constants/theme';
+import { spacing, typography } from '../../src/constants/theme';
 import { cardSurface } from '../../src/constants/shadows';
 import type { FixedAsset } from '../../src/types';
 
@@ -38,6 +45,7 @@ export default function OthersScreen() {
   const [notes, setNotes] = useState('');
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const localStyles = useMemo(
     () =>
@@ -70,11 +78,24 @@ export default function OthersScreen() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    setAssets(await getFixedAssets());
-    setLoading(false);
+    try {
+      setAssets(await getFixedAssets());
+      setError(null);
+    } catch (e) {
+      setError(formatSqliteError(e));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const formOpenRef = useRef(false);
+  formOpenRef.current = showAdd;
+
+  useFocusEffect(useCallback(() => {
+    // Don't reload over an open add/edit form.
+    if (formOpenRef.current) return;
+    load();
+  }, [load]));
 
   const total = assets.reduce((sum, a) => sum + a.value, 0);
 
@@ -92,9 +113,10 @@ export default function OthersScreen() {
   };
 
   const handleSave = async () => {
-    const val = parseFloat(value);
-    if (!name.trim() || !val) {
-      Alert.alert('Error', 'Enter asset name and value');
+    if (saving) return;
+    const val = parsePositiveAmount(value);
+    if (!name.trim() || val === null) {
+      Alert.alert('Error', 'Enter asset name and a value greater than zero');
       return;
     }
     setSaving(true);
@@ -117,7 +139,7 @@ export default function OthersScreen() {
   const startEdit = (asset: FixedAsset) => {
     setEditingId(asset.id);
     setName(asset.name);
-    setValue(String(asset.value));
+    setValue(formatAmountInput(asset.value));
     setNotes(asset.notes ?? '');
     setShowAdd(true);
   };
@@ -129,9 +151,13 @@ export default function OthersScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await deleteFixedAsset(asset.id);
-          refresh();
-          await load();
+          try {
+            await deleteFixedAsset(asset.id);
+            refresh();
+            await load();
+          } catch (e) {
+            Alert.alert('Error', formatSqliteError(e));
+          }
         },
       },
     ]);
@@ -145,8 +171,12 @@ export default function OthersScreen() {
     );
   }
 
+  if (error) {
+    return <ErrorState message={error} onRetry={load} />;
+  }
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <FormScreen>
       <View style={localStyles.hero}>
         <Text style={localStyles.heroLabel}>Fixed Assets Total</Text>
         <Text style={localStyles.heroValue}>{formatCurrency(total)}</Text>
@@ -200,6 +230,6 @@ export default function OthersScreen() {
           </View>
         ))
       )}
-    </ScrollView>
+    </FormScreen>
   );
 }

@@ -1,12 +1,15 @@
 import {
-  generateInvoiceNo,
   getDatabase,
   getPaymentStatus,
+  recomputeProductStock,
   recordTransaction,
+  reverseTransactionsByReference,
   updateWeightedAvgCost,
 } from '../db/database';
-import { triggerAutoBackup } from './backup';
+import { isInvoiceNoCollision, resolvePurchaseInvoiceNo } from './invoiceNumbers';
 import { upsertParty } from './parties';
+import { formatCurrency } from '../utils/format';
+import { addMoney, mulMoney, roundMoney, subMoney } from '../utils/money';
 import type {
   PaymentInput,
   Purchase,
@@ -14,6 +17,26 @@ import type {
   PurchaseItemInput,
   PurchasePayment,
 } from '../types';
+
+function validatePurchaseItems(items: PurchaseItemInput[]): void {
+  if (items.length === 0) throw new Error('Add at least one item');
+  for (const item of items) {
+    if (item.qty <= 0) throw new Error('Item quantity must be greater than zero');
+    if (item.unit_cost <= 0) throw new Error('Item unit cost must be greater than zero');
+  }
+}
+
+function validatePaymentAmount(
+  totalAmount: number,
+  paidAmount: number,
+  paymentAmount: number
+): void {
+  if (paymentAmount <= 0) throw new Error('Payment amount must be greater than zero');
+  const remaining = subMoney(totalAmount, paidAmount);
+  if (paymentAmount > remaining + 0.01) {
+    throw new Error(`Payment exceeds amount due (${formatCurrency(remaining)} remaining)`);
+  }
+}
 
 export async function getPurchases(filter?: 'all' | 'paid' | 'unpaid'): Promise<Purchase[]> {
   const db = await getDatabase();
@@ -62,16 +85,19 @@ export async function createPurchase(params: {
   payments: PaymentInput[];
   discount_amount?: number;
   notes?: string;
+  vendor_invoice_no?: string;
+  invoice_no?: string;
 }): Promise<number> {
+  validatePurchaseItems(params.items);
+
   const db = await getDatabase();
-  const invoiceNo = await generateInvoiceNo(db, 'P');
 
   let subtotal = 0;
   const itemDetails: { product_id: number; qty: number; unit_cost: number; total: number }[] = [];
 
   for (const item of params.items) {
-    const total = item.qty * item.unit_cost;
-    subtotal += total;
+    const total = mulMoney(item.qty, item.unit_cost);
+    subtotal = addMoney(subtotal, total);
     itemDetails.push({
       product_id: item.product_id,
       qty: item.qty,
@@ -80,68 +106,88 @@ export async function createPurchase(params: {
     });
   }
 
-  const discount = Math.max(0, params.discount_amount ?? 0);
-  const totalAmount = Math.max(0, subtotal - discount);
+  const discount = roundMoney(Math.max(0, params.discount_amount ?? 0));
+  const totalAmount = roundMoney(Math.max(0, subMoney(subtotal, discount)));
 
   let paidAmount = 0;
   for (const payment of params.payments) {
-    paidAmount += payment.amount;
+    paidAmount = addMoney(paidAmount, payment.amount);
+  }
+  if (paidAmount > totalAmount + 0.01) {
+    throw new Error('Total payments cannot exceed invoice amount');
   }
 
   const status = getPaymentStatus(totalAmount, paidAmount);
   let purchaseId = 0;
 
-  await db.withTransactionAsync(async () => {
-    await upsertParty(params.supplier_name, 'vendor', db);
+  // Invoice number is resolved inside the transaction so a concurrent create
+  // cannot read the same next-sequence; retry once on auto-number collision.
+  const attemptCreate = async (): Promise<void> => {
+    await db.withTransactionAsync(async () => {
+      const invoiceNo = await resolvePurchaseInvoiceNo(params.invoice_no);
+      await upsertParty(params.supplier_name, 'vendor', db);
 
-    const result = await db.runAsync(
-      `INSERT INTO purchases (invoice_no, supplier_name, date, total_amount, paid_amount, status, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        invoiceNo,
-        params.supplier_name,
-        params.date,
-        totalAmount,
-        paidAmount,
-        status,
-        params.notes ?? null,
-      ]
-    );
-    purchaseId = result.lastInsertRowId;
+      const result = await db.runAsync(
+        `INSERT INTO purchases (invoice_no, supplier_name, vendor_invoice_no, date, total_amount, paid_amount, status, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          invoiceNo,
+          params.supplier_name,
+          params.vendor_invoice_no?.trim() || null,
+          params.date,
+          totalAmount,
+          paidAmount,
+          status,
+          params.notes ?? null,
+        ]
+      );
+      purchaseId = result.lastInsertRowId;
 
-    for (const item of itemDetails) {
-      await db.runAsync(
-        `INSERT INTO purchase_items (purchase_id, product_id, qty, unit_cost, total)
-         VALUES (?, ?, ?, ?, ?)`,
-        [purchaseId, item.product_id, item.qty, item.unit_cost, item.total]
-      );
-      await updateWeightedAvgCost(db, item.product_id, item.qty, item.unit_cost);
-      await db.runAsync(
-        `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, reference_id, notes)
-         VALUES (?, 'purchase', ?, ?, 'purchase', ?, ?)`,
-        [item.product_id, item.qty, item.unit_cost, purchaseId, `Purchase ${invoiceNo}`]
-      );
+      for (const item of itemDetails) {
+        await db.runAsync(
+          `INSERT INTO purchase_items (purchase_id, product_id, qty, unit_cost, total)
+           VALUES (?, ?, ?, ?, ?)`,
+          [purchaseId, item.product_id, item.qty, item.unit_cost, item.total]
+        );
+        await updateWeightedAvgCost(db, item.product_id, item.qty, item.unit_cost);
+        await db.runAsync(
+          `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, reference_id, notes)
+           VALUES (?, 'purchase', ?, ?, 'purchase', ?, ?)`,
+          [item.product_id, item.qty, item.unit_cost, purchaseId, `Purchase ${invoiceNo}`]
+        );
+      }
+
+      for (const payment of params.payments) {
+        if (payment.amount <= 0) continue;
+        const amount = roundMoney(payment.amount);
+        const paymentResult = await db.runAsync(
+          `INSERT INTO purchase_payments (purchase_id, account_id, amount, date, notes) VALUES (?, ?, ?, ?, ?)`,
+          [purchaseId, payment.account_id, amount, payment.date, payment.notes ?? null]
+        );
+        await recordTransaction(db, {
+          account_id: payment.account_id,
+          type: 'purchase_payment',
+          amount: -amount,
+          reference_type: 'purchase',
+          reference_id: purchaseId,
+          payment_id: paymentResult.lastInsertRowId,
+          description: `Payment for ${invoiceNo} - ${params.supplier_name}`,
+          date: payment.date,
+        });
+      }
+    });
+  };
+
+  try {
+    await attemptCreate();
+  } catch (error) {
+    if (!params.invoice_no?.trim() && isInvoiceNoCollision(error)) {
+      await attemptCreate();
+    } else {
+      throw error;
     }
+  }
 
-    for (const payment of params.payments) {
-      if (payment.amount <= 0) continue;
-      await db.runAsync(
-        `INSERT INTO purchase_payments (purchase_id, account_id, amount, date, notes) VALUES (?, ?, ?, ?, ?)`,
-        [purchaseId, payment.account_id, payment.amount, payment.date, payment.notes ?? null]
-      );
-      await recordTransaction(db, {
-        account_id: payment.account_id,
-        type: 'purchase_payment',
-        amount: -payment.amount,
-        reference_type: 'purchase',
-        reference_id: purchaseId,
-        description: `Payment for ${invoiceNo} - ${params.supplier_name}`,
-        date: payment.date,
-      });
-    }
-  });
-
-  await triggerAutoBackup();
   return purchaseId;
 }
 
@@ -156,22 +202,26 @@ export async function addPurchasePayment(
     throw new Error('Please select a valid bank/cash account');
   }
 
+  validatePaymentAmount(purchase.total_amount, purchase.paid_amount, payment.amount);
+
   await db.withTransactionAsync(async () => {
-    await db.runAsync(
+    const amount = roundMoney(payment.amount);
+    const paymentResult = await db.runAsync(
       `INSERT INTO purchase_payments (purchase_id, account_id, amount, date, notes) VALUES (?, ?, ?, ?, ?)`,
-      [purchaseId, payment.account_id, payment.amount, payment.date, payment.notes ?? null]
+      [purchaseId, payment.account_id, amount, payment.date, payment.notes ?? null]
     );
     await recordTransaction(db, {
       account_id: payment.account_id,
       type: 'purchase_payment',
-      amount: -payment.amount,
+      amount: -amount,
       reference_type: 'purchase',
       reference_id: purchaseId,
+      payment_id: paymentResult.lastInsertRowId,
       description: `Payment for ${purchase.invoice_no} - ${purchase.supplier_name}`,
       date: payment.date,
     });
 
-    const newPaid = purchase.paid_amount + payment.amount;
+    const newPaid = addMoney(purchase.paid_amount, amount);
     const status = getPaymentStatus(purchase.total_amount, newPaid);
     await db.runAsync('UPDATE purchases SET paid_amount = ?, status = ? WHERE id = ?', [
       newPaid,
@@ -180,7 +230,6 @@ export async function addPurchasePayment(
     ]);
   });
 
-  await triggerAutoBackup();
 }
 
 export async function deletePurchase(id: number): Promise<void> {
@@ -189,41 +238,33 @@ export async function deletePurchase(id: number): Promise<void> {
   if (!purchase) throw new Error('Purchase not found');
 
   const items = await getPurchaseItems(id);
-  const payments = await getPurchasePayments(id);
+  const productIds = Array.from(new Set(items.map((i) => i.product_id)));
 
   await db.withTransactionAsync(async () => {
-    for (const item of items) {
-      const product = await db.getFirstAsync<{ current_qty: number; name: string }>(
-        'SELECT current_qty, name FROM products WHERE id = ?',
-        [item.product_id]
-      );
-      if (!product || product.current_qty < item.qty) {
-        throw new Error(`Cannot delete: not enough stock to reverse ${product?.name ?? 'item'}`);
-      }
-      await db.runAsync('UPDATE products SET current_qty = current_qty - ? WHERE id = ?', [
-        item.qty,
-        item.product_id,
-      ]);
-      await db.runAsync(
-        `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, reference_id, notes)
-         VALUES (?, 'adjustment', ?, ?, 'purchase_delete', ?, ?)`,
-        [item.product_id, -item.qty, item.unit_cost, id, `Reversed ${purchase.invoice_no}`]
-      );
-    }
-
-    for (const payment of payments) {
-      await db.runAsync('UPDATE accounts SET current_balance = current_balance + ? WHERE id = ?', [
-        payment.amount,
-        payment.account_id,
-      ]);
-    }
-
+    // Drop this purchase's own inventory movements so the recomputed stock and
+    // cost basis exclude it entirely, then recompute affected products exactly.
     await db.runAsync(
-      `DELETE FROM transactions WHERE reference_type = 'purchase' AND reference_id = ?`,
+      `DELETE FROM inventory_movements WHERE reference_type = 'purchase' AND reference_id = ?`,
       [id]
     );
+
+    for (const productId of productIds) {
+      const { currentQty } = await recomputeProductStock(db, productId);
+      if (currentQty < -0.0001) {
+        const product = await db.getFirstAsync<{ name: string }>(
+          'SELECT name FROM products WHERE id = ?',
+          [productId]
+        );
+        throw new Error(
+          `Cannot delete: stock for ${product?.name ?? 'an item'} would go negative (already sold)`
+        );
+      }
+    }
+
+    await reverseTransactionsByReference(db, 'purchase', id);
+    await db.runAsync('DELETE FROM purchase_payments WHERE purchase_id = ?', [id]);
+    await db.runAsync('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
     await db.runAsync('DELETE FROM purchases WHERE id = ?', [id]);
   });
 
-  await triggerAutoBackup();
 }

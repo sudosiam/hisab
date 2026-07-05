@@ -2,32 +2,66 @@ import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
   StyleSheet,
   Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { FormInput, PrimaryButton, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import {
+  FormInput,
+  FormScreen,
+  PrimaryButton,
+  SectionHeader,
+  useScreenStyles,
+} from '../../../src/components/ui';
 import { CustomerAutocomplete } from '../../../src/components/CustomerAutocomplete';
 import { ProductPicker } from '../../../src/components/ProductPicker';
 import { PaymentSplitForm, PaymentRow } from '../../../src/components/PaymentSplitForm';
+import { DraftBanner } from '../../../src/components/DraftBanner';
 import { getProducts } from '../../../src/services/inventory';
-import { getAccounts } from '../../../src/services/banking';
+import { getSelectableAccounts } from '../../../src/services/banking';
 import { createPurchase } from '../../../src/services/purchases';
+import { getNextPurchaseInvoiceNo } from '../../../src/services/invoiceNumbers';
+import { DRAFT_KEYS, loadDraft, type PurchaseFormDraft } from '../../../src/services/formDrafts';
+import { useFormDraft } from '../../../src/hooks/useFormDraft';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
-import { formatCurrency } from '../../../src/utils/format';
-import { todayISO } from '../../../src/utils/date';
+import { formatAmountInput, formatCurrency } from '../../../src/utils/format';
+import { todayISO, isValidISODate } from '../../../src/utils/date';
 import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import type { Account, Product } from '../../../src/types';
 
 interface LineItem {
+  key: string;
   product_id: number;
   qty: string;
   unit_cost: string;
+}
+
+let lineItemCounter = 0;
+function createLineItem(product: Product): LineItem {
+  lineItemCounter += 1;
+  return {
+    key: `purchase-item-${Date.now()}-${lineItemCounter}`,
+    product_id: product.id,
+    qty: '1',
+    unit_cost: formatAmountInput(product.avg_cost),
+  };
+}
+
+function isPurchaseDraftEmpty(d: PurchaseFormDraft): boolean {
+  const hasText =
+    d.supplierName.trim() ||
+    d.vendorInvoiceNo.trim() ||
+    d.notes.trim() ||
+    (parseFloat(d.discount) || 0) > 0 ||
+    d.payments.length > 0;
+  if (hasText) return false;
+  if (d.items.length === 0) return true;
+  if (d.items.length > 1) return false;
+  return d.items[0].qty === '1';
 }
 
 export default function NewPurchaseScreen() {
@@ -67,7 +101,9 @@ export default function NewPurchaseScreen() {
   const [supplierName, setSupplierName] = useState(
     () => (typeof supplierNameParam === 'string' ? decodeURIComponent(supplierNameParam) : '')
   );
+  const [invoiceNo, setInvoiceNo] = useState('');
   const [date, setDate] = useState(todayISO());
+  const [vendorInvoiceNo, setVendorInvoiceNo] = useState('');
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState('0');
   const [products, setProducts] = useState<Product[]>([]);
@@ -76,15 +112,97 @@ export default function NewPurchaseScreen() {
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const draftPayload = useMemo<PurchaseFormDraft>(
+    () => ({
+      supplierName,
+      invoiceNo,
+      date,
+      vendorInvoiceNo,
+      notes,
+      discount,
+      items,
+      payments,
+    }),
+    [supplierName, invoiceNo, date, vendorInvoiceNo, notes, discount, items, payments]
+  );
+
+  const { markReady, discardDraft, clearDraftOnSave, hasDraft, noteDraftLoaded } = useFormDraft(
+    DRAFT_KEYS.purchaseNew,
+    draftPayload,
+    { isEmpty: isPurchaseDraftEmpty }
+  );
+
+  const resetForm = async (productList: Product[]) => {
+    setSupplierName('');
+    setInvoiceNo(await getNextPurchaseInvoiceNo());
+    setDate(todayISO());
+    setVendorInvoiceNo('');
+    setNotes('');
+    setDiscount('0');
+    setPayments([]);
+    if (productList.length > 0) {
+      setItems([createLineItem(productList[0])]);
+    } else {
+      setItems([]);
+    }
+  };
+
+  const handleDiscardDraft = () => {
+    Alert.alert('Discard draft?', 'Your unsaved purchase will be cleared.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: async () => {
+          await discardDraft();
+          await resetForm(products);
+        },
+      },
+    ]);
+  };
+
   React.useEffect(() => {
-    Promise.all([getProducts(), getAccounts()]).then(([p, a]) => {
-      setProducts(p);
-      setAccounts(a);
-      if (p.length > 0) {
-        setItems([{ product_id: p[0].id, qty: '1', unit_cost: String(p[0].avg_cost.toFixed(2)) }]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [p, a] = await Promise.all([getProducts(), getSelectableAccounts()]);
+        if (cancelled) return;
+        setProducts(p);
+        setAccounts(a);
+        const draft = await loadDraft<PurchaseFormDraft>(DRAFT_KEYS.purchaseNew);
+        const nextInvoice = await getNextPurchaseInvoiceNo();
+        if (cancelled) return;
+        if (draft && !isPurchaseDraftEmpty(draft)) {
+          setSupplierName(draft.supplierName || '');
+          setInvoiceNo(draft.invoiceNo || nextInvoice);
+          setDate(isValidISODate(draft.date) ? draft.date : todayISO());
+          setVendorInvoiceNo(draft.vendorInvoiceNo || '');
+          setNotes(draft.notes || '');
+          setDiscount(Number.isFinite(parseFloat(draft.discount)) ? draft.discount : '0');
+          const validItems = (draft.items ?? []).filter((i) =>
+            p.some((prod) => prod.id === i.product_id)
+          );
+          setItems(validItems.length ? validItems : p.length > 0 ? [createLineItem(p[0])] : []);
+          setPayments(draft.payments || []);
+          noteDraftLoaded();
+        } else if (typeof supplierNameParam === 'string' && supplierNameParam) {
+          setSupplierName(decodeURIComponent(supplierNameParam));
+          setInvoiceNo(nextInvoice);
+          if (p.length > 0) setItems([createLineItem(p[0])]);
+        } else {
+          setInvoiceNo(nextInvoice);
+          if (p.length > 0) setItems([createLineItem(p[0])]);
+        }
+      } catch (e) {
+        if (!cancelled) Alert.alert('Error', formatSqliteError(e));
+      } finally {
+        if (!cancelled) markReady();
       }
-    });
-  }, []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [markReady, noteDraftLoaded, supplierNameParam]);
 
   const subtotal = items.reduce(
     (sum, item) => sum + (parseFloat(item.qty) || 0) * (parseFloat(item.unit_cost) || 0),
@@ -95,16 +213,16 @@ export default function NewPurchaseScreen() {
 
   const addItem = () => {
     if (products.length === 0) return;
-    setItems([...items, { product_id: products[0].id, qty: '1', unit_cost: '0' }]);
+    setItems([...items, createLineItem(products[0])]);
   };
 
-  const updateItem = (index: number, field: keyof LineItem, value: string | number) => {
+  const updateItem = (index: number, field: 'product_id' | 'qty' | 'unit_cost', value: string | number) => {
     const updated = [...items];
     updated[index] = { ...updated[index], [field]: value };
     if (field === 'product_id') {
       const product = products.find((p) => p.id === value);
       if (product) {
-        updated[index].unit_cost = String(product.avg_cost.toFixed(2));
+        updated[index].unit_cost = formatAmountInput(product.avg_cost);
       }
     }
     setItems(updated);
@@ -115,8 +233,13 @@ export default function NewPurchaseScreen() {
   };
 
   const handleSave = async () => {
+    if (loading) return;
     if (!supplierName.trim()) {
       Alert.alert('Error', 'Supplier name is required');
+      return;
+    }
+    if (!invoiceNo.trim()) {
+      Alert.alert('Error', 'Purchase number is required');
       return;
     }
     if (items.length === 0) {
@@ -127,12 +250,36 @@ export default function NewPurchaseScreen() {
       Alert.alert('Error', 'Discount cannot exceed subtotal');
       return;
     }
+    if (!isValidISODate(date)) {
+      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
+      return;
+    }
+    for (const p of payments) {
+      if (parseFloat(p.amount) > 0 && !isValidISODate(p.date)) {
+        Alert.alert('Error', 'Enter a valid payment date as YYYY-MM-DD');
+        return;
+      }
+    }
+    for (const item of items) {
+      const qty = parseFloat(item.qty);
+      const cost = parseFloat(item.unit_cost);
+      if (!qty || qty <= 0) {
+        Alert.alert('Error', 'Each item must have quantity greater than zero');
+        return;
+      }
+      if (!cost || cost <= 0) {
+        Alert.alert('Error', 'Each item must have unit cost greater than zero');
+        return;
+      }
+    }
 
     setLoading(true);
     try {
       const id = await createPurchase({
         supplier_name: supplierName.trim(),
+        invoice_no: invoiceNo.trim(),
         date,
+        vendor_invoice_no: vendorInvoiceNo.trim() || undefined,
         notes: notes.trim() || undefined,
         discount_amount: discountAmount,
         items: items.map((i) => ({
@@ -149,6 +296,7 @@ export default function NewPurchaseScreen() {
             notes: p.notes || undefined,
           })),
       });
+      await clearDraftOnSave();
       refresh();
       router.replace(`/(drawer)/purchases/${id}`);
     } catch (e) {
@@ -159,11 +307,14 @@ export default function NewPurchaseScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
+    <FormScreen>
+      <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
+      <FormInput
+        label="Purchase No"
+        value={invoiceNo}
+        onChangeText={setInvoiceNo}
+        placeholder="Auto-generated"
+      />
       <CustomerAutocomplete
         label="Supplier"
         partyType="vendor"
@@ -172,6 +323,12 @@ export default function NewPurchaseScreen() {
         placeholder="Start typing vendor name"
       />
       <FormInput label="Date (YYYY-MM-DD)" value={date} onChangeText={setDate} />
+      <FormInput
+        label="Vendor Invoice No (optional)"
+        value={vendorInvoiceNo}
+        onChangeText={setVendorInvoiceNo}
+        placeholder="Supplier bill / invoice number"
+      />
       <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
 
       <View style={styles.section}>
@@ -186,7 +343,7 @@ export default function NewPurchaseScreen() {
           <Text style={localStyles.hint}>Add products in Inventory first.</Text>
         ) : (
           items.map((item, index) => (
-            <View key={index} style={localStyles.itemCard}>
+            <View key={item.key} style={localStyles.itemCard}>
               <ProductPicker
                 products={products}
                 value={item.product_id}
@@ -209,7 +366,11 @@ export default function NewPurchaseScreen() {
                     keyboardType="decimal-pad"
                   />
                 </View>
-                <TouchableOpacity onPress={() => removeItem(index)} style={localStyles.removeBtn}>
+                <TouchableOpacity
+                  onPress={() => removeItem(index)}
+                  style={localStyles.removeBtn}
+                  accessibilityLabel="Remove item"
+                >
                   <Text style={localStyles.removeText}>✕</Text>
                 </TouchableOpacity>
               </View>
@@ -241,9 +402,10 @@ export default function NewPurchaseScreen() {
         payments={payments}
         onChange={setPayments}
         totalDue={total}
+        defaultDate={isValidISODate(date) ? date : undefined}
       />
 
       <PrimaryButton title="Save Purchase" onPress={handleSave} loading={loading} />
-    </ScrollView>
+    </FormScreen>
   );
 }

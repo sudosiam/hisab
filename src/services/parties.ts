@@ -1,4 +1,5 @@
 import { getDatabase } from '../db/database';
+import { roundMoney } from '../utils/money';
 import type * as SQLite from 'expo-sqlite';
 import type {
   Party,
@@ -109,6 +110,13 @@ export async function getPartyStatement(partyId: number): Promise<PartyStatement
   if (!party) return [];
 
   const db = await getDatabase();
+
+  // Uniform same-day sort key: invoices/bills ('0') come before payments
+  // ('1'), then by row id. Mixing created_at timestamps with other formats
+  // produced wrong ordering for backdated entries.
+  const sortKey = (kind: '0' | '1', id: number): string =>
+    `${kind}#${String(id).padStart(12, '0')}`;
+
   type RawEntry = {
     sort_date: string;
     sort_created: string;
@@ -136,7 +144,7 @@ export async function getPartyStatement(partyId: number): Promise<PartyStatement
     for (const sale of sales) {
       entries.push({
         sort_date: sale.date,
-        sort_created: sale.created_at,
+        sort_created: sortKey('0', sale.id),
         date: sale.date,
         description: `Invoice ${sale.invoice_no}`,
         debit: sale.total_amount,
@@ -162,7 +170,7 @@ export async function getPartyStatement(partyId: number): Promise<PartyStatement
     for (const payment of payments) {
       entries.push({
         sort_date: payment.date,
-        sort_created: `${payment.date}#${payment.payment_id}`,
+        sort_created: sortKey('1', payment.payment_id),
         date: payment.date,
         description: `Payment — ${payment.invoice_no}`,
         debit: 0,
@@ -186,7 +194,7 @@ export async function getPartyStatement(partyId: number): Promise<PartyStatement
     for (const purchase of purchases) {
       entries.push({
         sort_date: purchase.date,
-        sort_created: purchase.created_at,
+        sort_created: sortKey('0', purchase.id),
         date: purchase.date,
         description: `Bill ${purchase.invoice_no}`,
         debit: 0,
@@ -212,7 +220,7 @@ export async function getPartyStatement(partyId: number): Promise<PartyStatement
     for (const payment of payments) {
       entries.push({
         sort_date: payment.date,
-        sort_created: `${payment.date}#${payment.payment_id}`,
+        sort_created: sortKey('1', payment.payment_id),
         date: payment.date,
         description: `Payment — ${payment.invoice_no}`,
         debit: payment.amount,
@@ -232,9 +240,9 @@ export async function getPartyStatement(partyId: number): Promise<PartyStatement
   let balance = 0;
   return entries.map((entry, index) => {
     if (party.type === 'customer') {
-      balance += entry.debit - entry.credit;
+      balance = roundMoney(balance + entry.debit - entry.credit);
     } else {
-      balance += entry.credit - entry.debit;
+      balance = roundMoney(balance + entry.credit - entry.debit);
     }
     return {
       id: `${entry.reference_type}-${entry.reference_id}-${index}`,
@@ -285,12 +293,13 @@ export async function searchPartyNames(query: string, type: PartyType): Promise<
   if (!q) {
     return db
       .getAllAsync<{ name: string }>(
-        `SELECT name FROM (
+        `SELECT MIN(name) as name FROM (
            SELECT name FROM parties WHERE type = ?
            UNION
-           SELECT DISTINCT ${txColumn} AS name FROM ${txTable}
+           SELECT ${txColumn} AS name FROM ${txTable}
            WHERE ${txColumn} IS NOT NULL AND ${txColumn} != ''
          )
+         GROUP BY name COLLATE NOCASE
          ORDER BY name ASC LIMIT 20`,
         [type]
       )
@@ -299,13 +308,14 @@ export async function searchPartyNames(query: string, type: PartyType): Promise<
 
   return db
     .getAllAsync<{ name: string }>(
-      `SELECT name FROM (
+      `SELECT MIN(name) as name FROM (
          SELECT name FROM parties WHERE type = ?
          UNION
-         SELECT DISTINCT ${txColumn} AS name FROM ${txTable}
+         SELECT ${txColumn} AS name FROM ${txTable}
          WHERE ${txColumn} IS NOT NULL AND ${txColumn} != ''
        )
        WHERE name LIKE ? COLLATE NOCASE
+       GROUP BY name COLLATE NOCASE
        ORDER BY name ASC LIMIT 20`,
       [type, `%${q}%`]
     )
@@ -332,16 +342,18 @@ export async function upsertParty(
 
 export async function syncPartiesFromTransactions(): Promise<void> {
   const db = await getDatabase();
-  await db.runAsync(`
-    INSERT OR IGNORE INTO parties (name, type)
-    SELECT DISTINCT party_name, 'customer' FROM sales
-    WHERE party_name IS NOT NULL AND party_name != ''
-  `);
-  await db.runAsync(`
-    INSERT OR IGNORE INTO parties (name, type)
-    SELECT DISTINCT supplier_name, 'vendor' FROM purchases
-    WHERE supplier_name IS NOT NULL AND supplier_name != ''
-  `);
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(`
+      INSERT OR IGNORE INTO parties (name, type)
+      SELECT DISTINCT party_name, 'customer' FROM sales
+      WHERE party_name IS NOT NULL AND party_name != ''
+    `);
+    await db.runAsync(`
+      INSERT OR IGNORE INTO parties (name, type)
+      SELECT DISTINCT supplier_name, 'vendor' FROM purchases
+      WHERE supplier_name IS NOT NULL AND supplier_name != ''
+    `);
+  });
 }
 
 export async function createParty(params: {
@@ -354,6 +366,16 @@ export async function createParty(params: {
   if (!trimmed) throw new Error('Name is required');
 
   const db = await getDatabase();
+  const duplicate = await db.getFirstAsync<{ id: number }>(
+    'SELECT id FROM parties WHERE name = ? COLLATE NOCASE AND type = ?',
+    [trimmed, params.type]
+  );
+  if (duplicate) {
+    throw new Error(
+      `A ${params.type === 'customer' ? 'customer' : 'vendor'} named "${trimmed}" already exists`
+    );
+  }
+
   const result = await db.runAsync(
     'INSERT INTO parties (name, type, phone, notes) VALUES (?, ?, ?, ?)',
     [trimmed, params.type, params.phone?.trim() || null, params.notes?.trim() || null]
@@ -406,11 +428,27 @@ export async function updateParty(
     if (trimmed.toLowerCase() !== existing.name.toLowerCase()) {
       if (params.type === 'customer') {
         await db.runAsync(
+          `UPDATE transactions SET description = (
+             SELECT 'Payment for ' || s.invoice_no || ' - ' || ? FROM sales s WHERE s.id = transactions.reference_id
+           )
+           WHERE reference_type = 'sale'
+           AND reference_id IN (SELECT id FROM sales WHERE party_name = ? COLLATE NOCASE)`,
+          [trimmed, existing.name]
+        );
+        await db.runAsync(
           'UPDATE sales SET party_name = ? WHERE party_name = ? COLLATE NOCASE',
           [trimmed, existing.name]
         );
       }
       if (params.type === 'vendor') {
+        await db.runAsync(
+          `UPDATE transactions SET description = (
+             SELECT 'Payment for ' || p.invoice_no || ' - ' || ? FROM purchases p WHERE p.id = transactions.reference_id
+           )
+           WHERE reference_type = 'purchase'
+           AND reference_id IN (SELECT id FROM purchases WHERE supplier_name = ? COLLATE NOCASE)`,
+          [trimmed, existing.name]
+        );
         await db.runAsync(
           'UPDATE purchases SET supplier_name = ? WHERE supplier_name = ? COLLATE NOCASE',
           [trimmed, existing.name]

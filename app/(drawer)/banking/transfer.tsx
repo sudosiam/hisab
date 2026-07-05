@@ -1,12 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, Alert, TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { Alert, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { FormInput, PrimaryButton, useScreenStyles } from '../../../src/components/ui';
-import { getAccounts, transferBetweenAccounts } from '../../../src/services/banking';
+import {
+  FormInput,
+  FormScreen,
+  PrimaryButton,
+  useScreenStyles,
+} from '../../../src/components/ui';
+import { getSelectableAccounts, transferBetweenAccounts } from '../../../src/services/banking';
 import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
-import { todayISO } from '../../../src/utils/date';
+import { todayISO, isValidISODate } from '../../../src/utils/date';
+import { parsePositiveAmount } from '../../../src/utils/format';
 import { radius, spacing } from '../../../src/constants/theme';
 import type { Account } from '../../../src/types';
 
@@ -41,17 +47,31 @@ export default function TransferScreen() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    getAccounts().then((a) => {
-      setAccounts(a);
-      if (a.length > 0) setFromId(a[0].id);
-      if (a.length > 1) setToId(a[1].id);
-    });
+    let cancelled = false;
+    getSelectableAccounts()
+      .then((a) => {
+        if (cancelled) return;
+        setAccounts(a);
+        if (a.length > 0) setFromId(a[0].id);
+        if (a.length > 1) setToId(a[1].id);
+      })
+      .catch((e) => {
+        if (!cancelled) Alert.alert('Error', formatSqliteError(e));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleSave = async () => {
-    const amt = parseFloat(amount);
-    if (!amt) {
-      Alert.alert('Error', 'Enter a valid amount');
+    if (loading) return;
+    const amt = parsePositiveAmount(amount);
+    if (amt === null) {
+      Alert.alert('Error', 'Enter an amount greater than zero');
+      return;
+    }
+    if (!isValidISODate(date)) {
+      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
       return;
     }
     setLoading(true);
@@ -73,7 +93,7 @@ export default function TransferScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <FormScreen>
       <Text style={styles.label}>From Account</Text>
       {accounts.map((a) => (
         <TouchableOpacity
@@ -100,6 +120,6 @@ export default function TransferScreen() {
       <FormInput label="Date" value={date} onChangeText={setDate} />
       <FormInput label="Note (optional)" value={description} onChangeText={setDescription} />
       <PrimaryButton title="Transfer" onPress={handleSave} loading={loading} />
-    </ScrollView>
+    </FormScreen>
   );
 }

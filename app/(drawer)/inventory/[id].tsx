@@ -1,8 +1,7 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   StyleSheet,
   ActivityIndicator,
   Alert,
@@ -17,10 +16,19 @@ import {
   getProductSellPrice,
   updateProduct,
 } from '../../../src/services/inventory';
-import { FormInput, PrimaryButton, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import {
+  FormInput,
+  FormScreen,
+  PrimaryButton,
+  SectionHeader,
+  useScreenStyles,
+} from '../../../src/components/ui';
+import { StatCard } from '../../../src/components/StatCard';
+import { CategoryPicker } from '../../../src/components/CategoryPicker';
 import { formatSqliteError } from '../../../src/db/database';
 import { parseRouteId } from '../../../src/utils/route';
-import { formatCurrency, formatQty } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency, formatQty } from '../../../src/utils/format';
+import { roundMoney } from '../../../src/utils/money';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { radius, spacing } from '../../../src/constants/theme';
@@ -36,19 +44,13 @@ export default function ProductDetailScreen() {
     () =>
       StyleSheet.create({
         name: { fontSize: 22, fontWeight: '700', color: colors.text },
-        meta: { color: colors.textSecondary, marginBottom: spacing.md },
-        stats: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginVertical: spacing.md },
-        stat: {
-          backgroundColor: colors.surface,
-          padding: spacing.md,
-          borderRadius: radius.md,
-          minWidth: '45%',
-          flex: 1,
-          borderWidth: 1,
-          borderColor: colors.border,
+        meta: { color: colors.textSecondary, marginBottom: spacing.sm },
+        kpiRow: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: spacing.sm,
+          marginVertical: spacing.md,
         },
-        statLabel: { fontSize: 11, color: colors.textSecondary },
-        statValue: { fontSize: 15, fontWeight: '600', marginTop: 4, color: colors.text },
         moveRow: {
           flexDirection: 'row',
           backgroundColor: colors.surface,
@@ -71,6 +73,7 @@ export default function ProductDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
+  const [category, setCategory] = useState('');
   const [sku, setSku] = useState('');
   const [unit, setUnit] = useState('');
   const [sellPrice, setSellPrice] = useState('');
@@ -92,9 +95,10 @@ export default function ProductDetailScreen() {
       setMovements(m);
       if (p) {
         setName(p.name);
+        setCategory(p.category ?? '');
         setSku(p.sku ?? '');
         setUnit(p.unit);
-        setSellPrice(p.sell_price > 0 ? String(p.sell_price) : '');
+        setSellPrice(p.sell_price > 0 ? formatAmountInput(p.sell_price) : '');
       }
       setError(p ? null : 'Product not found');
     } catch (e) {
@@ -105,17 +109,35 @@ export default function ProductDetailScreen() {
     }
   }, [productId]);
 
-  useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
+  const dirtyRef = useRef(false);
+  dirtyRef.current = editing || adjustQty.trim().length > 0 || adjustNotes.trim().length > 0;
+
+  useFocusEffect(useCallback(() => {
+    // Don't reload over an open edit form or a half-typed adjustment.
+    if (dirtyRef.current) return;
+    setLoading(true);
+    load();
+  }, [load]));
 
   const handleSaveEdit = async () => {
-    if (!product || !name.trim()) return;
+    if (!product || saving) return;
+    if (!name.trim()) {
+      Alert.alert('Error', 'Product name is required');
+      return;
+    }
+    const price = sellPrice.trim() ? parseFloat(sellPrice) : 0;
+    if (!Number.isFinite(price) || price < 0) {
+      Alert.alert('Error', 'Enter a valid sell price');
+      return;
+    }
     setSaving(true);
     try {
       await updateProduct(product.id, {
         name: name.trim(),
+        category: category.trim() || null,
         sku: sku.trim() || undefined,
         unit: unit.trim() || 'pcs',
-        sell_price: parseFloat(sellPrice) || 0,
+        sell_price: price,
       });
       refresh();
       setEditing(false);
@@ -128,9 +150,9 @@ export default function ProductDetailScreen() {
   };
 
   const handleAdjust = async () => {
-    if (!product) return;
+    if (!product || saving) return;
     const qty = parseFloat(adjustQty);
-    if (!qty) {
+    if (!Number.isFinite(qty) || qty === 0) {
       Alert.alert('Error', 'Enter adjustment quantity (+ or -)');
       return;
     }
@@ -188,16 +210,25 @@ export default function ProductDetailScreen() {
     );
   }
 
+  const stockValue = roundMoney(product.current_qty * product.avg_cost);
+  const unitSellPrice = getProductSellPrice(product);
+  const marginPct =
+    unitSellPrice > 0 ? roundMoney(((unitSellPrice - product.avg_cost) / unitSellPrice) * 100) : 0;
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <FormScreen>
       {!editing ? (
         <>
           <Text style={localStyles.name}>{product.name}</Text>
+          {product.category ? (
+            <Text style={localStyles.meta}>{product.category}</Text>
+          ) : null}
           {product.sku ? <Text style={localStyles.meta}>SKU: {product.sku}</Text> : null}
         </>
       ) : (
         <>
           <FormInput label="Name" value={name} onChangeText={setName} />
+          <CategoryPicker value={category} onChange={setCategory} />
           <FormInput label="SKU" value={sku} onChangeText={setSku} />
           <FormInput label="Unit" value={unit} onChangeText={setUnit} />
           <FormInput
@@ -210,26 +241,27 @@ export default function ProductDetailScreen() {
         </>
       )}
 
-      <View style={localStyles.stats}>
-        <View style={localStyles.stat}>
-          <Text style={localStyles.statLabel}>Current Stock</Text>
-          <Text style={localStyles.statValue}>{formatQty(product.current_qty, product.unit)}</Text>
+      {!editing ? (
+        <View style={localStyles.kpiRow}>
+          <StatCard
+            label="Stock Value"
+            value={stockValue}
+            color={colors.primary}
+            subtitle={`Avg cost ${formatCurrency(product.avg_cost)}`}
+          />
+          <StatCard
+            label="On Hand"
+            displayValue={formatQty(product.current_qty, product.unit)}
+            color={colors.accent}
+          />
+          <StatCard
+            label="Sell Price"
+            value={unitSellPrice}
+            color={colors.success}
+            subtitle={marginPct > 0 ? `${marginPct}% margin` : undefined}
+          />
         </View>
-        <View style={localStyles.stat}>
-          <Text style={localStyles.statLabel}>Weighted Avg Cost</Text>
-          <Text style={localStyles.statValue}>{formatCurrency(product.avg_cost)}</Text>
-        </View>
-        <View style={localStyles.stat}>
-          <Text style={localStyles.statLabel}>Sell Price</Text>
-          <Text style={[localStyles.statValue, { color: colors.success }]}>
-            {formatCurrency(getProductSellPrice(product))}
-          </Text>
-        </View>
-        <View style={localStyles.stat}>
-          <Text style={localStyles.statLabel}>Stock Value</Text>
-          <Text style={localStyles.statValue}>{formatCurrency(product.current_qty * product.avg_cost)}</Text>
-        </View>
-      </View>
+      ) : null}
 
       <SectionHeader title="Stock Adjustment" />
       <FormInput
@@ -246,22 +278,39 @@ export default function ProductDetailScreen() {
       <PrimaryButton title="Apply Adjustment" onPress={handleAdjust} loading={saving} />
 
       <SectionHeader title="Movement History" />
-      {movements.map((m) => (
-        <View key={m.id} style={localStyles.moveRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={localStyles.moveType}>{m.type.toUpperCase()}</Text>
-            <Text style={localStyles.moveNotes}>{m.notes ?? ''}</Text>
+      {movements.length === 0 ? (
+        <Text style={styles.empty}>No stock movements yet</Text>
+      ) : (
+        movements.map((m) => (
+          <View key={m.id} style={localStyles.moveRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={localStyles.moveType}>{m.type.toUpperCase()}</Text>
+              <Text style={localStyles.moveNotes}>{m.notes ?? ''}</Text>
+            </View>
+            <Text style={[localStyles.moveQty, m.qty < 0 && localStyles.neg]}>
+              {m.qty > 0 ? '+' : ''}{formatQty(m.qty, product.unit)}
+            </Text>
           </View>
-          <Text style={[localStyles.moveQty, m.qty < 0 && localStyles.neg]}>
-            {m.qty > 0 ? '+' : ''}{formatQty(m.qty, product.unit)}
-          </Text>
-        </View>
-      ))}
+        ))
+      )}
 
       <View style={localStyles.actions}>
-        <PrimaryButton title={editing ? 'Cancel Edit' : 'Edit Product'} onPress={() => setEditing(!editing)} variant="secondary" />
+        <PrimaryButton
+          title={editing ? 'Cancel Edit' : 'Edit Product'}
+          onPress={() => {
+            if (editing && product) {
+              setName(product.name);
+              setCategory(product.category ?? '');
+              setSku(product.sku ?? '');
+              setUnit(product.unit);
+              setSellPrice(product.sell_price > 0 ? formatAmountInput(product.sell_price) : '');
+            }
+            setEditing(!editing);
+          }}
+          variant="secondary"
+        />
         <PrimaryButton title="Delete Product" onPress={handleDelete} variant="danger" />
       </View>
-    </ScrollView>
+    </FormScreen>
   );
 }

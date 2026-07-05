@@ -1,13 +1,28 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { Link, useFocusEffect, useRouter } from 'expo-router';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
+} from 'react-native';
+import { Link, useRouter } from 'expo-router';
 import { getSales } from '../../../src/services/sales';
 import { StatusBadge } from '../../../src/components/StatusBadge';
-import { FilterChip, FilterRow, SearchField, useScreenStyles } from '../../../src/components/ui';
+import {
+  ErrorState,
+  FilterChip,
+  FilterRow,
+  SearchField,
+  useScreenStyles,
+} from '../../../src/components/ui';
 import { formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
+import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 import type { Sale } from '../../../src/types';
 
 type Filter = 'all' | 'paid' | 'unpaid';
@@ -20,7 +35,7 @@ export default function SalesListScreen() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const filteredSales = useMemo(
     () =>
@@ -30,14 +45,42 @@ export default function SalesListScreen() {
     [sales, search]
   );
 
+  // `load` changes when `filter` changes, so the focus-refresh hook re-runs
+  // for filter switches too — no separate effect (which double-fetched).
   const load = useCallback(async () => {
-    setLoading(true);
-    const data = await getSales(filter);
-    setSales(data);
-    setLoading(false);
+    setSales(await getSales(filter));
   }, [filter]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load, refreshKey]));
+  const { booting, error, retry } = useFocusRefresh(load, [refreshKey]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: Sale }) => (
+      <TouchableOpacity
+        style={styles.card}
+        onPress={() => router.push(`/(drawer)/sales/${item.id}`)}
+      >
+        <View style={styles.row}>
+          <Text style={styles.cardTitle}>{item.invoice_no}</Text>
+          <StatusBadge status={item.status} />
+        </View>
+        <Text style={styles.cardSub}>{item.party_name}</Text>
+        <View style={[styles.row, { marginTop: 4 }]}>
+          <Text style={styles.cardSub}>{item.date}</Text>
+          <Text style={styles.amount}>{formatCurrency(item.total_amount)}</Text>
+        </View>
+        {item.paid_amount < item.total_amount && (
+          <Text style={{ fontSize: 12, color: colors.danger, marginTop: 4 }}>
+            Due: {formatCurrency(item.total_amount - item.paid_amount)}
+          </Text>
+        )}
+      </TouchableOpacity>
+    ),
+    [colors.danger, router, styles]
+  );
+
+  if (error) {
+    return <ErrorState message={error} onRetry={retry} />;
+  }
 
   return (
     <View style={styles.container}>
@@ -58,39 +101,33 @@ export default function SalesListScreen() {
         placeholder="Search invoice, customer, date..."
       />
 
-      {loading ? (
+      {booting && sales.length === 0 ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
       ) : (
         <FlatList
           data={filteredSales}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={styles.list}
+          renderItem={renderItem}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                load()
+                  .catch(() => {})
+                  .finally(() => setRefreshing(false));
+              }}
+              colors={[colors.primary]}
+              tintColor={colors.primary}
+            />
+          }
+          {...FLATLIST_PERF}
           ListEmptyComponent={
             <Text style={styles.empty}>
               {search.trim() ? 'No sales match your search.' : 'No sales yet. Create your first sale.'}
             </Text>
           }
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.card}
-              onPress={() => router.push(`/(drawer)/sales/${item.id}`)}
-            >
-              <View style={styles.row}>
-                <Text style={styles.cardTitle}>{item.invoice_no}</Text>
-                <StatusBadge status={item.status} />
-              </View>
-              <Text style={styles.cardSub}>{item.party_name}</Text>
-              <View style={[styles.row, { marginTop: 4 }]}>
-                <Text style={styles.cardSub}>{item.date}</Text>
-                <Text style={styles.amount}>{formatCurrency(item.total_amount)}</Text>
-              </View>
-              {item.paid_amount < item.total_amount && (
-                <Text style={{ fontSize: 12, color: colors.danger, marginTop: 4 }}>
-                  Due: {formatCurrency(item.total_amount - item.paid_amount)}
-                </Text>
-              )}
-            </TouchableOpacity>
-          )}
         />
       )}
 

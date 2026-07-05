@@ -8,7 +8,7 @@ import { usePathname, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
-import { spacing, radius, typography } from '../constants/theme';
+import { spacing, radius } from '../constants/theme';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -16,6 +16,7 @@ interface NavItem {
   label: string;
   route: string;
   icon: IconName;
+  activeIcon: IconName;
   match: string[];
 }
 
@@ -27,33 +28,53 @@ interface NavSection {
 const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Overview',
-    items: [{ label: 'Dashboard', route: '/', icon: 'grid-outline', match: ['/', '/index'] }],
+    items: [
+      { label: 'Dashboard', route: '/', icon: 'home-outline', activeIcon: 'home', match: ['/', '/index'] },
+    ],
   },
   {
     title: 'Business',
     items: [
-      { label: 'Sales', route: '/sales', icon: 'cart-outline', match: ['/sales'] },
-      { label: 'Purchases', route: '/purchases', icon: 'bag-handle-outline', match: ['/purchases'] },
-      { label: 'Inventory', route: '/inventory', icon: 'cube-outline', match: ['/inventory'] },
-      { label: 'Parties', route: '/parties', icon: 'people-outline', match: ['/parties'] },
+      { label: 'Sales', route: '/sales', icon: 'cart-outline', activeIcon: 'cart', match: ['/sales'] },
+      { label: 'Purchases', route: '/purchases', icon: 'bag-handle-outline', activeIcon: 'bag-handle', match: ['/purchases'] },
+      { label: 'Inventory', route: '/inventory', icon: 'cube-outline', activeIcon: 'cube', match: ['/inventory'] },
+      { label: 'Parties', route: '/parties', icon: 'people-outline', activeIcon: 'people', match: ['/parties'] },
     ],
   },
   {
     title: 'Finance',
     items: [
-      { label: 'Banking', route: '/banking', icon: 'wallet-outline', match: ['/banking'] },
-      { label: 'Expenses', route: '/expense', icon: 'receipt-outline', match: ['/expense'] },
-      { label: 'Others', route: '/others', icon: 'layers-outline', match: ['/others'] },
-      { label: 'Balance Sheet', route: '/balance-sheet', icon: 'scale-outline', match: ['/balance-sheet'] },
+      { label: 'Banking', route: '/banking', icon: 'wallet-outline', activeIcon: 'wallet', match: ['/banking'] },
+      { label: 'Expenses', route: '/expense', icon: 'receipt-outline', activeIcon: 'receipt', match: ['/expense'] },
+      {
+        label: 'Other Income',
+        route: '/other-income',
+        icon: 'cash-outline',
+        activeIcon: 'cash',
+        match: ['/other-income'],
+      },
+      { label: 'Balance Sheet', route: '/balance-sheet', icon: 'scale-outline', activeIcon: 'scale', match: ['/balance-sheet'] },
     ],
   },
   {
     title: 'Reports',
-    items: [{ label: 'All Reports', route: '/reports', icon: 'bar-chart-outline', match: ['/reports'] }],
+    items: [
+      { label: 'All Reports', route: '/reports', icon: 'bar-chart-outline', activeIcon: 'bar-chart', match: ['/reports'] },
+      { label: 'Growth', route: '/growth', icon: 'analytics-outline', activeIcon: 'analytics', match: ['/growth'] },
+    ],
+  },
+  {
+    title: 'More',
+    items: [
+      { label: 'Investments', route: '/investments', icon: 'trending-up-outline', activeIcon: 'trending-up', match: ['/investments'] },
+      { label: 'Fixed Assets', route: '/others', icon: 'business-outline', activeIcon: 'business', match: ['/others'] },
+    ],
   },
   {
     title: 'Settings',
-    items: [{ label: 'Settings', route: '/settings', icon: 'settings-outline', match: ['/settings'] }],
+    items: [
+      { label: 'Settings', route: '/settings', icon: 'settings-outline', activeIcon: 'settings', match: ['/settings'] },
+    ],
   },
 ];
 
@@ -107,8 +128,8 @@ export function CustomDrawerContent(props: DrawerContentComponentProps) {
                 >
                   <View style={[styles.iconWrap, active && styles.iconWrapActive]}>
                     <Ionicons
-                      name={item.icon}
-                      size={17}
+                      name={active ? item.activeIcon : item.icon}
+                      size={18}
                       color={active ? colors.navActiveText : colors.textSecondary}
                     />
                   </View>
@@ -139,47 +160,52 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.lg,
+      paddingVertical: spacing.md,
       borderBottomWidth: 1,
       borderBottomColor: colors.borderLight,
       gap: spacing.sm,
     },
     logoImage: {
-      width: 44,
-      height: 44,
-      borderRadius: radius.md,
+      width: 38,
+      height: 38,
+      borderRadius: radius.sm,
     },
     appName: {
-      ...typography.title,
+      fontSize: 18,
+      fontWeight: '700',
       color: colors.text,
+      letterSpacing: -0.2,
     },
     appTagline: {
-      fontSize: 12,
+      fontSize: 11,
       color: colors.textSecondary,
-      marginTop: 2,
+      marginTop: 1,
     },
     scroll: {
-      paddingTop: spacing.sm,
-      paddingBottom: spacing.md,
+      paddingTop: spacing.xs,
+      paddingBottom: spacing.sm,
     },
     section: {
-      marginBottom: spacing.sm,
+      marginBottom: spacing.xs,
     },
     sectionTitle: {
-      ...typography.section,
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.6,
       color: colors.textMuted,
       textTransform: 'uppercase',
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
+      paddingTop: spacing.sm,
+      paddingBottom: 4,
     },
     navItem: {
       flexDirection: 'row',
       alignItems: 'center',
       marginHorizontal: spacing.sm,
-      marginVertical: 2,
-      paddingVertical: 8,
+      marginVertical: 1,
+      paddingVertical: 7,
       paddingHorizontal: spacing.sm,
-      borderRadius: radius.md,
+      borderRadius: radius.sm,
     },
     navItemActive: {
       backgroundColor: colors.navActive,
@@ -207,11 +233,11 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     footer: {
       borderTopWidth: 1,
       borderTopColor: colors.borderLight,
-      paddingTop: spacing.md,
+      paddingTop: spacing.sm,
       paddingHorizontal: spacing.md,
     },
     footerText: {
-      fontSize: 11,
+      fontSize: 10,
       color: colors.textMuted,
       letterSpacing: 0.2,
     },

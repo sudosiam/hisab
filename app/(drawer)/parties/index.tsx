@@ -7,9 +7,11 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  RefreshControl,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import {
+  ErrorState,
   FilterChip,
   FilterRow,
   FormInput,
@@ -20,7 +22,6 @@ import {
 import {
   createParty,
   getPartiesWithSummary,
-  syncPartiesFromTransactions,
 } from '../../../src/services/parties';
 import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -28,6 +29,8 @@ import { useTheme } from '../../../src/context/ThemeContext';
 import { formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { spacing, radius } from '../../../src/constants/theme';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
+import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 import { cardSurface } from '../../../src/constants/shadows';
 import type { PartyType, PartyWithSummary } from '../../../src/types';
 
@@ -44,13 +47,13 @@ export default function PartiesScreen() {
         summary: {
           ...cardSurface(colors, isDark),
           flexDirection: 'row',
-          justifyContent: 'space-around',
           marginHorizontal: spacing.md,
           marginTop: spacing.sm,
           marginBottom: spacing.sm,
           padding: spacing.md,
+          gap: spacing.sm,
         },
-        summaryItem: { alignItems: 'center' },
+        summaryItem: { flex: 1, alignItems: 'center' },
         summaryValue: { fontSize: 18, fontWeight: '700', color: colors.primary },
         summaryLabel: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
         partyRow: {
@@ -105,7 +108,6 @@ export default function PartiesScreen() {
   const [parties, setParties] = useState<PartyWithSummary[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [type, setType] = useState<PartyType>('customer');
@@ -114,13 +116,11 @@ export default function PartiesScreen() {
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    await syncPartiesFromTransactions();
     setParties(await getPartiesWithSummary());
-    setLoading(false);
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load, refreshKey]));
+  const { booting, error, retry } = useFocusRefresh(load, [refreshKey]);
+  const [refreshing, setRefreshing] = useState(false);
 
   const filteredParties = useMemo(() => {
     return parties.filter((party) => {
@@ -129,14 +129,18 @@ export default function PartiesScreen() {
     });
   }, [parties, filter, search]);
 
-  const customerCount = parties.filter((p) => p.type === 'customer').length;
-  const vendorCount = parties.filter((p) => p.type === 'vendor').length;
-  const totalReceivable = parties
-    .filter((p) => p.type === 'customer')
-    .reduce((sum, p) => sum + p.balance_due, 0);
-  const totalPayable = parties
-    .filter((p) => p.type === 'vendor')
-    .reduce((sum, p) => sum + p.balance_due, 0);
+  const { totalReceivable, totalPayable } = useMemo(() => {
+    let receivable = 0;
+    let payable = 0;
+    for (const party of parties) {
+      if (party.type === 'customer') {
+        receivable += party.balance_due;
+      } else {
+        payable += party.balance_due;
+      }
+    }
+    return { totalReceivable: receivable, totalPayable: payable };
+  }, [parties]);
 
   const resetForm = () => {
     setName('');
@@ -174,17 +178,13 @@ export default function PartiesScreen() {
     }
   };
 
+  if (error) {
+    return <ErrorState message={error} onRetry={retry} />;
+  }
+
   return (
     <View style={styles.container}>
       <View style={localStyles.summary}>
-        <View style={localStyles.summaryItem}>
-          <Text style={localStyles.summaryValue}>{customerCount}</Text>
-          <Text style={localStyles.summaryLabel}>Customers</Text>
-        </View>
-        <View style={localStyles.summaryItem}>
-          <Text style={localStyles.summaryValue}>{vendorCount}</Text>
-          <Text style={localStyles.summaryLabel}>Vendors</Text>
-        </View>
         <View style={localStyles.summaryItem}>
           <Text style={[localStyles.summaryValue, { color: colors.success }]}>
             {formatCurrency(totalReceivable)}
@@ -233,7 +233,7 @@ export default function PartiesScreen() {
             ))}
           </View>
           <FormInput label="Name" value={name} onChangeText={setName} placeholder="Company or person name" />
-          <FormInput label="Phone (optional)" value={phone} onChangeText={setPhone} keyboardType="numeric" />
+          <FormInput label="Phone (optional)" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
           <FormInput label="Notes (optional)" value={notes} onChangeText={setNotes} multiline />
           <PrimaryButton title="Add Party" onPress={handleSave} loading={saving} />
           <TouchableOpacity style={{ marginTop: spacing.sm, alignItems: 'center' }} onPress={resetForm}>
@@ -242,13 +242,27 @@ export default function PartiesScreen() {
         </View>
       ) : null}
 
-      {loading ? (
+      {booting && parties.length === 0 ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
       ) : (
         <FlatList
           data={filteredParties}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={{ paddingBottom: 96 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                load()
+                  .catch(() => {})
+                  .finally(() => setRefreshing(false));
+              }}
+              colors={[colors.primary]}
+              tintColor={colors.primary}
+            />
+          }
+          {...FLATLIST_PERF}
           ListEmptyComponent={
             <Text style={styles.empty}>
               {search.trim() || filter !== 'all'

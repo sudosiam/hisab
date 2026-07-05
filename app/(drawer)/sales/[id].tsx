@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   StyleSheet,
   ActivityIndicator,
   Alert,
@@ -17,11 +16,19 @@ import {
   deleteSale,
 } from '../../../src/services/sales';
 import { formatSqliteError } from '../../../src/db/database';
-import { getAccounts } from '../../../src/services/banking';
+import { getSelectableAccounts } from '../../../src/services/banking';
 import { StatusBadge } from '../../../src/components/StatusBadge';
+import { StatCard } from '../../../src/components/StatCard';
 import { AccountPicker } from '../../../src/components/AccountPicker';
-import { FormInput, PrimaryButton, SectionHeader, useScreenStyles } from '../../../src/components/ui';
-import { formatCurrency } from '../../../src/utils/format';
+import {
+  FormInput,
+  FormScreen,
+  PrimaryButton,
+  SectionHeader,
+  useScreenStyles,
+} from '../../../src/components/ui';
+import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
+import { roundMoney } from '../../../src/utils/money';
 import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
@@ -42,18 +49,17 @@ export default function SaleDetailScreen() {
         invoice: { fontSize: 20, fontWeight: '700', color: colors.text },
         party: { fontSize: 16, color: colors.textSecondary, marginTop: 4 },
         date: { fontSize: 13, color: colors.textSecondary },
-        summary: {
-          backgroundColor: colors.surface,
-          padding: spacing.md,
-          borderRadius: radius.md,
+        kpiRow: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: spacing.sm,
           marginVertical: spacing.md,
-          gap: 4,
-          borderWidth: 1,
-          borderColor: colors.border,
         },
-        due: { color: colors.danger, fontWeight: '600' },
-        cost: { color: colors.textSecondary, marginTop: 4 },
-        profit: { color: colors.success, fontWeight: '700', marginTop: 4, fontSize: 16 },
+        discountNote: {
+          fontSize: 12,
+          color: colors.textMuted,
+          marginBottom: spacing.xs,
+        },
         itemRow: {
           flexDirection: 'row',
           justifyContent: 'space-between',
@@ -63,7 +69,6 @@ export default function SaleDetailScreen() {
         },
         itemName: { fontWeight: '500', color: colors.text },
         itemMeta: { fontSize: 12, color: colors.textSecondary },
-        itemProfit: { fontSize: 12, color: colors.success, fontWeight: '600', marginTop: 2 },
         itemTotal: { fontWeight: '600', color: colors.text },
         muted: { color: colors.textSecondary, fontSize: 13 },
         paySection: { marginTop: spacing.md },
@@ -104,7 +109,7 @@ export default function SaleDetailScreen() {
         getSaleById(saleId),
         getSaleItems(saleId),
         getSalePayments(saleId),
-        getAccounts(),
+        getSelectableAccounts(),
       ]);
       setSale(s);
       setItems(i);
@@ -113,7 +118,7 @@ export default function SaleDetailScreen() {
       if (a.length > 0) setSelectedAccount(a[0].id);
       if (s) {
         const dueAmt = s.total_amount - s.paid_amount;
-        if (dueAmt > 0) setPayAmount(dueAmt.toFixed(2));
+        if (dueAmt > 0) setPayAmount(formatAmountInput(dueAmt));
       }
       setError(s ? null : 'Sale not found');
     } catch (e) {
@@ -132,12 +137,16 @@ export default function SaleDetailScreen() {
   );
 
   const handleAddPayment = async () => {
-    const amount = parseFloat(payAmount);
-    if (!amount || amount <= 0) {
-      Alert.alert('Error', 'Enter a valid amount');
+    if (!sale || saving) return;
+    const amount = parsePositiveAmount(payAmount);
+    if (amount === null) {
+      Alert.alert('Error', 'Enter an amount greater than zero');
       return;
     }
-    if (!sale) return;
+    if (!selectedAccount) {
+      Alert.alert('Error', 'Select a payment account');
+      return;
+    }
 
     const due = sale.total_amount - sale.paid_amount;
     if (amount > due + 0.01) {
@@ -201,15 +210,16 @@ export default function SaleDetailScreen() {
     );
   }
 
-  const due = sale.total_amount - sale.paid_amount;
-  const totalCost = items.reduce((sum, item) => sum + item.unit_cost * item.qty, 0);
-  const grossProfit = items.reduce(
-    (sum, item) => sum + (item.unit_price - item.unit_cost) * item.qty,
-    0
-  );
+  const due = roundMoney(sale.total_amount - sale.paid_amount);
+  const totalCost = roundMoney(items.reduce((sum, item) => sum + item.unit_cost * item.qty, 0));
+  const grossProfit = roundMoney(sale.total_amount - totalCost);
+  const marginPct =
+    sale.total_amount > 0 ? roundMoney((grossProfit / sale.total_amount) * 100) : 0;
+  const hasDiscount = (sale.discount_amount ?? 0) > 0;
+  const hasServiceCharges = (sale.service_charges ?? 0) > 0;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <FormScreen>
       <View style={localStyles.header}>
         <Text style={localStyles.invoice}>{sale.invoice_no}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
@@ -222,38 +232,42 @@ export default function SaleDetailScreen() {
       <Text style={localStyles.party}>{sale.party_name}</Text>
       <Text style={localStyles.date}>{sale.date}</Text>
 
-      <View style={localStyles.summary}>
-        {(sale.subtotal ?? sale.total_amount) > 0 && (sale.discount_amount ?? 0) > 0 ? (
-          <>
-            <Text style={styles.value}>Subtotal: {formatCurrency(sale.subtotal ?? sale.total_amount)}</Text>
-            <Text style={styles.value}>Discount: {formatCurrency(sale.discount_amount ?? 0)}</Text>
-          </>
-        ) : null}
-        <Text style={styles.value}>Total: {formatCurrency(sale.total_amount)}</Text>
-        <Text style={styles.value}>Paid: {formatCurrency(sale.paid_amount)}</Text>
-        <Text style={[styles.value, due > 0 && localStyles.due]}>
-          Due: {formatCurrency(due)}
+      {hasDiscount || hasServiceCharges ? (
+        <Text style={localStyles.discountNote}>
+          Subtotal {formatCurrency(sale.subtotal)}
+          {hasDiscount ? ` · Discount ${formatCurrency(sale.discount_amount)}` : ''}
+          {hasServiceCharges ? ` · Service ${formatCurrency(sale.service_charges)}` : ''}
         </Text>
-        <Text style={localStyles.cost}>Cost: {formatCurrency(totalCost)}</Text>
-        <Text style={localStyles.profit}>Profit: {formatCurrency(grossProfit)}</Text>
+      ) : null}
+
+      <View style={localStyles.kpiRow}>
+        <StatCard label="Total" value={sale.total_amount} color={colors.primary} />
+        <StatCard
+          label="Due"
+          value={due}
+          color={due > 0 ? colors.danger : colors.success}
+          subtitle={`Paid ${formatCurrency(sale.paid_amount)}`}
+        />
+        <StatCard
+          label="Profit"
+          value={grossProfit}
+          color={grossProfit >= 0 ? colors.success : colors.danger}
+          subtitle={`${marginPct}% margin · Cost ${formatCurrency(totalCost)}`}
+        />
       </View>
 
       <SectionHeader title="Items" />
-      {items.map((item) => {
-        const itemProfit = (item.unit_price - item.unit_cost) * item.qty;
-        return (
-          <View key={item.id} style={localStyles.itemRow}>
-            <View>
-              <Text style={localStyles.itemName}>{item.product_name}</Text>
-              <Text style={localStyles.itemMeta}>
-                {item.qty} × {formatCurrency(item.unit_price)} · Cost {formatCurrency(item.unit_cost)}
-              </Text>
-              <Text style={localStyles.itemProfit}>Profit: {formatCurrency(itemProfit)}</Text>
-            </View>
-            <Text style={localStyles.itemTotal}>{formatCurrency(item.total)}</Text>
+      {items.map((item) => (
+        <View key={item.id} style={localStyles.itemRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={localStyles.itemName}>{item.product_name}</Text>
+            <Text style={localStyles.itemMeta}>
+              {item.qty} × {formatCurrency(item.unit_price)}
+            </Text>
           </View>
-        );
-      })}
+          <Text style={localStyles.itemTotal}>{formatCurrency(item.total)}</Text>
+        </View>
+      ))}
 
       <SectionHeader title="Payments" />
       {payments.length === 0 ? (
@@ -284,7 +298,7 @@ export default function SaleDetailScreen() {
             placeholder="Amount"
           />
           <TouchableOpacity
-            onPress={() => setPayAmount(due.toFixed(2))}
+            onPress={() => setPayAmount(formatAmountInput(due))}
             style={{ marginBottom: spacing.sm }}
           >
             <Text style={styles.link}>Fill remaining ({formatCurrency(due)})</Text>
@@ -300,7 +314,9 @@ export default function SaleDetailScreen() {
         </>
       ) : null}
 
-      <PrimaryButton title="Delete Sale" onPress={handleDelete} variant="danger" />
-    </ScrollView>
+      <View style={{ marginTop: spacing.lg }}>
+        <PrimaryButton title="Delete Sale" onPress={handleDelete} variant="danger" />
+      </View>
+    </FormScreen>
   );
 }

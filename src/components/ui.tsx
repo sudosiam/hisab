@@ -6,8 +6,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   ViewStyle,
-  TextStyle,
+  TextInputProps,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -121,7 +124,17 @@ export function PrimaryButton({
         ? styles.secondary
         : styles.primary;
   const textStyle =
-    variant === 'secondary' ? styles.secondaryText : styles.primaryText;
+    variant === 'danger'
+      ? styles.dangerText
+      : variant === 'secondary'
+        ? styles.secondaryText
+        : styles.primaryText;
+  const spinnerColor =
+    variant === 'secondary'
+      ? colors.primary
+      : variant === 'danger'
+        ? colors.danger
+        : colors.onPrimary;
 
   return (
     <TouchableOpacity
@@ -131,7 +144,7 @@ export function PrimaryButton({
       activeOpacity={0.8}
     >
       {loading ? (
-        <ActivityIndicator color={variant === 'secondary' ? colors.primary : colors.onPrimary} />
+        <ActivityIndicator color={spinnerColor} />
       ) : (
         <Text style={textStyle}>{title}</Text>
       )}
@@ -174,26 +187,17 @@ function createButtonStyles(colors: ThemeColors, isDark: boolean) {
     disabled: { opacity: 0.5 },
     primaryText: { color: colors.onPrimary, fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
     secondaryText: { color: colors.primary, fontSize: 15, fontWeight: '600' },
+    dangerText: { color: colors.danger, fontSize: 15, fontWeight: '700' },
   });
 }
 
-interface InputProps {
+interface InputProps extends Omit<TextInputProps, 'style'> {
   label: string;
   value: string;
   onChangeText: (v: string) => void;
-  placeholder?: string;
-  keyboardType?: 'default' | 'decimal-pad' | 'numeric';
-  multiline?: boolean;
 }
 
-export function FormInput({
-  label,
-  value,
-  onChangeText,
-  placeholder,
-  keyboardType = 'default',
-  multiline,
-}: InputProps) {
+export function FormInput({ label, value, onChangeText, multiline, ...rest }: InputProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createInputStyles(colors), [colors]);
 
@@ -204,11 +208,87 @@ export function FormInput({
         style={[styles.input, multiline && styles.multiline]}
         value={value}
         onChangeText={onChangeText}
-        placeholder={placeholder}
-        keyboardType={keyboardType}
         multiline={multiline}
         placeholderTextColor={colors.textMuted}
+        accessibilityLabel={rest.accessibilityLabel ?? label}
+        {...rest}
       />
+    </View>
+  );
+}
+
+/**
+ * Keyboard-aware wrapper for form screens: KeyboardAvoidingView + ScrollView
+ * with taps kept alive so buttons work while the keyboard is open.
+ */
+export function FormScreen({
+  children,
+  contentStyle,
+}: {
+  children: React.ReactNode;
+  contentStyle?: ViewStyle;
+}) {
+  const styles = useScreenStyles();
+  return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
+    >
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[styles.content, contentStyle]}
+        keyboardShouldPersistTaps="handled"
+      >
+        {children}
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+/** Full-screen error state with a retry action, for failed screen loads. */
+export function ErrorState({
+  message,
+  onRetry,
+}: {
+  message?: string;
+  onRetry?: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useScreenStyles();
+  return (
+    <View style={styles.center}>
+      <Ionicons name="cloud-offline-outline" size={40} color={colors.textMuted} />
+      <Text
+        style={{
+          color: colors.textSecondary,
+          fontSize: 15,
+          textAlign: 'center',
+          marginTop: spacing.md,
+          marginBottom: spacing.md,
+          paddingHorizontal: spacing.xl,
+          lineHeight: 22,
+        }}
+      >
+        {message || 'Something went wrong while loading this screen.'}
+      </Text>
+      {onRetry ? (
+        <TouchableOpacity
+          onPress={onRetry}
+          activeOpacity={0.8}
+          accessibilityLabel="Retry"
+          style={{
+            paddingHorizontal: spacing.lg,
+            paddingVertical: 10,
+            borderRadius: radius.md,
+            backgroundColor: colors.primary,
+          }}
+        >
+          <Text style={{ color: colors.onPrimary, fontWeight: '700', fontSize: 14 }}>
+            Try Again
+          </Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -533,11 +613,12 @@ export function DashboardShortcuts() {
             style={styles.item}
             onPress={() => router.navigate(item.route as never)}
             activeOpacity={0.75}
+            accessibilityLabel={item.label}
           >
             <View style={styles.iconWrap}>
-              <Ionicons name={item.icon} size={20} color={colors.primary} />
+              <Ionicons name={item.icon} size={22} color={colors.primary} />
             </View>
-            <Text style={styles.label} numberOfLines={1}>
+            <Text style={styles.itemLabel} numberOfLines={1}>
               {item.label}
             </Text>
           </TouchableOpacity>
@@ -548,8 +629,6 @@ export function DashboardShortcuts() {
 }
 
 function createShortcutStyles(colors: ThemeColors, isDark: boolean) {
-  const surface = cardSurface(colors, isDark);
-
   return StyleSheet.create({
     heading: {
       ...typography.section,
@@ -565,25 +644,21 @@ function createShortcutStyles(colors: ThemeColors, isDark: boolean) {
     item: {
       flex: 1,
       alignItems: 'center',
-      ...surface,
-      paddingVertical: spacing.md,
-      paddingHorizontal: spacing.xs,
+      justifyContent: 'center',
     },
     iconWrap: {
-      width: 44,
-      height: 44,
+      width: 46,
+      height: 46,
       borderRadius: radius.md,
       backgroundColor: colors.navActive,
       alignItems: 'center',
       justifyContent: 'center',
-      marginBottom: spacing.sm,
     },
-    label: {
+    itemLabel: {
+      marginTop: 6,
       fontSize: 11,
-      fontWeight: '700',
-      color: colors.text,
-      textAlign: 'center',
-      letterSpacing: 0.1,
+      fontWeight: '600',
+      color: colors.textSecondary,
     },
   });
 }

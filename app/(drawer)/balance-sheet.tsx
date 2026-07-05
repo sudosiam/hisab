@@ -5,11 +5,12 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
+  RefreshControl,
   ViewStyle,
   TextStyle,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { SectionHeader, useScreenStyles } from '../../src/components/ui';
+import { ErrorState, SectionHeader, useScreenStyles } from '../../src/components/ui';
 import { getBalanceSheet } from '../../src/services/banking';
 import { formatCurrency } from '../../src/utils/format';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -22,6 +23,8 @@ export default function BalanceSheetScreen() {
   const { colors, isDark } = useTheme();
   const [data, setData] = useState<BalanceSheet | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const localStyles = useMemo(
     () =>
@@ -51,18 +54,27 @@ export default function BalanceSheetScreen() {
         rowValue: { fontSize: 14, color: colors.text, fontWeight: '500' },
         bold: { fontWeight: '700' },
         highlight: { color: colors.primary, fontSize: 17, fontWeight: '700' },
-        hint: { fontSize: 13, color: colors.textSecondary, marginTop: spacing.sm },
       }),
     [colors, isDark]
   );
 
   const load = useCallback(async () => {
     setLoading(true);
-    setData(await getBalanceSheet());
-    setLoading(false);
+    try {
+      setData(await getBalanceSheet());
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load balance sheet');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  if (error && !data) {
+    return <ErrorState message={error} onRetry={load} />;
+  }
 
   if (loading || !data) {
     return (
@@ -81,9 +93,23 @@ export default function BalanceSheetScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true);
+            load().finally(() => setRefreshing(false));
+          }}
+          colors={[colors.primary]}
+          tintColor={colors.primary}
+        />
+      }
+    >
       <View style={localStyles.hero}>
-        <Text style={localStyles.heroLabel}>Owner's Equity</Text>
+        <Text style={localStyles.heroLabel}>Owner&apos;s Equity</Text>
         <Text style={localStyles.heroValue}>{formatCurrency(data.equity)}</Text>
         <Text style={{ color: colors.textSecondary, marginTop: spacing.sm, fontSize: 13 }}>
           Assets {formatCurrency(data.assets.total)} − Liabilities {formatCurrency(data.liabilities.total)}
@@ -96,7 +122,6 @@ export default function BalanceSheetScreen() {
         <Row localStyles={rowStyles} label="Accounts Receivable" value={data.assets.receivables} />
         <Row localStyles={rowStyles} label="Inventory" value={data.assets.inventory} />
         <Row localStyles={rowStyles} label="Fixed Assets" value={data.assets.fixedAssets} />
-        <Text style={localStyles.hint}>Manage fixed asset details in Others (sidebar)</Text>
         <View style={localStyles.sectionTotal}>
           <Row localStyles={rowStyles} label="Total Assets" value={data.assets.total} bold />
         </View>

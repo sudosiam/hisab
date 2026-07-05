@@ -1,13 +1,49 @@
-import { getDatabase, getPaymentStatus, recordTransaction } from '../db/database';
-import { getMonthRange } from '../utils/date';
-import { triggerAutoBackup } from './backup';
+import {
+  getDatabase,
+  getPaymentStatus,
+  recordTransaction,
+  updateAccountBalance,
+} from '../db/database';
+import { todayISO } from '../utils/date';
+import { resolvePeriodRange } from '../utils/period';
+import { addMonths, addWeeks, addYears, format, parse } from 'date-fns';
+import { addMoney, roundMoney, subMoney } from '../utils/money';
 import { getPurchaseById } from './purchases';
 import { getSaleById } from './sales';
 import type { Account, BalanceSheet, Expense, FixedAsset, Transaction } from '../types';
 
+const ACTIVE_ACCOUNT_SQL = 'COALESCE(is_excluded, 0) = 0';
+
+/** Validate and normalize a user-entered money amount. */
+function assertPositiveAmount(amount: number): number {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Enter an amount greater than zero');
+  }
+  return roundMoney(amount);
+}
+
 export async function getAccounts(): Promise<Account[]> {
   const db = await getDatabase();
   return db.getAllAsync<Account>('SELECT * FROM accounts ORDER BY name ASC');
+}
+
+/** Accounts available for payments, expenses, transfers, and totals. */
+export async function getSelectableAccounts(): Promise<Account[]> {
+  const db = await getDatabase();
+  return db.getAllAsync<Account>(
+    `SELECT * FROM accounts WHERE ${ACTIVE_ACCOUNT_SQL} ORDER BY name ASC`
+  );
+}
+
+/** Selectable accounts plus one existing account (for edit screens). */
+export async function getAccountsForPicker(includeAccountId?: number): Promise<Account[]> {
+  const accounts = await getSelectableAccounts();
+  if (!includeAccountId || accounts.some((a) => a.id === includeAccountId)) {
+    return accounts;
+  }
+  const extra = await getAccountById(includeAccountId);
+  if (!extra) return accounts;
+  return [...accounts, extra].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function getAccountById(id: number): Promise<Account | null> {
@@ -21,27 +57,132 @@ export async function createAccount(params: {
   opening_balance?: number;
 }): Promise<number> {
   const db = await getDatabase();
-  const opening = params.opening_balance ?? 0;
+  const opening = roundMoney(params.opening_balance ?? 0);
 
-  const result = await db.runAsync(
-    `INSERT INTO accounts (name, type, opening_balance, current_balance) VALUES (?, ?, ?, ?)`,
-    [params.name, params.type, opening, 0]
-  );
+  let accountId = 0;
 
-  const accountId = result.lastInsertRowId;
+  await db.withTransactionAsync(async () => {
+    const result = await db.runAsync(
+      `INSERT INTO accounts (name, type, opening_balance, current_balance, is_excluded) VALUES (?, ?, ?, ?, 0)`,
+      [params.name, params.type, opening, 0]
+    );
 
-  if (opening !== 0) {
-    await recordTransaction(db, {
-      account_id: accountId,
-      type: 'opening',
-      amount: opening,
-      description: `Opening balance - ${params.name}`,
-      date: new Date().toISOString().slice(0, 10),
-    });
-  }
+    accountId = result.lastInsertRowId;
 
-  await triggerAutoBackup();
+    if (opening !== 0) {
+      await recordTransaction(db, {
+        account_id: accountId,
+        type: 'opening',
+        amount: opening,
+        description: `Opening balance - ${params.name}`,
+        date: todayISO(),
+      });
+    }
+  });
+
   return accountId;
+}
+
+/**
+ * Change an account's opening balance by rewriting its 'opening' ledger row
+ * and shifting the current balance by the difference, atomically.
+ */
+export async function updateOpeningBalance(accountId: number, newOpening: number): Promise<void> {
+  if (!Number.isFinite(newOpening)) {
+    throw new Error('Enter a valid opening balance');
+  }
+  const account = await getAccountById(accountId);
+  if (!account) throw new Error('Account not found');
+
+  const opening = roundMoney(newOpening);
+  const db = await getDatabase();
+
+  await db.withTransactionAsync(async () => {
+    const tx = await db.getFirstAsync<Transaction>(
+      `SELECT * FROM transactions WHERE account_id = ? AND type = 'opening' LIMIT 1`,
+      [accountId]
+    );
+    const oldAmount = roundMoney(tx?.amount ?? 0);
+    const delta = subMoney(opening, oldAmount);
+
+    if (tx) {
+      if (opening === 0) {
+        await db.runAsync('DELETE FROM transactions WHERE id = ?', [tx.id]);
+      } else {
+        await db.runAsync('UPDATE transactions SET amount = ? WHERE id = ?', [opening, tx.id]);
+      }
+    } else if (opening !== 0) {
+      await db.runAsync(
+        `INSERT INTO transactions (account_id, type, amount, description, date) VALUES (?, 'opening', ?, ?, ?)`,
+        [accountId, opening, `Opening balance - ${account.name}`, todayISO()]
+      );
+    }
+
+    await db.runAsync(
+      'UPDATE accounts SET opening_balance = ?, current_balance = ROUND(current_balance + ?, 2) WHERE id = ?',
+      [opening, delta, accountId]
+    );
+  });
+}
+
+export async function updateAccount(
+  id: number,
+  params: {
+    name: string;
+    type: 'cash' | 'bank';
+    is_excluded?: boolean;
+  }
+): Promise<void> {
+  const trimmed = params.name.trim();
+  if (!trimmed) throw new Error('Account name is required');
+
+  const existing = await getAccountById(id);
+  if (!existing) throw new Error('Account not found');
+
+  const db = await getDatabase();
+  await db.runAsync(
+    `UPDATE accounts SET name = ?, type = ?, is_excluded = ? WHERE id = ?`,
+    [trimmed, params.type, params.is_excluded ? 1 : 0, id]
+  );
+}
+
+export async function deleteAccount(id: number): Promise<void> {
+  const account = await getAccountById(id);
+  if (!account) throw new Error('Account not found');
+
+  const db = await getDatabase();
+
+  const tx = await db.getFirstAsync<{ id: number }>(
+    'SELECT id FROM transactions WHERE account_id = ? LIMIT 1',
+    [id]
+  );
+  if (tx) throw new Error('Cannot delete: account has transaction history');
+
+  const expense = await db.getFirstAsync<{ id: number }>(
+    'SELECT id FROM expenses WHERE account_id = ? LIMIT 1',
+    [id]
+  );
+  if (expense) throw new Error('Cannot delete: account is used in expenses');
+
+  const income = await db.getFirstAsync<{ id: number }>(
+    'SELECT id FROM other_income WHERE account_id = ? LIMIT 1',
+    [id]
+  );
+  if (income) throw new Error('Cannot delete: account is used in other income');
+
+  const salePay = await db.getFirstAsync<{ id: number }>(
+    'SELECT id FROM sale_payments WHERE account_id = ? LIMIT 1',
+    [id]
+  );
+  if (salePay) throw new Error('Cannot delete: account is used in sale payments');
+
+  const purchasePay = await db.getFirstAsync<{ id: number }>(
+    'SELECT id FROM purchase_payments WHERE account_id = ? LIMIT 1',
+    [id]
+  );
+  if (purchasePay) throw new Error('Cannot delete: account is used in purchase payments');
+
+  await db.runAsync('DELETE FROM accounts WHERE id = ?', [id]);
 }
 
 export async function getTransactions(accountId?: number): Promise<Transaction[]> {
@@ -65,7 +206,7 @@ export async function getTransactions(accountId?: number): Promise<Transaction[]
 export async function getTotalBalance(): Promise<number> {
   const db = await getDatabase();
   const row = await db.getFirstAsync<{ total: number }>(
-    'SELECT COALESCE(SUM(current_balance), 0) as total FROM accounts'
+    `SELECT COALESCE(SUM(current_balance), 0) as total FROM accounts WHERE ${ACTIVE_ACCOUNT_SQL}`
   );
   return row?.total ?? 0;
 }
@@ -82,6 +223,7 @@ export async function createExpense(params: {
   if (!params.account_id) {
     throw new Error('Please select a valid bank/cash account');
   }
+  const amount = assertPositiveAmount(params.amount);
 
   const db = await getDatabase();
 
@@ -92,7 +234,7 @@ export async function createExpense(params: {
       [
         params.category,
         params.description,
-        params.amount,
+        amount,
         params.account_id,
         params.date,
         params.is_recurring ? 1 : 0,
@@ -103,7 +245,7 @@ export async function createExpense(params: {
     await recordTransaction(db, {
       account_id: params.account_id,
       type: 'expense',
-      amount: -params.amount,
+      amount: -amount,
       reference_type: 'expense',
       reference_id: expenseId,
       description: `${params.category}: ${params.description}`,
@@ -111,14 +253,13 @@ export async function createExpense(params: {
     });
   });
 
-  await triggerAutoBackup();
   return expenseId;
 }
 
-export async function getExpenses(monthKey?: string): Promise<Expense[]> {
+export async function getExpenses(periodKey?: string): Promise<Expense[]> {
   const db = await getDatabase();
-  if (monthKey) {
-    const { start, end } = getMonthRange(monthKey);
+  if (periodKey) {
+    const { start, end } = await resolvePeriodRange(periodKey);
     return db.getAllAsync<Expense>(
       `SELECT e.*, a.name as account_name FROM expenses e
        JOIN accounts a ON a.id = e.account_id
@@ -159,6 +300,7 @@ export async function updateExpense(
   if (!params.account_id) {
     throw new Error('Please select a valid bank/cash account');
   }
+  const amount = assertPositiveAmount(params.amount);
 
   const db = await getDatabase();
   const existing = await getExpenseById(id);
@@ -170,10 +312,7 @@ export async function updateExpense(
       [id]
     );
     if (tx) {
-      await db.runAsync('UPDATE accounts SET current_balance = current_balance - ? WHERE id = ?', [
-        tx.amount,
-        tx.account_id,
-      ]);
+      await updateAccountBalance(db, tx.account_id, -tx.amount);
       await db.runAsync('DELETE FROM transactions WHERE id = ?', [tx.id]);
     }
 
@@ -182,7 +321,7 @@ export async function updateExpense(
       [
         params.category,
         params.description,
-        params.amount,
+        amount,
         params.account_id,
         params.date,
         params.is_recurring ? 1 : 0,
@@ -194,7 +333,7 @@ export async function updateExpense(
     await recordTransaction(db, {
       account_id: params.account_id,
       type: 'expense',
-      amount: -params.amount,
+      amount: -amount,
       reference_type: 'expense',
       reference_id: id,
       description: `${params.category}: ${params.description}`,
@@ -202,7 +341,6 @@ export async function updateExpense(
     });
   });
 
-  await triggerAutoBackup();
 }
 
 export async function deleteExpense(id: number): Promise<void> {
@@ -214,23 +352,19 @@ export async function deleteExpense(id: number): Promise<void> {
 
   await db.withTransactionAsync(async () => {
     if (tx) {
-      await db.runAsync('UPDATE accounts SET current_balance = current_balance - ? WHERE id = ?', [
-        tx.amount,
-        tx.account_id,
-      ]);
+      await updateAccountBalance(db, tx.account_id, -tx.amount);
       await db.runAsync('DELETE FROM transactions WHERE id = ?', [tx.id]);
     }
     await db.runAsync('DELETE FROM expenses WHERE id = ?', [id]);
   });
 
-  await triggerAutoBackup();
 }
 
 export async function getBalanceSheet(): Promise<BalanceSheet> {
   const db = await getDatabase();
 
   const cashBank = await db.getFirstAsync<{ total: number }>(
-    'SELECT COALESCE(SUM(current_balance), 0) as total FROM accounts'
+    `SELECT COALESCE(SUM(current_balance), 0) as total FROM accounts WHERE ${ACTIVE_ACCOUNT_SQL}`
   );
 
   const inventory = await db.getFirstAsync<{ total: number }>(
@@ -249,12 +383,13 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
     'SELECT COALESCE(SUM(value), 0) as total FROM fixed_assets'
   );
 
-  const cash = cashBank?.total ?? 0;
-  const inv = inventory?.total ?? 0;
-  const recv = receivables?.total ?? 0;
-  const fixed = fixedAssets?.total ?? 0;
-  const pay = payables?.total ?? 0;
-  const totalAssets = cash + inv + recv + fixed;
+  const cash = roundMoney(cashBank?.total ?? 0);
+  const inv = roundMoney(inventory?.total ?? 0);
+  const recv = roundMoney(receivables?.total ?? 0);
+  const fixed = roundMoney(fixedAssets?.total ?? 0);
+  const pay = roundMoney(payables?.total ?? 0);
+  const totalAssets = addMoney(cash, inv, recv, fixed);
+  const equity = subMoney(totalAssets, pay);
 
   return {
     assets: {
@@ -268,7 +403,7 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
       payables: pay,
       total: pay,
     },
-    equity: totalAssets - pay,
+    equity,
   };
 }
 
@@ -287,7 +422,6 @@ export async function addFixedAsset(params: {
     `INSERT INTO fixed_assets (name, value, notes) VALUES (?, ?, ?)`,
     [params.name, params.value, params.notes ?? null]
   );
-  await triggerAutoBackup();
   return result.lastInsertRowId;
 }
 
@@ -302,13 +436,11 @@ export async function updateFixedAsset(
     params.notes ?? null,
     id,
   ]);
-  await triggerAutoBackup();
 }
 
 export async function deleteFixedAsset(id: number): Promise<void> {
   const db = await getDatabase();
   await db.runAsync('DELETE FROM fixed_assets WHERE id = ?', [id]);
-  await triggerAutoBackup();
 }
 
 export async function deleteTransaction(id: number): Promise<void> {
@@ -316,23 +448,31 @@ export async function deleteTransaction(id: number): Promise<void> {
   const tx = await db.getFirstAsync<Transaction>('SELECT * FROM transactions WHERE id = ?', [id]);
   if (!tx) throw new Error('Transaction not found');
 
+  if (tx.type === 'opening') {
+    throw new Error('Opening balances cannot be deleted. Edit the account instead.');
+  }
+
   await db.withTransactionAsync(async () => {
-    await db.runAsync('UPDATE accounts SET current_balance = current_balance - ? WHERE id = ?', [
-      tx.amount,
-      tx.account_id,
-    ]);
+    await updateAccountBalance(db, tx.account_id, -tx.amount);
 
     if (tx.reference_type === 'sale' && tx.reference_id) {
-      const payment = await db.getFirstAsync<{ id: number }>(
-        `SELECT id FROM sale_payments WHERE sale_id = ? AND account_id = ? AND amount = ? AND date = ? LIMIT 1`,
-        [tx.reference_id, tx.account_id, tx.amount, tx.date]
-      );
+      // Prefer the exact linked payment; fall back to matching for rows
+      // created before payment_id existed.
+      const payment = tx.payment_id
+        ? await db.getFirstAsync<{ id: number }>(
+            'SELECT id FROM sale_payments WHERE id = ?',
+            [tx.payment_id]
+          )
+        : await db.getFirstAsync<{ id: number }>(
+            `SELECT id FROM sale_payments WHERE sale_id = ? AND account_id = ? AND amount = ? AND date = ? ORDER BY id DESC LIMIT 1`,
+            [tx.reference_id, tx.account_id, tx.amount, tx.date]
+          );
       if (payment) {
         await db.runAsync('DELETE FROM sale_payments WHERE id = ?', [payment.id]);
       }
       const sale = await getSaleById(tx.reference_id);
       if (sale) {
-        const newPaid = Math.max(0, sale.paid_amount - tx.amount);
+        const newPaid = Math.max(0, subMoney(sale.paid_amount, tx.amount));
         const status = getPaymentStatus(sale.total_amount, newPaid);
         await db.runAsync('UPDATE sales SET paid_amount = ?, status = ? WHERE id = ?', [
           newPaid,
@@ -340,20 +480,23 @@ export async function deleteTransaction(id: number): Promise<void> {
           tx.reference_id,
         ]);
       }
-    }
-
-    if (tx.reference_type === 'purchase' && tx.reference_id) {
+    } else if (tx.reference_type === 'purchase' && tx.reference_id) {
       const paidAmount = Math.abs(tx.amount);
-      const payment = await db.getFirstAsync<{ id: number }>(
-        `SELECT id FROM purchase_payments WHERE purchase_id = ? AND account_id = ? AND amount = ? AND date = ? LIMIT 1`,
-        [tx.reference_id, tx.account_id, paidAmount, tx.date]
-      );
+      const payment = tx.payment_id
+        ? await db.getFirstAsync<{ id: number }>(
+            'SELECT id FROM purchase_payments WHERE id = ?',
+            [tx.payment_id]
+          )
+        : await db.getFirstAsync<{ id: number }>(
+            `SELECT id FROM purchase_payments WHERE purchase_id = ? AND account_id = ? AND amount = ? AND date = ? ORDER BY id DESC LIMIT 1`,
+            [tx.reference_id, tx.account_id, paidAmount, tx.date]
+          );
       if (payment) {
         await db.runAsync('DELETE FROM purchase_payments WHERE id = ?', [payment.id]);
       }
       const purchase = await getPurchaseById(tx.reference_id);
       if (purchase) {
-        const newPaid = Math.max(0, purchase.paid_amount - paidAmount);
+        const newPaid = Math.max(0, subMoney(purchase.paid_amount, paidAmount));
         const status = getPaymentStatus(purchase.total_amount, newPaid);
         await db.runAsync('UPDATE purchases SET paid_amount = ?, status = ? WHERE id = ?', [
           newPaid,
@@ -361,16 +504,33 @@ export async function deleteTransaction(id: number): Promise<void> {
           tx.reference_id,
         ]);
       }
-    }
-
-    if (tx.reference_type === 'expense' && tx.reference_id) {
+    } else if (tx.reference_type === 'expense' && tx.reference_id) {
+      // Remove the source expense too, or it would linger unaccounted.
       await db.runAsync('DELETE FROM expenses WHERE id = ?', [tx.reference_id]);
+    } else if (tx.reference_type === 'other_income' && tx.reference_id) {
+      await db.runAsync('DELETE FROM other_income WHERE id = ?', [tx.reference_id]);
+    } else if (tx.type === 'transfer') {
+      // A transfer has two legs; deleting one must delete its pair or the two
+      // accounts fall out of sync.
+      const pair =
+        tx.reference_type === 'transfer' && tx.reference_id
+          ? await db.getFirstAsync<Transaction>(
+              `SELECT * FROM transactions WHERE reference_type = 'transfer' AND reference_id = ? AND id != ?`,
+              [tx.reference_id, id]
+            )
+          : await db.getFirstAsync<Transaction>(
+              `SELECT * FROM transactions WHERE type = 'transfer' AND date = ? AND amount = ? AND id != ? ORDER BY ABS(id - ?) ASC LIMIT 1`,
+              [tx.date, -tx.amount, id, id]
+            );
+      if (pair) {
+        await updateAccountBalance(db, pair.account_id, -pair.amount);
+        await db.runAsync('DELETE FROM transactions WHERE id = ?', [pair.id]);
+      }
     }
 
     await db.runAsync('DELETE FROM transactions WHERE id = ?', [id]);
   });
 
-  await triggerAutoBackup();
 }
 
 export async function transferBetweenAccounts(params: {
@@ -386,31 +546,45 @@ export async function transferBetweenAccounts(params: {
   if (params.from_account_id === params.to_account_id) {
     throw new Error('Choose two different accounts');
   }
-  if (params.amount <= 0) {
-    throw new Error('Enter a valid amount');
-  }
+  const amount = assertPositiveAmount(params.amount);
 
   const db = await getDatabase();
   const desc = params.description ?? 'Account transfer';
 
+  const fromAccount = await getAccountById(params.from_account_id);
+  const toAccount = await getAccountById(params.to_account_id);
+  if (!fromAccount || !toAccount) throw new Error('Account not found');
+  if (fromAccount.is_excluded || toAccount.is_excluded) {
+    throw new Error('Cannot transfer using an excluded account');
+  }
+  if (fromAccount.current_balance + 0.01 < amount) {
+    throw new Error('Insufficient balance in the source account');
+  }
+
   await db.withTransactionAsync(async () => {
-    await recordTransaction(db, {
+    const outId = await recordTransaction(db, {
       account_id: params.from_account_id,
       type: 'transfer',
-      amount: -params.amount,
+      amount: -amount,
       description: `${desc} (out)`,
       date: params.date,
     });
+    // Link both legs by the out-leg id so deleting either removes the pair.
+    await db.runAsync(
+      `UPDATE transactions SET reference_type = 'transfer', reference_id = ? WHERE id = ?`,
+      [outId, outId]
+    );
     await recordTransaction(db, {
       account_id: params.to_account_id,
       type: 'transfer',
-      amount: params.amount,
+      amount,
+      reference_type: 'transfer',
+      reference_id: outId,
       description: `${desc} (in)`,
       date: params.date,
     });
   });
 
-  await triggerAutoBackup();
 }
 
 export async function recordDeposit(params: {
@@ -422,25 +596,23 @@ export async function recordDeposit(params: {
   if (!params.account_id) {
     throw new Error('Select an account');
   }
-  if (params.amount <= 0) {
-    throw new Error('Enter a valid amount');
-  }
+  const amount = assertPositiveAmount(params.amount);
 
   const db = await getDatabase();
   const account = await getAccountById(params.account_id);
   if (!account) throw new Error('Account not found');
+  if (account.is_excluded) throw new Error('Cannot use an excluded account');
 
   await db.withTransactionAsync(async () => {
     await recordTransaction(db, {
       account_id: params.account_id,
       type: 'deposit',
-      amount: params.amount,
+      amount,
       description: params.description?.trim() || `Deposit — ${account.name}`,
       date: params.date,
     });
   });
 
-  await triggerAutoBackup();
 }
 
 export async function recordWithdrawal(params: {
@@ -452,14 +624,13 @@ export async function recordWithdrawal(params: {
   if (!params.account_id) {
     throw new Error('Select an account');
   }
-  if (params.amount <= 0) {
-    throw new Error('Enter a valid amount');
-  }
+  const amount = assertPositiveAmount(params.amount);
 
   const db = await getDatabase();
   const account = await getAccountById(params.account_id);
   if (!account) throw new Error('Account not found');
-  if (account.current_balance + 0.01 < params.amount) {
+  if (account.is_excluded) throw new Error('Cannot use an excluded account');
+  if (account.current_balance + 0.01 < amount) {
     throw new Error('Insufficient balance in this account');
   }
 
@@ -467,11 +638,84 @@ export async function recordWithdrawal(params: {
     await recordTransaction(db, {
       account_id: params.account_id,
       type: 'withdrawal',
-      amount: -params.amount,
+      amount: -amount,
       description: params.description?.trim() || `Withdrawal — ${account.name}`,
       date: params.date,
     });
   });
 
-  await triggerAutoBackup();
+}
+
+function advanceByRecurrence(dateStr: string, recurrence: string): string {
+  const date = parse(dateStr, 'yyyy-MM-dd', new Date());
+  switch (recurrence) {
+    case 'Weekly':
+      return format(addWeeks(date, 1), 'yyyy-MM-dd');
+    case 'Yearly':
+      return format(addYears(date, 1), 'yyyy-MM-dd');
+    case 'Monthly':
+    default:
+      return format(addMonths(date, 1), 'yyyy-MM-dd');
+  }
+}
+
+/** Generate due recurring expense entries that have not yet been created. */
+export async function processRecurringExpenses(): Promise<number> {
+  const db = await getDatabase();
+  const today = todayISO();
+  let created = 0;
+
+  const templates = await db.getAllAsync<Expense>(
+    'SELECT * FROM expenses WHERE is_recurring = 1'
+  );
+
+  for (const template of templates) {
+    let nextDate = advanceByRecurrence(template.date, template.recurrence ?? 'Monthly');
+    const recurrence = template.recurrence ?? 'Monthly';
+
+    while (nextDate <= today) {
+      const existing = await db.getFirstAsync<{ id: number }>(
+        `SELECT id FROM expenses
+         WHERE category = ? AND description = ? AND amount = ? AND account_id = ?
+         AND date = ? AND is_recurring = 0`,
+        [
+          template.category,
+          template.description,
+          template.amount,
+          template.account_id,
+          nextDate,
+        ]
+      );
+
+      if (!existing) {
+        await db.withTransactionAsync(async () => {
+          const result = await db.runAsync(
+            `INSERT INTO expenses (category, description, amount, account_id, date, is_recurring, recurrence)
+             VALUES (?, ?, ?, ?, ?, 0, NULL)`,
+            [
+              template.category,
+              template.description,
+              template.amount,
+              template.account_id,
+              nextDate,
+            ]
+          );
+          await recordTransaction(db, {
+            account_id: template.account_id,
+            type: 'expense',
+            amount: -template.amount,
+            reference_type: 'expense',
+            reference_id: result.lastInsertRowId,
+            description: `${template.category}: ${template.description}`,
+            date: nextDate,
+          });
+        });
+        created += 1;
+      }
+
+      nextDate = advanceByRecurrence(nextDate, recurrence);
+    }
+  }
+
+  return created;
 }

@@ -10,11 +10,18 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
-import { FormInput, PrimaryButton, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import {
+  FormInput,
+  FormScreen,
+  PrimaryButton,
+  SectionHeader,
+  useScreenStyles,
+} from '../../../src/components/ui';
+import { StatCard } from '../../../src/components/StatCard';
 import { AccountPicker } from '../../../src/components/AccountPicker';
 import {
   deleteExpense,
-  getAccounts,
+  getAccountsForPicker,
   getExpenseById,
   updateExpense,
 } from '../../../src/services/banking';
@@ -22,9 +29,9 @@ import { formatSqliteError } from '../../../src/db/database';
 import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
-import { formatCurrency } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
+import { isValidISODate } from '../../../src/utils/date';
 import { spacing, radius } from '../../../src/constants/theme';
-import { cardSurface } from '../../../src/constants/shadows';
 import type { Account, Expense } from '../../../src/types';
 
 const RECURRENCE_OPTIONS = ['Monthly', 'Weekly', 'Yearly'];
@@ -34,19 +41,17 @@ export default function ExpenseDetailScreen() {
   const router = useRouter();
   const { refresh } = useDatabase();
   const styles = useScreenStyles();
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
         header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-        amount: { fontSize: 28, fontWeight: '700', color: colors.primary, marginTop: spacing.sm },
-        summary: {
-          ...cardSurface(colors, isDark),
-          padding: spacing.md,
-          marginVertical: spacing.md,
+        kpiRow: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
           gap: spacing.sm,
+          marginVertical: spacing.md,
         },
-        recurring: { color: colors.primary, fontWeight: '600', fontSize: 13 },
         chipRow: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.sm },
         chip: {
           paddingHorizontal: spacing.md,
@@ -60,7 +65,7 @@ export default function ExpenseDetailScreen() {
         chipText: { fontSize: 12, color: colors.text, fontWeight: '600' },
         chipTextActive: { color: colors.onPrimary },
       }),
-    [colors, isDark]
+    [colors]
   );
 
   const [expense, setExpense] = useState<Expense | null>(null);
@@ -82,7 +87,7 @@ export default function ExpenseDetailScreen() {
   const fillForm = (e: Expense) => {
     setCategory(e.category);
     setDescription(e.description);
-    setAmount(String(e.amount));
+    setAmount(formatAmountInput(e.amount));
     setDate(e.date);
     setAccountId(e.account_id);
     setIsRecurring(!!e.is_recurring);
@@ -96,7 +101,8 @@ export default function ExpenseDetailScreen() {
       return;
     }
     try {
-      const [e, a] = await Promise.all([getExpenseById(expenseId), getAccounts()]);
+      const e = await getExpenseById(expenseId);
+      const a = await getAccountsForPicker(e?.account_id);
       setExpense(e);
       setAccounts(a);
       if (e) fillForm(e);
@@ -109,16 +115,29 @@ export default function ExpenseDetailScreen() {
     }
   }, [expenseId]);
 
+  const editingRef = React.useRef(false);
+  editingRef.current = editing;
+
   useFocusEffect(useCallback(() => {
+    // Don't reload over an open edit form — it would wipe unsaved changes.
+    if (editingRef.current) return;
     setLoading(true);
     load();
   }, [load]));
 
   const handleSave = async () => {
-    if (!expense) return;
-    const amt = parseFloat(amount);
-    if (!category.trim() || !description.trim() || !amt) {
+    if (!expense || saving) return;
+    const amt = parsePositiveAmount(amount);
+    if (!category.trim() || !description.trim()) {
       Alert.alert('Error', 'Fill all fields');
+      return;
+    }
+    if (amt === null) {
+      Alert.alert('Error', 'Enter an amount greater than zero');
+      return;
+    }
+    if (!isValidISODate(date)) {
+      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
       return;
     }
     setSaving(true);
@@ -187,7 +206,7 @@ export default function ExpenseDetailScreen() {
 
   if (editing) {
     return (
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <FormScreen>
         <SectionHeader title="Edit Expense" />
         <FormInput label="Category" value={category} onChangeText={setCategory} />
         <FormInput label="Description" value={description} onChangeText={setDescription} />
@@ -219,7 +238,7 @@ export default function ExpenseDetailScreen() {
 
         <PrimaryButton title="Save Changes" onPress={handleSave} loading={saving} />
         <PrimaryButton title="Cancel" onPress={() => { setEditing(false); fillForm(expense); }} variant="secondary" />
-      </ScrollView>
+      </FormScreen>
     );
   }
 
@@ -228,29 +247,22 @@ export default function ExpenseDetailScreen() {
       <View style={localStyles.header}>
         <View style={{ flex: 1 }}>
           <Text style={styles.cardTitle}>{expense.category}</Text>
-          <Text style={localStyles.amount}>{formatCurrency(expense.amount)}</Text>
+          <Text style={styles.cardSub}>{expense.description}</Text>
         </View>
         <TouchableOpacity onPress={() => setEditing(true)}>
           <Text style={styles.link}>Edit</Text>
         </TouchableOpacity>
       </View>
 
-      <View style={localStyles.summary}>
-        <View style={styles.row}>
-          <Text style={styles.label}>Description</Text>
-          <Text style={styles.value}>{expense.description}</Text>
-        </View>
-        <View style={styles.row}>
-          <Text style={styles.label}>Date</Text>
-          <Text style={styles.value}>{expense.date}</Text>
-        </View>
-        <View style={styles.row}>
-          <Text style={styles.label}>Paid From</Text>
-          <Text style={styles.value}>{expense.account_name}</Text>
-        </View>
-        {expense.is_recurring ? (
-          <Text style={localStyles.recurring}>Recurring · {expense.recurrence ?? 'Monthly'}</Text>
-        ) : null}
+      <View style={localStyles.kpiRow}>
+        <StatCard label="Amount" value={expense.amount} color={colors.warning} />
+        <StatCard label="Date" displayValue={expense.date} color={colors.primary} />
+        <StatCard
+          label="Account"
+          displayValue={expense.account_name ?? '—'}
+          color={colors.accent}
+          subtitle={expense.is_recurring ? `Recurring · ${expense.recurrence ?? 'Monthly'}` : 'One-time'}
+        />
       </View>
 
       <PrimaryButton title="Delete Expense" onPress={handleDelete} variant="danger" />

@@ -1,12 +1,19 @@
-import React, { useCallback, useState } from 'react';
-import { ScrollView, Alert, ActivityIndicator, View, Text, TouchableOpacity } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import { Alert, ActivityIndicator, View, Text, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { FormInput, PrimaryButton, useScreenStyles } from '../../../src/components/ui';
+import {
+  FormInput,
+  FormScreen,
+  PrimaryButton,
+  useScreenStyles,
+} from '../../../src/components/ui';
 import { CustomerAutocomplete } from '../../../src/components/CustomerAutocomplete';
 import { getSaleById, updateSale } from '../../../src/services/sales';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
+import { formatAmountInput } from '../../../src/utils/format';
+import { isValidISODate } from '../../../src/utils/date';
 import { spacing } from '../../../src/constants/theme';
 import type { Sale } from '../../../src/types';
 
@@ -20,6 +27,7 @@ export default function EditSaleScreen() {
   const [partyName, setPartyName] = useState('');
   const [date, setDate] = useState('');
   const [discount, setDiscount] = useState('0');
+  const [serviceCharges, setServiceCharges] = useState('');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -37,30 +45,61 @@ export default function EditSaleScreen() {
       setLoading(false);
       return;
     }
-    const s = await getSaleById(saleId);
-    if (s) {
-      setSale(s);
-      setPartyName(s.party_name);
-      setDate(s.date);
-      setDiscount(String(s.discount_amount ?? 0));
-      setNotes(s.notes ?? '');
-      setError(null);
-    } else {
-      setError('Sale not found');
+    try {
+      const s = await getSaleById(saleId);
+      if (s) {
+        setSale(s);
+        setPartyName(s.party_name);
+        setDate(s.date);
+        setDiscount(formatAmountInput(s.discount_amount ?? 0));
+        setServiceCharges(s.service_charges > 0 ? formatAmountInput(s.service_charges) : '');
+        setNotes(s.notes ?? '');
+        setError(null);
+      } else {
+        setError('Sale not found');
+      }
+    } catch (e) {
+      setError(formatSqliteError(e));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [saleId]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // Load once per sale — refocusing must not wipe unsaved edits.
+  const loadedForRef = useRef<number | null>(null);
+  useFocusEffect(useCallback(() => {
+    if (loadedForRef.current === saleId) return;
+    loadedForRef.current = saleId;
+    load();
+  }, [load, saleId]));
 
   const handleSave = async () => {
-    if (!sale) return;
+    if (!sale || saving) return;
+    if (!partyName.trim()) {
+      Alert.alert('Error', 'Customer name is required');
+      return;
+    }
+    if (!isValidISODate(date)) {
+      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
+      return;
+    }
+    const discountValue = discount.trim() ? parseFloat(discount) : 0;
+    const serviceValue = serviceCharges.trim() ? parseFloat(serviceCharges) : 0;
+    if (!Number.isFinite(discountValue) || discountValue < 0) {
+      Alert.alert('Error', 'Enter a valid discount amount');
+      return;
+    }
+    if (!Number.isFinite(serviceValue) || serviceValue < 0) {
+      Alert.alert('Error', 'Enter a valid service charge amount');
+      return;
+    }
     setSaving(true);
     try {
       await updateSale(sale.id, {
         party_name: partyName,
         date,
-        discount_amount: parseFloat(discount) || 0,
+        discount_amount: discountValue,
+        service_charges: serviceValue,
         notes: notes.trim() || undefined,
       });
       refresh();
@@ -92,7 +131,7 @@ export default function EditSaleScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <FormScreen>
       <CustomerAutocomplete value={partyName} onChange={setPartyName} />
       <FormInput label="Date (YYYY-MM-DD)" value={date} onChangeText={setDate} />
       <FormInput
@@ -101,8 +140,15 @@ export default function EditSaleScreen() {
         onChangeText={setDiscount}
         keyboardType="decimal-pad"
       />
+      <FormInput
+        label="Service Charges (₹, optional)"
+        value={serviceCharges}
+        onChangeText={setServiceCharges}
+        keyboardType="decimal-pad"
+        placeholder="0"
+      />
       <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
       <PrimaryButton title="Save Changes" onPress={handleSave} loading={saving} />
-    </ScrollView>
+    </FormScreen>
   );
 }

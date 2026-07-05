@@ -1,5 +1,6 @@
 import { getDatabase } from '../db/database';
-import { getMonthRange } from '../utils/date';
+import { roundMoney } from '../utils/money';
+import { resolvePeriodRange } from '../utils/period';
 
 export interface SalesReportRow {
   invoice_no: string;
@@ -32,13 +33,14 @@ export interface ProfitLossReport {
   revenue: number;
   cogs: number;
   grossProfit: number;
+  otherIncome: number;
   expenses: number;
   netProfit: number;
 }
 
-export async function getSalesReport(monthKey: string): Promise<SalesReportRow[]> {
+export async function getSalesReport(periodKey: string): Promise<SalesReportRow[]> {
   const db = await getDatabase();
-  const { start, end } = getMonthRange(monthKey);
+  const { start, end } = await resolvePeriodRange(periodKey);
   return db.getAllAsync<SalesReportRow>(
     `SELECT invoice_no, party_name, date, total_amount, paid_amount, status
      FROM sales WHERE date >= ? AND date <= ?
@@ -47,9 +49,9 @@ export async function getSalesReport(monthKey: string): Promise<SalesReportRow[]
   );
 }
 
-export async function getPurchaseReport(monthKey: string): Promise<PurchaseReportRow[]> {
+export async function getPurchaseReport(periodKey: string): Promise<PurchaseReportRow[]> {
   const db = await getDatabase();
-  const { start, end } = getMonthRange(monthKey);
+  const { start, end } = await resolvePeriodRange(periodKey);
   return db.getAllAsync<PurchaseReportRow>(
     `SELECT invoice_no, supplier_name, date, total_amount, paid_amount, status
      FROM purchases WHERE date >= ? AND date <= ?
@@ -66,9 +68,9 @@ export async function getInventoryReport(): Promise<InventoryReportRow[]> {
   );
 }
 
-export async function getProfitLossReport(monthKey: string): Promise<ProfitLossReport> {
+export async function getProfitLossReport(periodKey: string): Promise<ProfitLossReport> {
   const db = await getDatabase();
-  const { start, end } = getMonthRange(monthKey);
+  const { start, end } = await resolvePeriodRange(periodKey);
 
   const revenue = await db.getFirstAsync<{ total: number }>(
     `SELECT COALESCE(SUM(total_amount), 0) as total FROM sales WHERE date >= ? AND date <= ?`,
@@ -76,7 +78,10 @@ export async function getProfitLossReport(monthKey: string): Promise<ProfitLossR
   );
 
   const cogs = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(si.unit_cost * si.qty), 0) as total
+    `SELECT COALESCE(SUM(
+       si.unit_cost * si.qty *
+       CASE WHEN s.subtotal > 0 THEN (s.subtotal - s.discount_amount) / s.subtotal ELSE 1 END
+     ), 0) as total
      FROM sale_items si JOIN sales s ON s.id = si.sale_id
      WHERE s.date >= ? AND s.date <= ?`,
     [start, end]
@@ -87,17 +92,26 @@ export async function getProfitLossReport(monthKey: string): Promise<ProfitLossR
     [start, end]
   );
 
-  const rev = revenue?.total ?? 0;
-  const cost = cogs?.total ?? 0;
-  const exp = expenses?.total ?? 0;
-  const gross = rev - cost;
+  const otherIncome = await db.getFirstAsync<{ total: number }>(
+    `SELECT COALESCE(SUM(oi.amount), 0) as total FROM other_income oi
+     JOIN accounts a ON a.id = oi.account_id
+     WHERE oi.date >= ? AND oi.date <= ? AND COALESCE(a.is_excluded, 0) = 0`,
+    [start, end]
+  );
+
+  const rev = roundMoney(revenue?.total ?? 0);
+  const cost = roundMoney(cogs?.total ?? 0);
+  const exp = roundMoney(expenses?.total ?? 0);
+  const other = roundMoney(otherIncome?.total ?? 0);
+  const gross = roundMoney(rev - cost);
 
   return {
     revenue: rev,
     cogs: cost,
     grossProfit: gross,
+    otherIncome: other,
     expenses: exp,
-    netProfit: gross - exp,
+    netProfit: roundMoney(gross + other - exp),
   };
 }
 

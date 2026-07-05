@@ -18,6 +18,7 @@ import {
   useScreenStyles,
 } from '../../../src/components/ui';
 import { StatusBadge } from '../../../src/components/StatusBadge';
+import { StatCard } from '../../../src/components/StatCard';
 import {
   deleteParty,
   getPartyHistory,
@@ -47,7 +48,7 @@ export default function PartyDetailScreen() {
       StyleSheet.create({
         profileCard: {
           ...cardSurface(colors, isDark),
-          margin: spacing.md,
+          marginBottom: spacing.md,
           padding: spacing.lg,
         },
         profileTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
@@ -102,7 +103,6 @@ export default function PartyDetailScreen() {
         editBtnText: { color: colors.primary, fontWeight: '700', fontSize: 14 },
         financeCard: {
           ...cardSurface(colors, isDark),
-          marginHorizontal: spacing.md,
           marginBottom: spacing.md,
           padding: spacing.lg,
         },
@@ -132,21 +132,15 @@ export default function PartyDetailScreen() {
           textAlign: 'center',
           marginBottom: spacing.sm,
         },
-        statsGrid: {
+        kpiRow: {
           flexDirection: 'row',
-          borderTopWidth: 1,
-          borderTopColor: colors.borderLight,
-          paddingTop: spacing.md,
+          flexWrap: 'wrap',
+          gap: spacing.sm,
+          marginTop: spacing.sm,
         },
-        statItem: { flex: 1, alignItems: 'center' },
-        statDivider: { width: 1, backgroundColor: colors.borderLight },
-        statLabel: { fontSize: 10, color: colors.textMuted, textTransform: 'uppercase', marginBottom: 4 },
-        statValue: { fontSize: 14, fontWeight: '700', color: colors.text },
-        statPaid: { color: colors.success },
         quickActions: {
           flexDirection: 'row',
           gap: spacing.sm,
-          paddingHorizontal: spacing.md,
           marginBottom: spacing.md,
         },
         quickBtn: {
@@ -162,7 +156,6 @@ export default function PartyDetailScreen() {
         quickBtnText: { color: colors.onPrimary, fontWeight: '700', fontSize: 13 },
         tabRow: {
           flexDirection: 'row',
-          marginHorizontal: spacing.md,
           marginBottom: spacing.md,
           padding: 4,
           borderRadius: radius.md,
@@ -181,7 +174,6 @@ export default function PartyDetailScreen() {
         tabTextActive: { color: colors.primary, fontWeight: '700' },
         sectionCard: {
           ...cardSurface(colors, isDark),
-          marginHorizontal: spacing.md,
           marginBottom: spacing.md,
           overflow: 'hidden',
         },
@@ -257,7 +249,6 @@ export default function PartyDetailScreen() {
         historyDue: { fontSize: 12, color: colors.danger, fontWeight: '700' },
         form: {
           ...cardSurface(colors, isDark),
-          marginHorizontal: spacing.md,
           marginBottom: spacing.md,
           padding: spacing.md,
         },
@@ -274,7 +265,7 @@ export default function PartyDetailScreen() {
         typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
         typeChipText: { fontWeight: '600', color: colors.text },
         typeChipTextActive: { color: colors.onPrimary },
-        footer: { paddingHorizontal: spacing.md, paddingBottom: spacing.xxl, gap: spacing.sm },
+        footer: { paddingBottom: spacing.sm, gap: spacing.sm },
         emptyBox: { padding: spacing.xl, alignItems: 'center', gap: spacing.sm },
         emptyText: { color: colors.textSecondary, fontSize: 14, textAlign: 'center' },
       }),
@@ -341,9 +332,14 @@ export default function PartyDetailScreen() {
     }
   }, [partyId, rawId]);
 
+  const showEditRef = React.useRef(false);
+  showEditRef.current = showEdit;
+
   useFocusEffect(
     useCallback(() => {
       if (rawId === 'index') return;
+      // Don't reload over an open edit form — it would wipe unsaved changes.
+      if (showEditRef.current) return;
       setLoading(true);
       setError(null);
       load();
@@ -468,7 +464,6 @@ export default function PartyDetailScreen() {
 
   const { party } = summary;
   const isCustomer = party.type === 'customer';
-  const balanceLabel = isCustomer ? 'Receivable Balance' : 'Payable Balance';
   const balanceColor = summary.balanceDue > 0.01 ? colors.danger : colors.success;
   const paidPct =
     summary.totalBilled > 0 ? Math.min(100, (summary.totalPaid / summary.totalBilled) * 100) : 0;
@@ -541,17 +536,13 @@ export default function PartyDetailScreen() {
             ))}
           </View>
           <FormInput label="Name" value={name} onChangeText={setName} />
-          <FormInput label="Phone" value={phone} onChangeText={setPhone} keyboardType="numeric" />
+          <FormInput label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
           <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
           <PrimaryButton title="Save Changes" onPress={handleSave} loading={saving} />
         </View>
       ) : null}
 
       <View style={localStyles.financeCard}>
-        <Text style={localStyles.balanceLabel}>{balanceLabel}</Text>
-        <Text style={[localStyles.balanceValue, { color: balanceColor }]}>
-          {formatCurrency(summary.balanceDue)}
-        </Text>
         {summary.totalBilled > 0 ? (
           <>
             <View style={localStyles.progressTrack}>
@@ -563,23 +554,20 @@ export default function PartyDetailScreen() {
             </Text>
           </>
         ) : null}
-        <View style={localStyles.statsGrid}>
-          <View style={localStyles.statItem}>
-            <Text style={localStyles.statLabel}>Invoices</Text>
-            <Text style={localStyles.statValue}>{summary.invoiceCount}</Text>
-          </View>
-          <View style={localStyles.statDivider} />
-          <View style={localStyles.statItem}>
-            <Text style={localStyles.statLabel}>Billed</Text>
-            <Text style={localStyles.statValue}>{formatCurrency(summary.totalBilled)}</Text>
-          </View>
-          <View style={localStyles.statDivider} />
-          <View style={localStyles.statItem}>
-            <Text style={localStyles.statLabel}>Paid</Text>
-            <Text style={[localStyles.statValue, localStyles.statPaid]}>
-              {formatCurrency(summary.totalPaid)}
-            </Text>
-          </View>
+        <View style={localStyles.kpiRow}>
+          <StatCard
+            label={isCustomer ? 'Receivable' : 'Payable'}
+            value={summary.balanceDue}
+            color={balanceColor}
+            subtitle={`${paidPct.toFixed(0)}% ${isCustomer ? 'collected' : 'paid'}`}
+          />
+          <StatCard label="Billed" value={summary.totalBilled} color={colors.primary} />
+          <StatCard
+            label="Paid"
+            value={summary.totalPaid}
+            color={colors.success}
+            subtitle={`${summary.invoiceCount} invoice${summary.invoiceCount === 1 ? '' : 's'}`}
+          />
         </View>
       </View>
 
@@ -664,7 +652,7 @@ export default function PartyDetailScreen() {
               const due = item.total_amount - item.paid_amount;
               return (
                 <TouchableOpacity
-                  key={item.id}
+                  key={`${item.record_type}-${item.id}`}
                   style={[localStyles.historyRow, index === history.length - 1 && localStyles.historyRowLast]}
                   onPress={() => openRecord(item)}
                   activeOpacity={0.75}

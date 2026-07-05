@@ -1,16 +1,54 @@
 import { getDatabase } from '../db/database';
-import { triggerAutoBackup } from './backup';
+import { mulMoney, roundMoney } from '../utils/money';
 import type { InventoryMovement, Product } from '../types';
 
 /** Default sale unit price: stored sell price, or cost + 20% markup. */
 export function getProductSellPrice(product: Pick<Product, 'sell_price' | 'avg_cost'>): number {
   if (product.sell_price > 0) return product.sell_price;
-  if (product.avg_cost > 0) return Number((product.avg_cost * 1.2).toFixed(2));
+  if (product.avg_cost > 0) return mulMoney(product.avg_cost, 1.2);
   return 0;
 }
 
-export async function getProducts(): Promise<Product[]> {
+export async function getProductCategories(): Promise<string[]> {
   const db = await getDatabase();
+  const rows = await db.getAllAsync<{ name: string }>(
+    `SELECT name FROM (
+       SELECT name FROM product_categories
+       UNION
+       SELECT DISTINCT category AS name FROM products
+       WHERE category IS NOT NULL AND TRIM(category) != ''
+     )
+     ORDER BY name COLLATE NOCASE ASC`
+  );
+  return rows.map((r) => r.name);
+}
+
+export async function addProductCategory(name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Category name is required');
+
+  const db = await getDatabase();
+  await db.runAsync('INSERT OR IGNORE INTO product_categories (name) VALUES (?)', [trimmed]);
+}
+
+async function ensureProductCategory(
+  db: Awaited<ReturnType<typeof getDatabase>>,
+  category: string | null | undefined
+): Promise<string | null> {
+  const trimmed = category?.trim();
+  if (!trimmed) return null;
+  await db.runAsync('INSERT OR IGNORE INTO product_categories (name) VALUES (?)', [trimmed]);
+  return trimmed;
+}
+
+export async function getProducts(category?: string): Promise<Product[]> {
+  const db = await getDatabase();
+  if (category?.trim()) {
+    return db.getAllAsync<Product>(
+      'SELECT * FROM products WHERE category = ? COLLATE NOCASE ORDER BY name ASC',
+      [category.trim()]
+    );
+  }
   return db.getAllAsync<Product>('SELECT * FROM products ORDER BY name ASC');
 }
 
@@ -33,30 +71,52 @@ export async function getProductMovements(productId: number): Promise<InventoryM
 export async function createProduct(params: {
   name: string;
   sku?: string;
+  category?: string;
   unit?: string;
   opening_qty?: number;
   opening_cost?: number;
   sell_price?: number;
 }): Promise<number> {
   const db = await getDatabase();
+  const trimmed = params.name.trim();
+  if (!trimmed) throw new Error('Product name is required');
+
+  const duplicate = await db.getFirstAsync<{ id: number }>(
+    'SELECT id FROM products WHERE name = ? COLLATE NOCASE',
+    [trimmed]
+  );
+  if (duplicate) throw new Error('A product with this name already exists');
+
   const openingQty = params.opening_qty ?? 0;
   const openingCost = params.opening_cost ?? 0;
+  if (!Number.isFinite(openingQty) || openingQty < 0) {
+    throw new Error('Opening quantity cannot be negative');
+  }
+  if (!Number.isFinite(openingCost) || openingCost < 0) {
+    throw new Error('Opening cost cannot be negative');
+  }
+  if (params.sell_price != null && (!Number.isFinite(params.sell_price) || params.sell_price < 0)) {
+    throw new Error('Sell price cannot be negative');
+  }
   const sellPrice =
     params.sell_price != null && params.sell_price >= 0
-      ? params.sell_price
+      ? roundMoney(params.sell_price)
       : openingCost > 0
-        ? Number((openingCost * 1.2).toFixed(2))
+        ? mulMoney(openingCost, 1.2)
         : 0;
 
   let productId = 0;
 
   await db.withTransactionAsync(async () => {
+    const category = await ensureProductCategory(db, params.category);
+
     const result = await db.runAsync(
-      `INSERT INTO products (name, sku, unit, opening_qty, opening_cost, avg_cost, sell_price, current_qty)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO products (name, sku, category, unit, opening_qty, opening_cost, avg_cost, sell_price, current_qty)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         params.name,
         params.sku ?? null,
+        category,
         params.unit ?? 'pcs',
         openingQty,
         openingCost,
@@ -77,30 +137,42 @@ export async function createProduct(params: {
     }
   });
 
-  await triggerAutoBackup();
   return productId;
 }
 
 export async function updateProduct(
   id: number,
-  params: { name: string; sku?: string; unit?: string; sell_price?: number }
+  params: { name: string; sku?: string; category?: string | null; unit?: string; sell_price?: number }
 ): Promise<void> {
   const db = await getDatabase();
-  const sellPrice = params.sell_price != null ? Math.max(0, params.sell_price) : undefined;
-  if (sellPrice != null) {
-    await db.runAsync(
-      'UPDATE products SET name = ?, sku = ?, unit = ?, sell_price = ? WHERE id = ?',
-      [params.name, params.sku ?? null, params.unit ?? 'pcs', sellPrice, id]
-    );
-  } else {
-    await db.runAsync('UPDATE products SET name = ?, sku = ?, unit = ? WHERE id = ?', [
-      params.name,
-      params.sku ?? null,
-      params.unit ?? 'pcs',
-      id,
-    ]);
+  const trimmed = params.name.trim();
+  if (!trimmed) throw new Error('Product name is required');
+
+  const duplicate = await db.getFirstAsync<{ id: number }>(
+    'SELECT id FROM products WHERE name = ? COLLATE NOCASE AND id != ?',
+    [trimmed, id]
+  );
+  if (duplicate) throw new Error('A product with this name already exists');
+
+  if (params.sell_price != null && (!Number.isFinite(params.sell_price) || params.sell_price < 0)) {
+    throw new Error('Sell price cannot be negative');
   }
-  await triggerAutoBackup();
+  const sellPrice = params.sell_price != null ? roundMoney(params.sell_price) : undefined;
+
+  await db.withTransactionAsync(async () => {
+    const category = await ensureProductCategory(db, params.category ?? null);
+    if (sellPrice != null) {
+      await db.runAsync(
+        'UPDATE products SET name = ?, sku = ?, category = ?, unit = ?, sell_price = ? WHERE id = ?',
+        [trimmed, params.sku ?? null, category, params.unit ?? 'pcs', sellPrice, id]
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE products SET name = ?, sku = ?, category = ?, unit = ? WHERE id = ?',
+        [trimmed, params.sku ?? null, category, params.unit ?? 'pcs', id]
+      );
+    }
+  });
 }
 
 export async function adjustStock(
@@ -108,15 +180,28 @@ export async function adjustStock(
   qty: number,
   notes?: string
 ): Promise<void> {
+  if (!Number.isFinite(qty) || qty === 0) {
+    throw new Error('Enter a non-zero adjustment quantity');
+  }
+
   const db = await getDatabase();
-  const product = await getProductById(productId);
-  if (!product) throw new Error('Product not found');
 
   await db.withTransactionAsync(async () => {
-    await db.runAsync('UPDATE products SET current_qty = current_qty + ? WHERE id = ?', [
-      qty,
+    // Read inside the transaction so a concurrent sale cannot slip between
+    // the stock check and the update.
+    const product = await db.getFirstAsync<Product>('SELECT * FROM products WHERE id = ?', [
       productId,
     ]);
+    if (!product) throw new Error('Product not found');
+
+    const newQty = roundMoney(product.current_qty + qty);
+    if (newQty < 0) {
+      throw new Error(
+        `Cannot reduce stock below zero (current: ${product.current_qty}, adjustment: ${qty})`
+      );
+    }
+
+    await db.runAsync('UPDATE products SET current_qty = ? WHERE id = ?', [newQty, productId]);
     await db.runAsync(
       `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, notes)
        VALUES (?, 'adjustment', ?, ?, 'adjustment', ?)`,
@@ -124,7 +209,6 @@ export async function adjustStock(
     );
   });
 
-  await triggerAutoBackup();
 }
 
 export async function deleteProduct(id: number): Promise<void> {
@@ -147,7 +231,6 @@ export async function deleteProduct(id: number): Promise<void> {
     await db.runAsync('DELETE FROM products WHERE id = ?', [id]);
   });
 
-  await triggerAutoBackup();
 }
 
 export async function getInventoryValue(): Promise<number> {
@@ -155,5 +238,5 @@ export async function getInventoryValue(): Promise<number> {
   const row = await db.getFirstAsync<{ total: number }>(
     'SELECT COALESCE(SUM(current_qty * avg_cost), 0) as total FROM products'
   );
-  return row?.total ?? 0;
+  return roundMoney(row?.total ?? 0);
 }
