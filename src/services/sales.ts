@@ -7,8 +7,9 @@ import {
   repairFinancialDataIntegrity,
   reverseTransactionsByReference,
 } from '../db/database';
-import { isInvoiceNoCollision, resolveSaleInvoiceNo } from './invoiceNumbers';
+import { isInvoiceNumberTakenError, resolveSaleInvoiceNo, syncNextInvoiceSettingAfterUse, getNextSaleInvoiceNo } from './invoiceNumbers';
 import { upsertParty } from './parties';
+import { deleteAttachmentsForReference } from './attachments';
 import { formatCurrency } from '../utils/format';
 import { addMoney, mulMoney, roundMoney, subMoney } from '../utils/money';
 import type { PaymentInput, Sale, SaleItem, SaleItemInput, SalePayment } from '../types';
@@ -110,12 +111,16 @@ export async function createSale(params: {
 
   const discount = roundMoney(Math.max(0, params.discount_amount ?? 0));
   const serviceCharges = roundMoney(Math.max(0, params.service_charges ?? 0));
+  if (discount > subtotal + 0.01) {
+    throw new Error('Discount cannot exceed subtotal');
+  }
   const totalAmount = roundMoney(
     Math.max(0, addMoney(subMoney(subtotal, discount), serviceCharges))
   );
 
   let paidAmount = 0;
   for (const payment of params.payments) {
+    if (payment.amount <= 0) continue;
     paidAmount = addMoney(paidAmount, payment.amount);
   }
   if (paidAmount > totalAmount + 0.01) {
@@ -125,12 +130,13 @@ export async function createSale(params: {
   const status = getPaymentStatus(totalAmount, paidAmount);
   let saleId = 0;
 
-  // Invoice number is resolved inside the transaction so a concurrent create
-  // cannot read the same next-sequence. If the unique index still trips
-  // (auto-numbered only), one retry picks up a fresh number.
-  const attemptCreate = async (): Promise<void> => {
+  // If the unique index trips (race or stale pre-filled number), one retry
+  // picks up a fresh auto-generated number.
+  const attemptCreate = async (forceAutoInvoice = false): Promise<void> => {
     await db.withTransactionAsync(async () => {
-      const invoiceNo = await resolveSaleInvoiceNo(params.invoice_no);
+      const invoiceNo = forceAutoInvoice
+        ? await getNextSaleInvoiceNo()
+        : await resolveSaleInvoiceNo(params.invoice_no);
       await upsertParty(params.party_name, 'customer', db, params.party_phone);
 
       const result = await db.runAsync(
@@ -195,14 +201,28 @@ export async function createSale(params: {
   try {
     await attemptCreate();
   } catch (error) {
-    if (!params.invoice_no?.trim() && isInvoiceNoCollision(error)) {
-      await attemptCreate();
+    if (isInvoiceNumberTakenError(error)) {
+      await attemptCreate(true);
     } else {
       throw error;
     }
   }
 
-  await repairFinancialDataIntegrity();
+  try {
+    await repairFinancialDataIntegrity();
+  } catch {
+    // Sale is saved; repair is best-effort housekeeping.
+  }
+
+  try {
+    const sale = await getSaleById(saleId);
+    if (sale) {
+      await syncNextInvoiceSettingAfterUse('sale', sale.invoice_no);
+    }
+  } catch {
+    // Counter sync failure must not fail an already-created sale.
+  }
+
   return saleId;
 }
 
@@ -251,15 +271,16 @@ export async function addSalePayment(
   payment: PaymentInput
 ): Promise<void> {
   const db = await getDatabase();
-  const sale = await getSaleById(saleId);
-  if (!sale) throw new Error('Sale not found');
   if (!payment.account_id) {
     throw new Error('Please select a valid bank/cash account');
   }
 
-  validatePaymentAmount(sale.total_amount, sale.paid_amount, payment.amount);
-
   await db.withTransactionAsync(async () => {
+    const sale = await db.getFirstAsync<Sale>('SELECT * FROM sales WHERE id = ?', [saleId]);
+    if (!sale) throw new Error('Sale not found');
+
+    validatePaymentAmount(sale.total_amount, sale.paid_amount, payment.amount);
+
     const amount = roundMoney(payment.amount);
     const paymentResult = await db.runAsync(
       `INSERT INTO sale_payments (sale_id, account_id, amount, date, notes) VALUES (?, ?, ?, ?, ?)`,
@@ -276,7 +297,11 @@ export async function addSalePayment(
       date: payment.date,
     });
 
-    const newPaid = addMoney(sale.paid_amount, amount);
+    const sumRow = await db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(amount), 0) AS total FROM sale_payments WHERE sale_id = ?`,
+      [saleId]
+    );
+    const newPaid = roundMoney(sumRow?.total ?? 0);
     const status = getPaymentStatus(sale.total_amount, newPaid);
     await db.runAsync('UPDATE sales SET paid_amount = ?, status = ? WHERE id = ?', [
       newPaid,
@@ -284,7 +309,6 @@ export async function addSalePayment(
       saleId,
     ]);
   });
-
 }
 
 export async function deleteSale(id: number): Promise<void> {
@@ -313,5 +337,6 @@ export async function deleteSale(id: number): Promise<void> {
     await db.runAsync('DELETE FROM sales WHERE id = ?', [id]);
   });
 
+  await deleteAttachmentsForReference('sale', id);
   await repairFinancialDataIntegrity();
 }

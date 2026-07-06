@@ -3,7 +3,12 @@ import { View, Text, StyleSheet, AppState, Alert } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { AppBootScreen } from '../components/AppBootScreen';
 import { getDatabase, resetDatabase, invalidateDatabase, formatSqliteError } from '../db/database';
-import { backupOnBackground, runDailyBackupIfDue, restoreDatabaseFromBackup } from '../services/backup';
+import {
+  backupOnBackground,
+  runDailyBackupIfDue,
+  restoreDatabaseFromBackup,
+  restoreLatestFromBackupFolder,
+} from '../services/backup';
 import { processRecurringExpenses } from '../services/banking';
 import { useTheme } from './ThemeContext';
 import { spacing } from '../constants/theme';
@@ -25,12 +30,14 @@ const DatabaseContext = createContext<DatabaseContextValue>({
 function DatabaseErrorUI({
   error,
   onRetry,
-  onRestore,
+  onRestoreFromFolder,
+  onRestoreFromFile,
   onReset,
 }: {
   error: string;
   onRetry: () => void;
-  onRestore: () => void;
+  onRestoreFromFolder: () => void;
+  onRestoreFromFile: () => void;
   onReset: () => void;
 }) {
   const { colors } = useTheme();
@@ -42,8 +49,11 @@ function DatabaseErrorUI({
       <Text style={styles.retryLink} onPress={onRetry}>
         Try again
       </Text>
-      <Text style={styles.retryLink} onPress={onRestore}>
-        Restore from backup
+      <Text style={styles.retryLink} onPress={onRestoreFromFolder}>
+        Restore from backup folder
+      </Text>
+      <Text style={styles.retryLink} onPress={onRestoreFromFile}>
+        Choose backup file
       </Text>
       <Text style={styles.resetLink} onPress={onReset}>
         Reset database (erases all data)
@@ -105,20 +115,35 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     if (!ready) return;
 
     processRecurringExpenses().catch(() => {});
-    runDailyBackupIfDue().catch(() => {});
+
+    // Defer backup so DB + UI finish mounting first (avoids Android SAF native crashes).
+    const backupTimer = setTimeout(() => {
+      runDailyBackupIfDue().catch(() => {});
+    }, 3000);
 
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
-        // Catch-up in case the app was killed without a chance to back up.
         runDailyBackupIfDue().catch(() => {});
       } else if (state === 'background' || state === 'inactive') {
-        // Capture the session's work when leaving the app (once, not per save).
         backupOnBackground().catch(() => {});
       }
     });
 
-    return () => subscription.remove();
+    return () => {
+      clearTimeout(backupTimer);
+      subscription.remove();
+    };
   }, [ready]);
+
+  const reloadAfterRestore = useCallback((result: { success: boolean; message: string }) => {
+    if (result.success) {
+      setError(null);
+      setRefreshKey((k) => k + 1);
+      setInitAttempt((a) => a + 1);
+    } else if (result.message !== 'Import cancelled') {
+      setError(result.message);
+    }
+  }, []);
 
   if (error) {
     return (
@@ -126,16 +151,16 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
         <DatabaseErrorUI
           error={error}
           onRetry={retryInit}
-          onRestore={async () => {
+          onRestoreFromFolder={async () => {
             try {
-              const result = await restoreDatabaseFromBackup();
-              if (result.success) {
-                setError(null);
-                setRefreshKey((k) => k + 1);
-                setInitAttempt((a) => a + 1);
-              } else {
-                setError(result.message);
-              }
+              reloadAfterRestore(await restoreLatestFromBackupFolder());
+            } catch (err) {
+              setError(formatSqliteError(err));
+            }
+          }}
+          onRestoreFromFile={async () => {
+            try {
+              reloadAfterRestore(await restoreDatabaseFromBackup());
             } catch (err) {
               setError(formatSqliteError(err));
             }

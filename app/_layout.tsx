@@ -14,22 +14,31 @@ function ThemedStatusBar() {
   return <StatusBar style={isDark ? 'light' : 'dark'} />;
 }
 
+function ThemedRoot({ children }: { children: React.ReactNode }) {
+  const { colors } = useTheme();
+  return (
+    <GestureHandlerRootView style={[styles.root, { backgroundColor: colors.background }]}>
+      {children}
+    </GestureHandlerRootView>
+  );
+}
+
 export default function RootLayout() {
   return (
-    <GestureHandlerRootView style={styles.root}>
-      <ErrorBoundary>
-        <ThemeProvider>
-          <DatabaseProvider>
-            <FinancialYearProvider>
-              <AppLockProvider>
+    <ThemeProvider>
+      <ThemedRoot>
+        <ErrorBoundary>
+          <AppLockProvider>
+            <DatabaseProvider>
+              <FinancialYearProvider>
                 <ThemedStatusBar />
-                <Stack screenOptions={{ headerShown: false }} />
-              </AppLockProvider>
-            </FinancialYearProvider>
-          </DatabaseProvider>
-        </ThemeProvider>
-      </ErrorBoundary>
-    </GestureHandlerRootView>
+                <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }} />
+              </FinancialYearProvider>
+            </DatabaseProvider>
+          </AppLockProvider>
+        </ErrorBoundary>
+      </ThemedRoot>
+    </ThemeProvider>
   );
 }
 

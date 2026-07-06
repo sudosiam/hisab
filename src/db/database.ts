@@ -1,8 +1,9 @@
 import * as SQLite from 'expo-sqlite';
+import { deleteDatabaseAsync } from 'expo-sqlite';
 import { roundMoney } from '../utils/money';
 
 export const DB_NAME = 'hisab.db';
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 /** Thrown when an existing database cannot be migrated to the current schema. */
 export class SchemaMigrationError extends Error {
@@ -14,6 +15,17 @@ export class SchemaMigrationError extends Error {
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 let initPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+let recoveredCorruptDatabase = false;
+
+function isLikelyCorruptDatabaseError(error: unknown): boolean {
+  const msg = formatSqliteError(error).toLowerCase();
+  return (
+    msg.includes('corrupt') ||
+    msg.includes('malformed') ||
+    msg.includes('not a database') ||
+    msg.includes('file is encrypted or is not a database')
+  );
+}
 
 export async function invalidateDatabase(): Promise<void> {
   if (dbInstance) {
@@ -25,6 +37,7 @@ export async function invalidateDatabase(): Promise<void> {
   }
   dbInstance = null;
   initPromise = null;
+  recoveredCorruptDatabase = false;
 }
 
 export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
@@ -42,8 +55,6 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
       let db: SQLite.SQLiteDatabase | null = null;
       try {
         db = await SQLite.openDatabaseAsync(DB_NAME);
-        // expo-sqlite disables foreign-key enforcement per connection by
-        // default; without this every CASCADE rule in the schema is inert.
         await db.execAsync('PRAGMA foreign_keys = ON;');
         await initSchema(db);
         dbInstance = db;
@@ -57,6 +68,21 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
           }
         }
         dbInstance = null;
+
+        if (!recoveredCorruptDatabase && isLikelyCorruptDatabaseError(error)) {
+          recoveredCorruptDatabase = true;
+          try {
+            await deleteDatabaseAsync(DB_NAME);
+          } catch {
+            // Best effort — continue to recreate schema.
+          }
+          db = await SQLite.openDatabaseAsync(DB_NAME);
+          await db.execAsync('PRAGMA foreign_keys = ON;');
+          await initSchema(db);
+          dbInstance = db;
+          return db;
+        }
+
         throw error;
       }
     })().catch((error) => {
@@ -70,11 +96,36 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
 
 export async function resetDatabase(): Promise<void> {
   await invalidateDatabase();
+  const { clearAllLocalMedia } = await import('../services/attachments');
+  await clearAllLocalMedia();
   const db = await SQLite.openDatabaseAsync(DB_NAME);
   await db.execAsync('PRAGMA foreign_keys = ON;');
   await rebuildSchema(db);
   dbInstance = db;
   initPromise = Promise.resolve(db);
+  const { pauseAutoBackupAfterReset } = await import('../services/backup');
+  await pauseAutoBackupAfterReset();
+}
+
+/** True when the database has real user data (not just default empty accounts). */
+export async function databaseHasUserData(): Promise<boolean> {
+  try {
+    const db = await getDatabase();
+    const row = await db.getFirstAsync<{ total: number }>(
+      `SELECT (
+        (SELECT COUNT(*) FROM sales) +
+        (SELECT COUNT(*) FROM purchases) +
+        (SELECT COUNT(*) FROM products) +
+        (SELECT COUNT(*) FROM parties) +
+        (SELECT COUNT(*) FROM expenses) +
+        (SELECT COUNT(*) FROM other_income) +
+        (SELECT COUNT(*) FROM fixed_assets)
+      ) AS total`
+    );
+    return (row?.total ?? 0) > 0;
+  } catch {
+    return false;
+  }
 }
 
 export async function closeDatabase(): Promise<void> {
@@ -138,29 +189,29 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 }
 
 async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Promise<void> {
-  // A crash mid-migration must not leave the schema half-upgraded.
-  await db.withTransactionAsync(async () => {
-    await ensurePartiesColumns(db);
-    await ensureProductsSellPriceColumn(db);
-    await ensureProductsUniqueName(db);
-    await ensureProductCategories(db);
-    await ensureAccountsExcludedColumn(db);
-    await ensurePurchaseVendorColumns(db);
-    await ensurePurchasesSubtotalDiscountColumns(db);
-    await ensureOtherIncomeTable(db);
-    await ensureSalesServiceChargesColumn(db);
-    await ensureUniqueInvoiceNumbers(db);
-    await ensureTransactionsPaymentIdColumn(db);
-    await cleanupOrphanChildRows(db);
-    await ensurePerformanceIndexes(db);
+  // Do not wrap migrations in a single transaction: DDL (ALTER/CREATE INDEX) can
+  // implicitly commit in SQLite, leaving expo-sqlite unable to roll back.
+  await ensurePartiesColumns(db);
+  await ensureProductsSellPriceColumn(db);
+  await ensureProductsUniqueName(db);
+  await ensureProductCategories(db);
+  await ensureAccountsExcludedColumn(db);
+  await ensurePurchaseVendorColumns(db);
+  await ensurePurchasesSubtotalDiscountColumns(db);
+  await ensureOtherIncomeTable(db);
+  await ensureSalesServiceChargesColumn(db);
+  await ensureUniqueInvoiceNumbers(db);
+  await ensureTransactionsPaymentIdColumn(db);
+  await ensureAttachmentsTable(db);
+  await cleanupOrphanChildRows(db);
+  await ensurePerformanceIndexes(db);
 
-    if (fromVersion < SCHEMA_VERSION) {
-      await db.runAsync(
-        `INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', ?)`,
-        [String(SCHEMA_VERSION)]
-      );
-    }
-  });
+  if (fromVersion < SCHEMA_VERSION) {
+    await db.runAsync(
+      `INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', ?)`,
+      [String(SCHEMA_VERSION)]
+    );
+  }
 }
 
 /**
@@ -349,6 +400,27 @@ async function ensureUniqueInvoiceNumbers(db: SQLite.SQLiteDatabase): Promise<vo
   }
 }
 
+async function ensureAttachmentsTable(db: SQLite.SQLiteDatabase): Promise<void> {
+  const table = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='attachments'`
+  );
+  if (table) return;
+
+  await db.execAsync(`
+    CREATE TABLE attachments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reference_type TEXT NOT NULL CHECK(reference_type IN ('sale', 'purchase')),
+      reference_id INTEGER NOT NULL,
+      file_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      storage_path TEXT NOT NULL,
+      file_size INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX idx_attachments_ref ON attachments(reference_type, reference_id);
+  `);
+}
+
 async function ensurePerformanceIndexes(db: SQLite.SQLiteDatabase): Promise<void> {
   const indexes = [
     'CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date)',
@@ -451,6 +523,10 @@ async function repairSaleItemUnitCosts(db: SQLite.SQLiteDatabase): Promise<void>
 }
 
 async function cleanupOrphanInvoiceHeaders(db: SQLite.SQLiteDatabase): Promise<void> {
+  const attachmentsTable = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='attachments'`
+  );
+
   const orphanSales = await db.getAllAsync<{ id: number }>(
     `SELECT id FROM sales WHERE id NOT IN (SELECT DISTINCT sale_id FROM sale_items)`
   );
@@ -466,6 +542,11 @@ async function cleanupOrphanInvoiceHeaders(db: SQLite.SQLiteDatabase): Promise<v
     );
     await reverseTransactionsByReference(db, 'sale', id);
     await db.runAsync('DELETE FROM sale_payments WHERE sale_id = ?', [id]);
+    if (attachmentsTable) {
+      await db.runAsync(`DELETE FROM attachments WHERE reference_type = 'sale' AND reference_id = ?`, [
+        id,
+      ]);
+    }
     await db.runAsync('DELETE FROM sales WHERE id = ?', [id]);
     for (const { product_id } of productIds) {
       await recomputeProductStock(db, product_id);
@@ -487,6 +568,12 @@ async function cleanupOrphanInvoiceHeaders(db: SQLite.SQLiteDatabase): Promise<v
     );
     await reverseTransactionsByReference(db, 'purchase', id);
     await db.runAsync('DELETE FROM purchase_payments WHERE purchase_id = ?', [id]);
+    if (attachmentsTable) {
+      await db.runAsync(
+        `DELETE FROM attachments WHERE reference_type = 'purchase' AND reference_id = ?`,
+        [id]
+      );
+    }
     await db.runAsync('DELETE FROM purchases WHERE id = ?', [id]);
     for (const { product_id } of productIds) {
       await recomputeProductStock(db, product_id);
@@ -495,7 +582,8 @@ async function cleanupOrphanInvoiceHeaders(db: SQLite.SQLiteDatabase): Promise<v
 }
 
 async function cleanupOrphanChildRows(db: SQLite.SQLiteDatabase): Promise<void> {
-  const statements = [
+  try {
+    const statements = [
     `DELETE FROM sale_items WHERE sale_id NOT IN (SELECT id FROM sales)`,
     `DELETE FROM sale_payments WHERE sale_id NOT IN (SELECT id FROM sales)`,
     `DELETE FROM purchase_items WHERE purchase_id NOT IN (SELECT id FROM purchases)`,
@@ -511,8 +599,11 @@ async function cleanupOrphanChildRows(db: SQLite.SQLiteDatabase): Promise<void> 
     }
   }
 
-  await repairSaleItemUnitCosts(db);
-  await cleanupOrphanInvoiceHeaders(db);
+    await repairSaleItemUnitCosts(db);
+    await cleanupOrphanInvoiceHeaders(db);
+  } catch {
+    // Best-effort housekeeping during migration; must not block app startup.
+  }
 }
 
 /** Fix stale sale costs and remove invoice headers left behind by old deletes. */
@@ -559,6 +650,9 @@ async function verifySchema(db: SQLite.SQLiteDatabase): Promise<boolean> {
     await db.getFirstAsync('SELECT value FROM fixed_assets LIMIT 1');
     await db.getFirstAsync('SELECT name, type, phone, notes FROM parties LIMIT 1');
     await db.getFirstAsync('SELECT name FROM product_categories LIMIT 1');
+    await db.getFirstAsync(
+      'SELECT reference_type, reference_id, storage_path FROM attachments LIMIT 1'
+    );
     return true;
   } catch {
     return false;
@@ -568,27 +662,26 @@ async function verifySchema(db: SQLite.SQLiteDatabase): Promise<boolean> {
 async function rebuildSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   // foreign_keys cannot change inside a transaction, so toggle it outside.
   await db.execAsync('PRAGMA foreign_keys = OFF;');
-  await db.withTransactionAsync(async () => {
-    await db.execAsync(`
-      DROP TABLE IF EXISTS sale_payments;
-      DROP TABLE IF EXISTS sale_items;
-      DROP TABLE IF EXISTS sales;
-      DROP TABLE IF EXISTS purchase_payments;
-      DROP TABLE IF EXISTS purchase_items;
-      DROP TABLE IF EXISTS purchases;
-      DROP TABLE IF EXISTS inventory_movements;
-      DROP TABLE IF EXISTS product_categories;
-      DROP TABLE IF EXISTS expenses;
-      DROP TABLE IF EXISTS other_income;
-      DROP TABLE IF EXISTS fixed_assets;
-      DROP TABLE IF EXISTS parties;
-      DROP TABLE IF EXISTS customers;
-      DROP TABLE IF EXISTS transactions;
-      DROP TABLE IF EXISTS products;
-      DROP TABLE IF EXISTS accounts;
-      DROP TABLE IF EXISTS settings;
-    `);
-  });
+  await db.execAsync(`
+    DROP TABLE IF EXISTS attachments;
+    DROP TABLE IF EXISTS sale_payments;
+    DROP TABLE IF EXISTS sale_items;
+    DROP TABLE IF EXISTS sales;
+    DROP TABLE IF EXISTS purchase_payments;
+    DROP TABLE IF EXISTS purchase_items;
+    DROP TABLE IF EXISTS purchases;
+    DROP TABLE IF EXISTS inventory_movements;
+    DROP TABLE IF EXISTS product_categories;
+    DROP TABLE IF EXISTS expenses;
+    DROP TABLE IF EXISTS other_income;
+    DROP TABLE IF EXISTS fixed_assets;
+    DROP TABLE IF EXISTS parties;
+    DROP TABLE IF EXISTS customers;
+    DROP TABLE IF EXISTS transactions;
+    DROP TABLE IF EXISTS products;
+    DROP TABLE IF EXISTS accounts;
+    DROP TABLE IF EXISTS settings;
+  `);
   await db.execAsync('PRAGMA foreign_keys = ON;');
 
   await createTables(db);
@@ -781,6 +874,17 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       value TEXT NOT NULL
     );
 
+    CREATE TABLE attachments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reference_type TEXT NOT NULL CHECK(reference_type IN ('sale', 'purchase')),
+      reference_id INTEGER NOT NULL,
+      file_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      storage_path TEXT NOT NULL,
+      file_size INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE UNIQUE INDEX idx_products_name_unique ON products(name COLLATE NOCASE);
     CREATE UNIQUE INDEX idx_sales_invoice_no_unique ON sales(invoice_no);
     CREATE UNIQUE INDEX idx_purchases_invoice_no_unique ON purchases(invoice_no);
@@ -794,6 +898,7 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
     CREATE INDEX idx_other_income_date ON other_income(date);
     CREATE INDEX idx_purchase_payments_date ON purchase_payments(date);
     CREATE INDEX idx_transactions_account_date ON transactions(account_id, date);
+    CREATE INDEX idx_attachments_ref ON attachments(reference_type, reference_id);
     CREATE INDEX idx_sale_items_sale ON sale_items(sale_id);
     CREATE INDEX idx_inventory_movements_product ON inventory_movements(product_id);
   `);

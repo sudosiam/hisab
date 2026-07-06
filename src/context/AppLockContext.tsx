@@ -7,15 +7,16 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { ActivityIndicator, AppState, View, StyleSheet } from 'react-native';
+import { AppState, View, StyleSheet } from 'react-native';
+import { AppBootScreen } from '../components/AppBootScreen';
 import { AppLockScreen } from '../components/AppLockScreen';
 import {
   getBiometricCapability,
+  disableAppLockIfMisconfigured,
   isAppLockEnabled,
   isAppLockSupported,
   isBiometricUnlockEnabled,
 } from '../services/appLock';
-import { useDatabase } from './DatabaseContext';
 
 /** Stay unlocked if the app is reopened within this window after leaving. */
 const LOCK_GRACE_MS = 30_000;
@@ -43,7 +44,6 @@ const AppLockContext = createContext<AppLockContextValue>({
 });
 
 export function AppLockProvider({ children }: { children: React.ReactNode }) {
-  const { ready } = useDatabase();
   const [initialized, setInitialized] = useState(false);
   const [lockEnabled, setLockEnabled] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -84,6 +84,8 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    await disableAppLockIfMisconfigured();
+
     const [enabled, biometric, capability] = await Promise.all([
       isAppLockEnabled(),
       isBiometricUnlockEnabled(),
@@ -106,10 +108,8 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (ready) {
-      refreshLockSettings();
-    }
-  }, [ready, refreshLockSettings]);
+    refreshLockSettings();
+  }, [refreshLockSettings]);
 
   useEffect(() => {
     if (!lockEnabled) return;
@@ -174,14 +174,11 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
-  // Never render app content before lock settings load — otherwise a cold
-  // start briefly exposes data before the lock screen mounts.
-  if (!ready || !initialized) {
+  // Load lock settings from SecureStore before showing app content.
+  if (!initialized) {
     return (
       <AppLockContext.Provider value={value}>
-        <View style={styles.boot}>
-          <ActivityIndicator size="large" />
-        </View>
+        <AppBootScreen />
       </AppLockContext.Provider>
     );
   }
@@ -221,10 +218,5 @@ const styles = StyleSheet.create({
   },
   hidden: {
     display: 'none',
-  },
-  boot: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

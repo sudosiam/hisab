@@ -19,6 +19,8 @@ import type { ThemeColors } from '../constants/theme';
 import { spacing, radius, typography } from '../constants/theme';
 import { cardSurface, fabShadow, primaryShadow } from '../constants/shadows';
 
+export { DatePickerField } from './DatePickerField';
+
 export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
   const surface = cardSurface(colors, isDark);
 

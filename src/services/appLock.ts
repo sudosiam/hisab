@@ -84,6 +84,13 @@ export async function hasPinConfigured(): Promise<boolean> {
   return !!(await SecureStore.getItemAsync(KEYS.pinHash));
 }
 
+/** Recover from enabled lock with no PIN stored (would brick the app). */
+export async function disableAppLockIfMisconfigured(): Promise<void> {
+  if ((await SecureStore.getItemAsync(KEYS.enabled)) === '1' && !(await hasPinConfigured())) {
+    await SecureStore.setItemAsync(KEYS.enabled, '0');
+  }
+}
+
 async function storePin(pin: string): Promise<void> {
   const salt = await generateSalt();
   const hash = await hashPin(pin, salt);

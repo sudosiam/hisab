@@ -6,11 +6,13 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
+import * as Crypto from 'expo-crypto';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
   FormInput,
   FormScreen,
   PrimaryButton,
+  DatePickerField,
   SectionHeader,
   useScreenStyles,
 } from '../../../src/components/ui';
@@ -18,9 +20,11 @@ import { CustomerAutocomplete } from '../../../src/components/CustomerAutocomple
 import { ProductPicker } from '../../../src/components/ProductPicker';
 import { PaymentSplitForm, PaymentRow } from '../../../src/components/PaymentSplitForm';
 import { DraftBanner } from '../../../src/components/DraftBanner';
+import { AttachmentSection } from '../../../src/components/AttachmentSection';
 import { getProducts } from '../../../src/services/inventory';
 import { getPaymentAccounts } from '../../../src/services/banking';
 import { createPurchase } from '../../../src/services/purchases';
+import { clearPendingAttachments, commitPendingAttachments } from '../../../src/services/attachments';
 import { getNextPurchaseInvoiceNo } from '../../../src/services/invoiceNumbers';
 import { DRAFT_KEYS, loadDraft, type PurchaseFormDraft } from '../../../src/services/formDrafts';
 import { useFormDraft } from '../../../src/hooks/useFormDraft';
@@ -31,7 +35,7 @@ import { formatAmountInput, formatCurrency } from '../../../src/utils/format';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
 import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import type { Account, Product } from '../../../src/types';
+import type { Account, PendingAttachment, Product } from '../../../src/types';
 
 interface LineItem {
   key: string;
@@ -60,11 +64,10 @@ function isPurchaseDraftEmpty(d: PurchaseFormDraft): boolean {
     d.payments.length > 0;
   if (hasText) return false;
   if (d.items.length === 0) return true;
-  if (d.items.length === 1) {
-    const item = d.items[0];
-    return !item.product_id && item.qty === '1' && !item.unit_cost.trim();
+  if (d.items.some((item) => item.product_id > 0 || item.unit_cost.trim() || item.qty !== '1')) {
+    return false;
   }
-  return false;
+  return true;
 }
 
 export default function NewPurchaseScreen() {
@@ -113,6 +116,8 @@ export default function NewPurchaseScreen() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [items, setItems] = useState<LineItem[]>([]);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
+  const pendingSessionKey = useMemo(() => Crypto.randomUUID(), []);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [loading, setLoading] = useState(false);
 
   const draftPayload = useMemo<PurchaseFormDraft>(
@@ -136,6 +141,8 @@ export default function NewPurchaseScreen() {
   );
 
   const resetForm = async (productList: Product[]) => {
+    await clearPendingAttachments(pendingAttachments);
+    setPendingAttachments([]);
     setSupplierName('');
     setInvoiceNo(await getNextPurchaseInvoiceNo());
     setDate(todayISO());
@@ -258,6 +265,10 @@ export default function NewPurchaseScreen() {
       return;
     }
     for (const p of payments) {
+      if (parseFloat(p.amount) > 0 && !p.account_id) {
+        Alert.alert('Error', 'Select an account for each payment amount');
+        return;
+      }
       if (parseFloat(p.amount) > 0 && !isValidISODate(p.date)) {
         Alert.alert('Error', 'Enter a valid payment date as YYYY-MM-DD');
         return;
@@ -303,9 +314,24 @@ export default function NewPurchaseScreen() {
             notes: p.notes || undefined,
           })),
       });
+      let attachmentNote = '';
+      if (pendingAttachments.length > 0) {
+        try {
+          await commitPendingAttachments('purchase', id, pendingAttachments);
+          setPendingAttachments([]);
+        } catch (e) {
+          attachmentNote =
+            e instanceof Error
+              ? `Purchase saved, but attachments failed: ${e.message}`
+              : 'Purchase saved, but some attachments could not be added.';
+        }
+      }
       await clearDraftOnSave();
       refresh();
       router.replace(`/(drawer)/purchases/${id}`);
+      if (attachmentNote) {
+        Alert.alert('Note', attachmentNote);
+      }
     } catch (e) {
       Alert.alert('Error', formatSqliteError(e));
     } finally {
@@ -329,7 +355,7 @@ export default function NewPurchaseScreen() {
         onChange={setSupplierName}
         placeholder="Start typing vendor name"
       />
-      <FormInput label="Date (YYYY-MM-DD)" value={date} onChangeText={setDate} />
+      <DatePickerField label="Date" value={date} onChange={setDate} />
       <FormInput
         label="Vendor Invoice No (optional)"
         value={vendorInvoiceNo}
@@ -411,6 +437,13 @@ export default function NewPurchaseScreen() {
         onChange={setPayments}
         totalDue={total}
         defaultDate={isValidISODate(date) ? date : undefined}
+      />
+
+      <AttachmentSection
+        referenceType="purchase"
+        pendingSessionKey={pendingSessionKey}
+        pendingAttachments={pendingAttachments}
+        onPendingAttachmentsChange={setPendingAttachments}
       />
 
       <PrimaryButton title="Save Purchase" onPress={handleSave} loading={loading} />

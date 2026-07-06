@@ -5,6 +5,7 @@ import {
   FormInput,
   FormScreen,
   PrimaryButton,
+  DatePickerField,
   useScreenStyles,
 } from '../../../src/components/ui';
 import { CustomerAutocomplete } from '../../../src/components/CustomerAutocomplete';
@@ -137,7 +138,7 @@ export default function EditSaleScreen() {
   return (
     <FormScreen>
       <CustomerAutocomplete value={partyName} onChange={setPartyName} />
-      <FormInput label="Date (YYYY-MM-DD)" value={date} onChangeText={setDate} />
+      <DatePickerField label="Date" value={date} onChange={setDate} />
       <FormInput
         label="Total Discount (₹)"
         value={discount}

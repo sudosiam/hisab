@@ -18,12 +18,14 @@ import {
 import { formatSqliteError } from '../../../src/db/database';
 import { getPaymentAccounts } from '../../../src/services/banking';
 import { StatusBadge } from '../../../src/components/StatusBadge';
+import { AttachmentSection } from '../../../src/components/AttachmentSection';
 import { StatCard } from '../../../src/components/StatCard';
 import { AccountPicker } from '../../../src/components/AccountPicker';
 import {
   FormInput,
   FormScreen,
   PrimaryButton,
+  DatePickerField,
   SectionHeader,
   useScreenStyles,
 } from '../../../src/components/ui';
@@ -32,7 +34,7 @@ import { roundMoney } from '../../../src/utils/money';
 import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
-import { todayISO } from '../../../src/utils/date';
+import { todayISO, isValidISODate } from '../../../src/utils/date';
 import { spacing } from '../../../src/constants/theme';
 import type { Account, Purchase, PurchaseItem, PurchasePayment } from '../../../src/types';
 
@@ -75,6 +77,7 @@ export default function PurchaseDetailScreen() {
   const [payments, setPayments] = useState<PurchasePayment[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [payAmount, setPayAmount] = useState('');
+  const [payDate, setPayDate] = useState(todayISO());
   const [selectedAccount, setSelectedAccount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -125,6 +128,10 @@ export default function PurchaseDetailScreen() {
       Alert.alert('Error', 'Select a payment account');
       return;
     }
+    if (!isValidISODate(payDate)) {
+      Alert.alert('Error', 'Select a valid payment date');
+      return;
+    }
     const due = purchase.total_amount - purchase.paid_amount;
     if (amount > due + 0.01) {
       Alert.alert('Error', `Amount exceeds due (${formatCurrency(due)})`);
@@ -132,8 +139,9 @@ export default function PurchaseDetailScreen() {
     }
     setSaving(true);
     try {
-      await addPurchasePayment(purchase.id, { account_id: selectedAccount, amount, date: todayISO() });
+      await addPurchasePayment(purchase.id, { account_id: selectedAccount, amount, date: payDate });
       setPayAmount('');
+      setPayDate(todayISO());
       refresh();
       await load();
     } catch (e) {
@@ -261,6 +269,7 @@ export default function PurchaseDetailScreen() {
             onChange={setSelectedAccount}
           />
           <FormInput label="Amount" value={payAmount} onChangeText={setPayAmount} keyboardType="decimal-pad" placeholder="Amount" />
+          <DatePickerField label="Payment date" value={payDate} onChange={setPayDate} />
           <TouchableOpacity
             onPress={() => setPayAmount(formatAmountInput(due))}
             style={{ marginBottom: spacing.sm }}
@@ -277,6 +286,8 @@ export default function PurchaseDetailScreen() {
           <Text style={localStyles.muted}>{purchase.notes}</Text>
         </>
       ) : null}
+
+      <AttachmentSection referenceType="purchase" referenceId={purchase.id} />
 
       <PrimaryButton title="Delete Purchase" onPress={handleDelete} variant="danger" />
     </FormScreen>

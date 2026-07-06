@@ -5,6 +5,7 @@ import {
   FormInput,
   FormScreen,
   PrimaryButton,
+  DatePickerField,
   useScreenStyles,
 } from '../../../src/components/ui';
 import { getPaymentAccounts, transferBetweenAccounts } from '../../../src/services/banking';
@@ -117,7 +118,7 @@ export default function TransferScreen() {
       ))}
 
       <FormInput label="Amount" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
-      <FormInput label="Date" value={date} onChangeText={setDate} />
+      <DatePickerField label="Date" value={date} onChange={setDate} />
       <FormInput label="Note (optional)" value={description} onChangeText={setDescription} />
       <PrimaryButton title="Transfer" onPress={handleSave} loading={loading} />
     </FormScreen>

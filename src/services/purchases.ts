@@ -7,8 +7,9 @@ import {
   reverseTransactionsByReference,
   updateWeightedAvgCost,
 } from '../db/database';
-import { isInvoiceNoCollision, resolvePurchaseInvoiceNo } from './invoiceNumbers';
+import { isInvoiceNumberTakenError, resolvePurchaseInvoiceNo, syncNextInvoiceSettingAfterUse, getNextPurchaseInvoiceNo } from './invoiceNumbers';
 import { upsertParty } from './parties';
+import { deleteAttachmentsForReference } from './attachments';
 import { formatCurrency } from '../utils/format';
 import { addMoney, mulMoney, roundMoney, subMoney } from '../utils/money';
 import type {
@@ -131,9 +132,11 @@ export async function createPurchase(params: {
   const status = getPaymentStatus(totalAmount, paidAmount);
   let purchaseId = 0;
 
-  const attemptCreate = async (): Promise<void> => {
+  const attemptCreate = async (forceAutoInvoice = false): Promise<void> => {
     await db.withTransactionAsync(async () => {
-      const invoiceNo = await resolvePurchaseInvoiceNo(params.invoice_no);
+      const invoiceNo = forceAutoInvoice
+        ? await getNextPurchaseInvoiceNo()
+        : await resolvePurchaseInvoiceNo(params.invoice_no);
       await upsertParty(params.supplier_name, 'vendor', db);
 
       const result = await db.runAsync(
@@ -192,14 +195,28 @@ export async function createPurchase(params: {
   try {
     await attemptCreate();
   } catch (error) {
-    if (!params.invoice_no?.trim() && isInvoiceNoCollision(error)) {
-      await attemptCreate();
+    if (isInvoiceNumberTakenError(error)) {
+      await attemptCreate(true);
     } else {
       throw error;
     }
   }
 
-  await repairFinancialDataIntegrity();
+  try {
+    await repairFinancialDataIntegrity();
+  } catch {
+    // Purchase is saved; repair is best-effort housekeeping.
+  }
+
+  try {
+    const purchase = await getPurchaseById(purchaseId);
+    if (purchase) {
+      await syncNextInvoiceSettingAfterUse('purchase', purchase.invoice_no);
+    }
+  } catch {
+    // Counter sync failure must not fail an already-created purchase.
+  }
+
   return purchaseId;
 }
 
@@ -208,15 +225,19 @@ export async function addPurchasePayment(
   payment: PaymentInput
 ): Promise<void> {
   const db = await getDatabase();
-  const purchase = await getPurchaseById(purchaseId);
-  if (!purchase) throw new Error('Purchase not found');
   if (!payment.account_id) {
     throw new Error('Please select a valid bank/cash account');
   }
 
-  validatePaymentAmount(purchase.total_amount, purchase.paid_amount, payment.amount);
-
   await db.withTransactionAsync(async () => {
+    const purchase = await db.getFirstAsync<Purchase>(
+      'SELECT * FROM purchases WHERE id = ?',
+      [purchaseId]
+    );
+    if (!purchase) throw new Error('Purchase not found');
+
+    validatePaymentAmount(purchase.total_amount, purchase.paid_amount, payment.amount);
+
     const amount = roundMoney(payment.amount);
     const paymentResult = await db.runAsync(
       `INSERT INTO purchase_payments (purchase_id, account_id, amount, date, notes) VALUES (?, ?, ?, ?, ?)`,
@@ -233,7 +254,11 @@ export async function addPurchasePayment(
       date: payment.date,
     });
 
-    const newPaid = addMoney(purchase.paid_amount, amount);
+    const sumRow = await db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_payments WHERE purchase_id = ?`,
+      [purchaseId]
+    );
+    const newPaid = roundMoney(sumRow?.total ?? 0);
     const status = getPaymentStatus(purchase.total_amount, newPaid);
     await db.runAsync('UPDATE purchases SET paid_amount = ?, status = ? WHERE id = ?', [
       newPaid,
@@ -276,5 +301,6 @@ export async function deletePurchase(id: number): Promise<void> {
     await db.runAsync('DELETE FROM purchases WHERE id = ?', [id]);
   });
 
+  await deleteAttachmentsForReference('purchase', id);
   await repairFinancialDataIntegrity();
 }

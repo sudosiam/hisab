@@ -14,6 +14,7 @@ import {
   FormInput,
   FormScreen,
   PrimaryButton,
+  DatePickerField,
   SectionHeader,
   useScreenStyles,
 } from '../../../src/components/ui';
@@ -211,7 +212,7 @@ export default function ExpenseDetailScreen() {
         <FormInput label="Category" value={category} onChangeText={setCategory} />
         <FormInput label="Description" value={description} onChangeText={setDescription} />
         <FormInput label="Amount (₹)" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
-        <FormInput label="Date" value={date} onChangeText={setDate} />
+        <DatePickerField label="Date" value={date} onChange={setDate} />
         <AccountPicker accounts={accounts} value={accountId} onChange={setAccountId} />
 
         <View style={[styles.row, { marginVertical: spacing.sm }]}>

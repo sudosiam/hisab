@@ -192,3 +192,17 @@ export function isValidISODate(dateStr: string): boolean {
   const parsed = parse(dateStr, 'yyyy-MM-dd', new Date());
   return isValid(parsed) && format(parsed, 'yyyy-MM-dd') === dateStr;
 }
+
+export function parseISODate(dateStr: string): Date {
+  return parse(dateStr, 'yyyy-MM-dd', new Date());
+}
+
+export function formatISODate(date: Date): string {
+  return format(date, 'yyyy-MM-dd');
+}
+
+/** Human-readable label for form fields, e.g. "6 Jul 2026". */
+export function formatDisplayDate(dateStr: string): string {
+  if (!isValidISODate(dateStr)) return 'Select date';
+  return format(parseISODate(dateStr), 'd MMM yyyy');
+}

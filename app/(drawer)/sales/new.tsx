@@ -6,11 +6,13 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
+import * as Crypto from 'expo-crypto';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
   FormInput,
   FormScreen,
   PrimaryButton,
+  DatePickerField,
   SectionHeader,
   useScreenStyles,
 } from '../../../src/components/ui';
@@ -18,9 +20,11 @@ import { CustomerAutocomplete } from '../../../src/components/CustomerAutocomple
 import { ProductPicker } from '../../../src/components/ProductPicker';
 import { PaymentSplitForm, PaymentRow } from '../../../src/components/PaymentSplitForm';
 import { DraftBanner } from '../../../src/components/DraftBanner';
+import { AttachmentSection } from '../../../src/components/AttachmentSection';
 import { getProducts, getProductSellPrice } from '../../../src/services/inventory';
 import { getSelectableAccounts } from '../../../src/services/banking';
 import { createSale } from '../../../src/services/sales';
+import { clearPendingAttachments, commitPendingAttachments } from '../../../src/services/attachments';
 import { getPartyByName } from '../../../src/services/parties';
 import { getNextSaleInvoiceNo } from '../../../src/services/invoiceNumbers';
 import { DRAFT_KEYS, loadDraft, type SaleFormDraft } from '../../../src/services/formDrafts';
@@ -32,7 +36,7 @@ import { formatAmountInput, formatCurrency } from '../../../src/utils/format';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
 import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import type { Account, Product } from '../../../src/types';
+import type { Account, PendingAttachment, Product } from '../../../src/types';
 
 interface LineItem {
   key: string;
@@ -62,11 +66,10 @@ function isSaleDraftEmpty(d: SaleFormDraft): boolean {
     d.payments.length > 0;
   if (hasText) return false;
   if (d.items.length === 0) return true;
-  if (d.items.length === 1) {
-    const item = d.items[0];
-    return !item.product_id && item.qty === '1' && !item.unit_price.trim();
+  if (d.items.some((item) => item.product_id > 0 || item.unit_price.trim() || item.qty !== '1')) {
+    return false;
   }
-  return false;
+  return true;
 }
 
 export default function NewSaleScreen() {
@@ -116,6 +119,8 @@ export default function NewSaleScreen() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [items, setItems] = useState<LineItem[]>([]);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
+  const pendingSessionKey = useMemo(() => Crypto.randomUUID(), []);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [loading, setLoading] = useState(false);
 
   const draftPayload = useMemo<SaleFormDraft>(
@@ -140,6 +145,8 @@ export default function NewSaleScreen() {
   );
 
   const resetForm = async (productList: Product[]) => {
+    await clearPendingAttachments(pendingAttachments);
+    setPendingAttachments([]);
     setPartyName('');
     setPartyPhone('');
     setInvoiceNo(await getNextSaleInvoiceNo());
@@ -217,12 +224,11 @@ export default function NewSaleScreen() {
     let cancelled = false;
     const name = partyName.trim();
     if (!name) {
-      setPartyPhone('');
       return;
     }
     getPartyByName(name, 'customer').then((party) => {
       if (!cancelled && party) {
-        setPartyPhone(party.phone ?? '');
+        setPartyPhone((current) => (current.trim() ? current : party.phone ?? ''));
       }
     });
     return () => {
@@ -282,6 +288,10 @@ export default function NewSaleScreen() {
       return;
     }
     for (const p of payments) {
+      if (parseFloat(p.amount) > 0 && !p.account_id) {
+        Alert.alert('Error', 'Select an account for each payment amount');
+        return;
+      }
       if (parseFloat(p.amount) > 0 && !isValidISODate(p.date)) {
         Alert.alert('Error', 'Enter a valid payment date as YYYY-MM-DD');
         return;
@@ -341,9 +351,24 @@ export default function NewSaleScreen() {
             notes: p.notes || undefined,
           })),
       });
+      let attachmentNote = '';
+      if (pendingAttachments.length > 0) {
+        try {
+          await commitPendingAttachments('sale', saleId, pendingAttachments);
+          setPendingAttachments([]);
+        } catch (e) {
+          attachmentNote =
+            e instanceof Error
+              ? `Sale saved, but attachments failed: ${e.message}`
+              : 'Sale saved, but some attachments could not be added.';
+        }
+      }
       await clearDraftOnSave();
       refresh();
       router.replace(`/(drawer)/sales/${saleId}`);
+      if (attachmentNote) {
+        Alert.alert('Note', attachmentNote);
+      }
     } catch (e) {
       Alert.alert('Error', formatSqliteError(e));
     } finally {
@@ -368,7 +393,7 @@ export default function NewSaleScreen() {
         keyboardType="phone-pad"
         placeholder="Customer mobile number"
       />
-      <FormInput label="Date (YYYY-MM-DD)" value={date} onChangeText={setDate} />
+      <DatePickerField label="Date" value={date} onChange={setDate} />
       <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
 
       <View style={styles.section}>
@@ -450,6 +475,13 @@ export default function NewSaleScreen() {
         onChange={setPayments}
         totalDue={total}
         defaultDate={isValidISODate(date) ? date : undefined}
+      />
+
+      <AttachmentSection
+        referenceType="sale"
+        pendingSessionKey={pendingSessionKey}
+        pendingAttachments={pendingAttachments}
+        onPendingAttachmentsChange={setPendingAttachments}
       />
 
       <PrimaryButton title="Save Sale" onPress={handleSave} loading={loading} />

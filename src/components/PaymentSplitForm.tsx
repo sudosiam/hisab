@@ -10,6 +10,7 @@ import { useTheme } from '../context/ThemeContext';
 import { spacing, radius } from '../constants/theme';
 import { cardSurface } from '../constants/shadows';
 import { AccountPicker } from './AccountPicker';
+import { DatePickerField } from './DatePickerField';
 import type { Account } from '../types';
 import { todayISO } from '../utils/date';
 import { formatAmountInput, formatCurrency } from '../utils/format';
@@ -134,19 +135,12 @@ export function PaymentSplitForm({ accounts, payments, onChange, totalDue, defau
                 <Text style={styles.remove}>✕</Text>
               </TouchableOpacity>
             </View>
-            <View style={styles.dateRow}>
-              <Text style={styles.dateLabel}>Date</Text>
-              <TextInput
-                style={[styles.input, styles.dateInput]}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={colors.textMuted}
-                value={payment.date}
-                onChangeText={(v) => updatePayment(index, 'date', v)}
-                autoCapitalize="none"
-                autoCorrect={false}
-                accessibilityLabel="Payment date"
-              />
-            </View>
+            <DatePickerField
+              label="Date"
+              value={payment.date}
+              onChange={(iso) => updatePayment(index, 'date', iso)}
+              compact
+            />
           </View>
         ))
       )}
@@ -172,14 +166,6 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       marginBottom: spacing.sm,
     },
     inputRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-    dateRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.sm,
-      marginTop: spacing.sm,
-    },
-    dateLabel: { fontSize: 12, color: colors.textSecondary, width: 34 },
-    dateInput: { flex: 1, paddingVertical: 8 },
     input: {
       borderWidth: 1,
       borderColor: colors.border,

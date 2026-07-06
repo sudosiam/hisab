@@ -34,18 +34,22 @@ import {
   getPurchaseInvoicePrefix,
   setPurchaseInvoicePrefix,
 } from '../../src/services/appSettings';
+import { previewNextInvoiceFromSetting, getNextSaleInvoiceNo, getNextPurchaseInvoiceNo } from '../../src/services/invoiceNumbers';
 import { getFinancialYearRangeLabel, MONTH_SHORT_NAMES } from '../../src/utils/date';
 import { clearAllDrafts } from '../../src/services/formDrafts';
 import {
   backupDatabase,
+  ensureBackupFolderReady,
   exportDatabase,
   getBackupFolderUri,
   getBackupLastError,
   getLastBackupAt,
   formatLastBackupLabel,
   isAutoBackupEnabled,
+  isAutoBackupPaused,
   pickBackupFolder,
   restoreDatabaseFromBackup,
+  restoreLatestFromBackupFolder,
   setAutoBackupEnabled,
 } from '../../src/services/backup';
 import { spacing, radius } from '../../src/constants/theme';
@@ -256,7 +260,8 @@ export default function SettingsScreen() {
   );
 
   const [folderUri, setFolderUri] = useState<string | null>(null);
-  const [autoBackup, setAutoBackup] = useState(true);
+  const [autoBackup, setAutoBackup] = useState(false);
+  const [backupPaused, setBackupPaused] = useState(false);
   const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
   const [backupError, setBackupError] = useState<{ at: string; message: string } | null>(null);
   const [backingUp, setBackingUp] = useState(false);
@@ -274,15 +279,28 @@ export default function SettingsScreen() {
   const [newPinForChange, setNewPinForChange] = useState('');
   const [salePrefix, setSalePrefix] = useState('S');
   const [purchasePrefix, setPurchasePrefix] = useState('P');
+  const [nextSaleInvoice, setNextSaleInvoice] = useState('');
+  const [nextPurchaseInvoice, setNextPurchaseInvoice] = useState('');
 
   const load = useCallback(async () => {
-    setFolderUri(await getBackupFolderUri());
+    const uri = await getBackupFolderUri();
+    if (uri) {
+      try {
+        await ensureBackupFolderReady(uri);
+      } catch {
+        // Folder may be temporarily unavailable; backup actions will surface errors.
+      }
+    }
+    setFolderUri(uri);
     setAutoBackup(await isAutoBackupEnabled());
+    setBackupPaused(await isAutoBackupPaused());
     setLastBackupAt(await getLastBackupAt());
     setBackupError(await getBackupLastError());
     await reloadFinancialYear();
     setSalePrefix(await getSaleInvoicePrefix());
     setPurchasePrefix(await getPurchaseInvoicePrefix());
+    setNextSaleInvoice(await getNextSaleInvoiceNo());
+    setNextPurchaseInvoice(await getNextPurchaseInvoiceNo());
   }, [reloadFinancialYear]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -291,7 +309,7 @@ export default function SettingsScreen() {
     const uri = await pickBackupFolder();
     if (uri) {
       setFolderUri(uri);
-      Alert.alert('Success', 'Backup folder selected');
+      Alert.alert('Success', 'Backup folder ready (database/, media/, and full/ zip folders created).');
     }
   };
 
@@ -330,6 +348,27 @@ export default function SettingsScreen() {
     setImportConfirmInput('');
   };
 
+  const handleRestoreFromFolder = async () => {
+    if (!folderUri) {
+      Alert.alert('Choose a backup folder', 'Select where backups are saved first.');
+      return;
+    }
+    setRestoring(true);
+    try {
+      const result = await restoreLatestFromBackupFolder();
+      if (result.success) {
+        await clearAllDrafts().catch(() => {});
+        setBackupPaused(false);
+        refresh();
+        Alert.alert('Imported', result.message);
+      } else {
+        Alert.alert('Import Failed', result.message);
+      }
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   const handleRestore = async () => {
     if (!canConfirmImport || restoring) return;
     setRestoring(true);
@@ -337,6 +376,7 @@ export default function SettingsScreen() {
       const result = await restoreDatabaseFromBackup();
       if (result.success) {
         await clearAllDrafts().catch(() => {});
+        setBackupPaused(false);
         refresh();
         setImportModalOpen(false);
         setImportConfirmInput('');
@@ -350,6 +390,13 @@ export default function SettingsScreen() {
   };
 
   const toggleAuto = async (value: boolean) => {
+    if (value && (await isAutoBackupPaused())) {
+      Alert.alert(
+        'Restore first',
+        'Backup is paused after reset. Restore from your backup folder before turning auto backup on.'
+      );
+      return;
+    }
     setAutoBackup(value);
     await setAutoBackupEnabled(value);
   };
@@ -376,8 +423,9 @@ export default function SettingsScreen() {
     try {
       await setSaleInvoicePrefix(salePrefix);
       setSalePrefix(await getSaleInvoicePrefix());
+      setNextSaleInvoice(await getNextSaleInvoiceNo());
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not save sale prefix');
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not save sale numbering');
       setSalePrefix(await getSaleInvoicePrefix());
     }
   };
@@ -386,8 +434,9 @@ export default function SettingsScreen() {
     try {
       await setPurchaseInvoicePrefix(purchasePrefix);
       setPurchasePrefix(await getPurchaseInvoicePrefix());
+      setNextPurchaseInvoice(await getNextPurchaseInvoiceNo());
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not save purchase prefix');
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not save purchase numbering');
       setPurchasePrefix(await getPurchaseInvoicePrefix());
     }
   };
@@ -415,6 +464,8 @@ export default function SettingsScreen() {
     try {
       await resetDatabase();
       await clearAllDrafts().catch(() => {});
+      setAutoBackup(false);
+      setBackupPaused(true);
       refresh();
       setResetModalOpen(false);
       setResetConfirmInput('');
@@ -549,23 +600,39 @@ export default function SettingsScreen() {
       </SettingsSection>
 
       <SettingsSection title="Invoicing" cardStyle={localStyles.sectionCard}>
+        <Text style={localStyles.rowMeta}>
+          Set the invoice number your next sale or purchase should use. Useful when moving from
+          another system — not starting from 0001.
+        </Text>
         <FormInput
-          label="Sale invoice prefix"
+          label="Next sale invoice number"
           value={salePrefix}
           onChangeText={setSalePrefix}
-          placeholder="S"
+          placeholder="BPH2627-0003"
           onEndEditing={saveSalePrefix}
         />
-        <Text style={localStyles.rowMeta}>Next sale: {salePrefix}-0001 style numbering</Text>
+        <Text style={localStyles.rowMeta}>
+          After save, next sale: {previewNextInvoiceFromSetting(salePrefix, 'S')}
+          {nextSaleInvoice &&
+          nextSaleInvoice !== previewNextInvoiceFromSetting(salePrefix, 'S')
+            ? ` (with existing sales: ${nextSaleInvoice})`
+            : ''}
+        </Text>
         <SettingsDivider color={colors.borderLight} />
         <FormInput
-          label="Purchase prefix"
+          label="Next purchase invoice number"
           value={purchasePrefix}
           onChangeText={setPurchasePrefix}
-          placeholder="P"
+          placeholder="GHP2728-000000013"
           onEndEditing={savePurchasePrefix}
         />
-        <Text style={localStyles.rowMeta}>Next purchase: {purchasePrefix}-0001 style numbering</Text>
+        <Text style={localStyles.rowMeta}>
+          After save, next purchase: {previewNextInvoiceFromSetting(purchasePrefix, 'P')}
+          {nextPurchaseInvoice &&
+          nextPurchaseInvoice !== previewNextInvoiceFromSetting(purchasePrefix, 'P')
+            ? ` (with existing purchases: ${nextPurchaseInvoice})`
+            : ''}
+        </Text>
       </SettingsSection>
 
       {lockSupported ? (
@@ -634,7 +701,8 @@ export default function SettingsScreen() {
           <View style={localStyles.rowStack}>
             <Text style={localStyles.rowLabel}>Daily auto backup</Text>
             <Text style={localStyles.rowMeta}>
-              Once a day &amp; when you leave the app · Last: {formatLastBackupLabel(lastBackupAt)}
+              Once a day &amp; when you leave the app · Saves database, photos, and a full zip ·
+              Last: {formatLastBackupLabel(lastBackupAt)}
             </Text>
           </View>
           <Switch
@@ -644,6 +712,21 @@ export default function SettingsScreen() {
             thumbColor={colors.surface}
           />
         </View>
+
+        {backupPaused ? (
+          <>
+            <SettingsDivider color={colors.borderLight} />
+            <View style={localStyles.rowStack}>
+              <Text style={[localStyles.rowLabel, { color: colors.danger }]}>
+                Backup paused after reset
+              </Text>
+              <Text style={localStyles.rowMeta}>
+                Auto backup is off and won&apos;t overwrite your backup folder until you restore.
+                Use &quot;Restore from backup folder&quot; below.
+              </Text>
+            </View>
+          </>
+        ) : null}
 
         {backupError ? (
           <>
@@ -677,7 +760,19 @@ export default function SettingsScreen() {
             disabled={exporting}
             activeOpacity={0.7}
           >
-            <Text style={localStyles.outlineBtnText}>{exporting ? 'Exporting…' : 'Export backup'}</Text>
+            <Text style={localStyles.outlineBtnText}>
+              {exporting ? 'Exporting…' : 'Export full backup (zip)'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={localStyles.outlineBtn}
+            onPress={handleRestoreFromFolder}
+            disabled={restoring || !folderUri}
+            activeOpacity={0.7}
+          >
+            <Text style={localStyles.outlineBtnText}>
+              {restoring ? 'Importing…' : 'Restore from backup folder'}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={localStyles.outlineBtn}
@@ -686,7 +781,7 @@ export default function SettingsScreen() {
             activeOpacity={0.7}
           >
             <Text style={localStyles.outlineBtnText}>
-              {restoring ? 'Importing…' : 'Import backup'}
+              {restoring ? 'Importing…' : 'Import backup file'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -748,8 +843,9 @@ export default function SettingsScreen() {
         <Pressable style={localStyles.modalSheet} onPress={(e) => e.stopPropagation()}>
           <Text style={localStyles.modalTitle}>Import backup</Text>
           <Text style={localStyles.modalText}>
-            This replaces all current data with the backup file. A snapshot of your current data is
-            kept during the import in case the file is bad. Type {IMPORT_CONFIRM_TEXT} to confirm.
+            This replaces all current data with the backup file (.db or full .zip with photos).
+            A snapshot of your current data is kept during the import in case the file is bad. Type{' '}
+            {IMPORT_CONFIRM_TEXT} to confirm.
           </Text>
           <FormInput
             label="Confirmation"

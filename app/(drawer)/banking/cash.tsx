@@ -1,12 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Alert, Text, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
-import {
-  FormInput,
-  FormScreen,
-  PrimaryButton,
-  useScreenStyles,
-} from '../../../src/components/ui';
+import { FormInput, FormScreen, PrimaryButton, DatePickerField, useScreenStyles } from '../../../src/components/ui';
 import { AccountPicker } from '../../../src/components/AccountPicker';
 import { getSelectableAccounts, recordDeposit, recordWithdrawal } from '../../../src/services/banking';
 import { formatSqliteError } from '../../../src/db/database';
@@ -137,7 +132,7 @@ export default function CashMovementScreen() {
         onChange={setAccountId}
       />
       <FormInput label="Amount (₹)" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
-      <FormInput label="Date" value={date} onChangeText={setDate} />
+      <DatePickerField label="Date" value={date} onChange={setDate} />
       <FormInput
         label="Note (optional)"
         value={description}

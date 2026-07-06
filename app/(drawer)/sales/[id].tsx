@@ -13,12 +13,14 @@ import { calculateSaleCogs, calculateSaleGrossProfit } from '../../../src/servic
 import { formatSqliteError } from '../../../src/db/database';
 import { getSelectableAccounts } from '../../../src/services/banking';
 import { StatusBadge } from '../../../src/components/StatusBadge';
+import { AttachmentSection } from '../../../src/components/AttachmentSection';
 import { StatCard } from '../../../src/components/StatCard';
 import { AccountPicker } from '../../../src/components/AccountPicker';
 import {
   FormInput,
   FormScreen,
   PrimaryButton,
+  DatePickerField,
   SectionHeader,
   useScreenStyles,
 } from '../../../src/components/ui';
@@ -27,7 +29,7 @@ import { roundMoney } from '../../../src/utils/money';
 import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
-import { todayISO } from '../../../src/utils/date';
+import { todayISO, isValidISODate } from '../../../src/utils/date';
 import { radius, spacing } from '../../../src/constants/theme';
 import type { Account, Sale, SaleItem, SalePayment } from '../../../src/types';
 
@@ -87,6 +89,7 @@ export default function SaleDetailScreen() {
   const [payments, setPayments] = useState<SalePayment[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [payAmount, setPayAmount] = useState('');
+  const [payDate, setPayDate] = useState(todayISO());
   const [selectedAccount, setSelectedAccount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -142,6 +145,10 @@ export default function SaleDetailScreen() {
       Alert.alert('Error', 'Select a payment account');
       return;
     }
+    if (!isValidISODate(payDate)) {
+      Alert.alert('Error', 'Select a valid payment date');
+      return;
+    }
 
     const due = sale.total_amount - sale.paid_amount;
     if (amount > due + 0.01) {
@@ -154,9 +161,10 @@ export default function SaleDetailScreen() {
       await addSalePayment(sale.id, {
         account_id: selectedAccount,
         amount,
-        date: todayISO(),
+        date: payDate,
       });
       setPayAmount('');
+      setPayDate(todayISO());
       refresh();
       await load();
     } catch (e) {
@@ -292,6 +300,7 @@ export default function SaleDetailScreen() {
             keyboardType="decimal-pad"
             placeholder="Amount"
           />
+          <DatePickerField label="Payment date" value={payDate} onChange={setPayDate} />
           <TouchableOpacity
             onPress={() => setPayAmount(formatAmountInput(due))}
             style={{ marginBottom: spacing.sm }}
@@ -308,6 +317,8 @@ export default function SaleDetailScreen() {
           <Text style={localStyles.muted}>{sale.notes}</Text>
         </>
       ) : null}
+
+      <AttachmentSection referenceType="sale" referenceId={sale.id} />
 
       <View style={{ marginTop: spacing.lg }}>
         <PrimaryButton title="Delete Sale" onPress={handleDelete} variant="danger" />

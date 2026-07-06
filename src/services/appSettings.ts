@@ -13,6 +13,18 @@ const PURCHASE_INVOICE_PREFIX_KEY = 'purchase_invoice_prefix';
 const DEFAULT_FINANCIAL_YEAR_START_MONTH = 4;
 const DEFAULT_SALE_INVOICE_PREFIX = 'S';
 const DEFAULT_PURCHASE_INVOICE_PREFIX = 'P';
+const INVOICE_SETTING_MAX_LEN = 40;
+
+function isValidInvoiceSetting(value: string): boolean {
+  const cleaned = value.trim().replace(/\s+/g, '').toUpperCase();
+  if (!cleaned) return false;
+  const withNumber = cleaned.match(/^(.*)-(\d+)$/);
+  if (withNumber) {
+    const stem = withNumber[1];
+    return !!stem && /^[A-Z0-9-]+$/.test(stem);
+  }
+  return /^[A-Z0-9-]+$/.test(cleaned);
+}
 
 async function getSettingValue(key: string): Promise<string | null> {
   const db = await getDatabase();
@@ -123,10 +135,10 @@ export async function getSaleInvoicePrefix(): Promise<string> {
 
 export async function setSaleInvoicePrefix(prefix: string): Promise<void> {
   const cleaned = prefix.trim().replace(/\s+/g, '').toUpperCase();
-  if (!cleaned || !/^[A-Z0-9-]+$/.test(cleaned)) {
-    throw new Error('Use letters, numbers, or hyphen only');
+  if (!isValidInvoiceSetting(cleaned)) {
+    throw new Error('Use your next invoice number, e.g. BPH2627-0003');
   }
-  await setSettingValue(SALE_INVOICE_PREFIX_KEY, cleaned.slice(0, 12));
+  await setSettingValue(SALE_INVOICE_PREFIX_KEY, cleaned.slice(0, INVOICE_SETTING_MAX_LEN));
 }
 
 export async function getPurchaseInvoicePrefix(): Promise<string> {
@@ -137,8 +149,8 @@ export async function getPurchaseInvoicePrefix(): Promise<string> {
 
 export async function setPurchaseInvoicePrefix(prefix: string): Promise<void> {
   const cleaned = prefix.trim().replace(/\s+/g, '').toUpperCase();
-  if (!cleaned || !/^[A-Z0-9-]+$/.test(cleaned)) {
-    throw new Error('Use letters, numbers, or hyphen only');
+  if (!isValidInvoiceSetting(cleaned)) {
+    throw new Error('Use your next invoice number, e.g. GHP2728-000000013');
   }
-  await setSettingValue(PURCHASE_INVOICE_PREFIX_KEY, cleaned.slice(0, 12));
+  await setSettingValue(PURCHASE_INVOICE_PREFIX_KEY, cleaned.slice(0, INVOICE_SETTING_MAX_LEN));
 }

@@ -5,6 +5,7 @@ import {
   FormInput,
   FormScreen,
   PrimaryButton,
+  DatePickerField,
   SectionHeader,
 } from '../../../src/components/ui';
 import { AccountPicker } from '../../../src/components/AccountPicker';
@@ -96,7 +97,7 @@ export default function NewOtherIncomeScreen() {
         onChangeText={setAmount}
         keyboardType="decimal-pad"
       />
-      <FormInput label="Date (YYYY-MM-DD)" value={date} onChangeText={setDate} />
+      <DatePickerField label="Date" value={date} onChange={setDate} />
       <AccountPicker accounts={accounts} value={accountId} onChange={setAccountId} />
       <PrimaryButton title="Save Other Income" onPress={handleSave} loading={loading} />
     </FormScreen>

@@ -258,3 +258,25 @@ export interface PurchaseItemInput {
   qty: number;
   unit_cost: number;
 }
+
+export type AttachmentReferenceType = 'sale' | 'purchase';
+
+export interface Attachment {
+  id: number;
+  reference_type: AttachmentReferenceType;
+  reference_id: number;
+  file_name: string;
+  mime_type: string;
+  storage_path: string;
+  file_size: number;
+  created_at: string;
+}
+
+/** Unsaved attachment held locally until a sale/purchase is created. */
+export interface PendingAttachment {
+  localKey: string;
+  file_name: string;
+  mime_type: string;
+  storage_path: string;
+  file_size: number;
+}

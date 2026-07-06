@@ -12,6 +12,7 @@ import {
   FormInput,
   FormScreen,
   PrimaryButton,
+  DatePickerField,
   useScreenStyles,
 } from '../../../src/components/ui';
 import { StatCard } from '../../../src/components/StatCard';
@@ -199,7 +200,7 @@ export default function OtherIncomeDetailScreen() {
             onChangeText={setAmount}
             keyboardType="decimal-pad"
           />
-          <FormInput label="Date (YYYY-MM-DD)" value={date} onChangeText={setDate} />
+          <DatePickerField label="Date" value={date} onChange={setDate} />
           <AccountPicker accounts={accounts} value={accountId} onChange={setAccountId} />
           <PrimaryButton title="Save Changes" onPress={handleSave} loading={saving} />
         </>

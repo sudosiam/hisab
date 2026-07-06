@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SystemUI from 'expo-system-ui';
 import {
   darkColors,
   lightColors,
@@ -52,6 +53,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     themeMode === 'system' ? systemScheme === 'dark' : themeMode === 'dark';
 
   const colors = isDark ? darkColors : lightColors;
+
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(colors.background).catch(() => {});
+  }, [colors.background]);
 
   const value = useMemo(
     () => ({

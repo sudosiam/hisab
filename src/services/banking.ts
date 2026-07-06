@@ -564,11 +564,17 @@ export async function transferBetweenAccounts(params: {
   const fromAccount = await getAccountById(params.from_account_id);
   const toAccount = await getAccountById(params.to_account_id);
   if (!fromAccount || !toAccount) throw new Error('Account not found');
-  if (fromAccount.current_balance + 0.01 < amount) {
-    throw new Error('Insufficient balance in the source account');
-  }
 
   await db.withTransactionAsync(async () => {
+    const freshFrom = await db.getFirstAsync<Account>(
+      'SELECT * FROM accounts WHERE id = ?',
+      [params.from_account_id]
+    );
+    if (!freshFrom) throw new Error('Account not found');
+    if (freshFrom.current_balance + 0.01 < amount) {
+      throw new Error('Insufficient balance in the source account');
+    }
+
     const outId = await recordTransaction(db, {
       account_id: params.from_account_id,
       type: 'transfer',
@@ -637,11 +643,17 @@ export async function recordWithdrawal(params: {
   const account = await getAccountById(params.account_id);
   if (!account) throw new Error('Account not found');
   if (account.is_excluded) throw new Error('Cannot use an excluded account');
-  if (account.current_balance + 0.01 < amount) {
-    throw new Error('Insufficient balance in this account');
-  }
 
   await db.withTransactionAsync(async () => {
+    const fresh = await db.getFirstAsync<Account>(
+      'SELECT * FROM accounts WHERE id = ?',
+      [params.account_id]
+    );
+    if (!fresh) throw new Error('Account not found');
+    if (fresh.current_balance + 0.01 < amount) {
+      throw new Error('Insufficient balance in this account');
+    }
+
     await recordTransaction(db, {
       account_id: params.account_id,
       type: 'withdrawal',
