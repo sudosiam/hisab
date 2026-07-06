@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import { roundMoney } from '../utils/money';
 
 export const DB_NAME = 'hisab.db';
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 /** Thrown when an existing database cannot be migrated to the current schema. */
 export class SchemaMigrationError extends Error {
@@ -146,6 +146,7 @@ async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Pr
     await ensureProductCategories(db);
     await ensureAccountsExcludedColumn(db);
     await ensurePurchaseVendorColumns(db);
+    await ensurePurchasesSubtotalDiscountColumns(db);
     await ensureOtherIncomeTable(db);
     await ensureSalesServiceChargesColumn(db);
     await ensureUniqueInvoiceNumbers(db);
@@ -281,6 +282,34 @@ async function ensurePurchaseVendorColumns(db: SQLite.SQLiteDatabase): Promise<v
   }
 }
 
+async function ensurePurchasesSubtotalDiscountColumns(db: SQLite.SQLiteDatabase): Promise<void> {
+  const table = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='purchases'`
+  );
+  if (!table) return;
+
+  const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(purchases)');
+  const names = new Set(columns.map((col) => col.name));
+  if (!names.has('subtotal')) {
+    await db.execAsync('ALTER TABLE purchases ADD COLUMN subtotal REAL NOT NULL DEFAULT 0');
+  }
+  if (!names.has('discount_amount')) {
+    await db.execAsync('ALTER TABLE purchases ADD COLUMN discount_amount REAL NOT NULL DEFAULT 0');
+  }
+
+  await db.execAsync(`
+    UPDATE purchases SET subtotal = (
+      SELECT COALESCE(SUM(total), 0) FROM purchase_items WHERE purchase_id = purchases.id
+    )
+    WHERE subtotal = 0
+      AND EXISTS (SELECT 1 FROM purchase_items WHERE purchase_id = purchases.id)
+  `);
+  await db.execAsync(`
+    UPDATE purchases SET discount_amount = MAX(0, subtotal - total_amount)
+    WHERE discount_amount = 0 AND subtotal > total_amount + 0.001
+  `);
+}
+
 /** De-duplicate existing invoice numbers, then enforce uniqueness at the DB level. */
 async function ensureUniqueInvoiceNumbers(db: SQLite.SQLiteDatabase): Promise<void> {
   for (const table of ['sales', 'purchases'] as const) {
@@ -396,6 +425,75 @@ async function ensureProductsSellPriceColumn(db: SQLite.SQLiteDatabase): Promise
  * Earlier releases deleted sales/purchases while foreign keys were OFF, so
  * CASCADE never fired and orphan child rows were left behind. Sweep them out.
  */
+async function repairSaleItemUnitCosts(db: SQLite.SQLiteDatabase): Promise<void> {
+  await db.execAsync(`
+    UPDATE sale_items
+    SET unit_cost = (
+      SELECT ABS(im.unit_cost)
+      FROM inventory_movements im
+      WHERE im.reference_type = 'sale'
+        AND im.reference_id = sale_items.sale_id
+        AND im.product_id = sale_items.product_id
+        AND im.type = 'sale'
+        AND im.unit_cost != 0
+      LIMIT 1
+    )
+    WHERE unit_cost = 0
+      AND EXISTS (
+        SELECT 1 FROM inventory_movements im
+        WHERE im.reference_type = 'sale'
+          AND im.reference_id = sale_items.sale_id
+          AND im.product_id = sale_items.product_id
+          AND im.type = 'sale'
+          AND im.unit_cost != 0
+      )
+  `);
+}
+
+async function cleanupOrphanInvoiceHeaders(db: SQLite.SQLiteDatabase): Promise<void> {
+  const orphanSales = await db.getAllAsync<{ id: number }>(
+    `SELECT id FROM sales WHERE id NOT IN (SELECT DISTINCT sale_id FROM sale_items)`
+  );
+  for (const { id } of orphanSales) {
+    const productIds = await db.getAllAsync<{ product_id: number }>(
+      `SELECT DISTINCT product_id FROM inventory_movements
+       WHERE reference_type = 'sale' AND reference_id = ?`,
+      [id]
+    );
+    await db.runAsync(
+      `DELETE FROM inventory_movements WHERE reference_type = 'sale' AND reference_id = ?`,
+      [id]
+    );
+    await reverseTransactionsByReference(db, 'sale', id);
+    await db.runAsync('DELETE FROM sale_payments WHERE sale_id = ?', [id]);
+    await db.runAsync('DELETE FROM sales WHERE id = ?', [id]);
+    for (const { product_id } of productIds) {
+      await recomputeProductStock(db, product_id);
+    }
+  }
+
+  const orphanPurchases = await db.getAllAsync<{ id: number }>(
+    `SELECT id FROM purchases WHERE id NOT IN (SELECT DISTINCT purchase_id FROM purchase_items)`
+  );
+  for (const { id } of orphanPurchases) {
+    const productIds = await db.getAllAsync<{ product_id: number }>(
+      `SELECT DISTINCT product_id FROM inventory_movements
+       WHERE reference_type = 'purchase' AND reference_id = ?`,
+      [id]
+    );
+    await db.runAsync(
+      `DELETE FROM inventory_movements WHERE reference_type = 'purchase' AND reference_id = ?`,
+      [id]
+    );
+    await reverseTransactionsByReference(db, 'purchase', id);
+    await db.runAsync('DELETE FROM purchase_payments WHERE purchase_id = ?', [id]);
+    await db.runAsync('DELETE FROM purchases WHERE id = ?', [id]);
+    for (const { product_id } of productIds) {
+      await recomputeProductStock(db, product_id);
+    }
+  }
+}
+
 async function cleanupOrphanChildRows(db: SQLite.SQLiteDatabase): Promise<void> {
   const statements = [
     `DELETE FROM sale_items WHERE sale_id NOT IN (SELECT id FROM sales)`,
@@ -412,6 +510,18 @@ async function cleanupOrphanChildRows(db: SQLite.SQLiteDatabase): Promise<void> 
       // Table may not exist yet on very old schemas; other migrations create it.
     }
   }
+
+  await repairSaleItemUnitCosts(db);
+  await cleanupOrphanInvoiceHeaders(db);
+}
+
+/** Fix stale sale costs and remove invoice headers left behind by old deletes. */
+export async function repairFinancialDataIntegrity(
+  db?: SQLite.SQLiteDatabase
+): Promise<void> {
+  const database = db ?? (await getDatabase());
+  await repairSaleItemUnitCosts(database);
+  await cleanupOrphanInvoiceHeaders(database);
 }
 
 async function getSchemaVersion(db: SQLite.SQLiteDatabase): Promise<number> {
@@ -440,7 +550,7 @@ async function verifySchema(db: SQLite.SQLiteDatabase): Promise<boolean> {
       'SELECT paid_amount, status, discount_amount, service_charges FROM sales LIMIT 1'
     );
     await db.getFirstAsync(
-      'SELECT paid_amount, status, vendor_invoice_no FROM purchases LIMIT 1'
+      'SELECT paid_amount, status, vendor_invoice_no, subtotal, discount_amount FROM purchases LIMIT 1'
     );
     await db.getFirstAsync('SELECT unit_cost FROM inventory_movements LIMIT 1');
     await db.getFirstAsync('SELECT type, amount, payment_id FROM transactions LIMIT 1');
@@ -597,6 +707,8 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       supplier_name TEXT NOT NULL,
       vendor_invoice_no TEXT,
       date TEXT NOT NULL,
+      subtotal REAL NOT NULL DEFAULT 0,
+      discount_amount REAL NOT NULL DEFAULT 0,
       total_amount REAL NOT NULL DEFAULT 0,
       paid_amount REAL NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'unpaid',
@@ -854,11 +966,17 @@ export async function reduceInventory(
     throw new Error(`Insufficient stock for ${product.name} (${product.current_qty} available)`);
   }
 
+  let unitCost = product.avg_cost;
+  if (unitCost <= 0) {
+    const recomputed = await recomputeProductStock(db, productId);
+    unitCost = recomputed.avgCost;
+  }
+
   await db.runAsync('UPDATE products SET current_qty = ROUND(current_qty - ?, 2) WHERE id = ?', [
     roundMoney(qty),
     productId,
   ]);
-  return product.avg_cost;
+  return unitCost;
 }
 
 export async function generateInvoiceNo(

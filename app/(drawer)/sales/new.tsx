@@ -21,6 +21,7 @@ import { DraftBanner } from '../../../src/components/DraftBanner';
 import { getProducts, getProductSellPrice } from '../../../src/services/inventory';
 import { getSelectableAccounts } from '../../../src/services/banking';
 import { createSale } from '../../../src/services/sales';
+import { getPartyByName } from '../../../src/services/parties';
 import { getNextSaleInvoiceNo } from '../../../src/services/invoiceNumbers';
 import { DRAFT_KEYS, loadDraft, type SaleFormDraft } from '../../../src/services/formDrafts';
 import { useFormDraft } from '../../../src/hooks/useFormDraft';
@@ -41,27 +42,31 @@ interface LineItem {
 }
 
 let lineItemCounter = 0;
-function createLineItem(product: Product): LineItem {
+function createEmptyLineItem(): LineItem {
   lineItemCounter += 1;
   return {
     key: `sale-item-${Date.now()}-${lineItemCounter}`,
-    product_id: product.id,
+    product_id: 0,
     qty: '1',
-    unit_price: formatAmountInput(getProductSellPrice(product)),
+    unit_price: '',
   };
 }
 
 function isSaleDraftEmpty(d: SaleFormDraft): boolean {
   const hasText =
     d.partyName.trim() ||
+    d.partyPhone.trim() ||
     d.notes.trim() ||
     d.serviceCharges.trim() ||
     (parseFloat(d.discount) || 0) > 0 ||
     d.payments.length > 0;
   if (hasText) return false;
   if (d.items.length === 0) return true;
-  if (d.items.length > 1) return false;
-  return d.items[0].qty === '1';
+  if (d.items.length === 1) {
+    const item = d.items[0];
+    return !item.product_id && item.qty === '1' && !item.unit_price.trim();
+  }
+  return false;
 }
 
 export default function NewSaleScreen() {
@@ -101,6 +106,7 @@ export default function NewSaleScreen() {
   const [partyName, setPartyName] = useState(
     () => (typeof partyNameParam === 'string' ? decodeURIComponent(partyNameParam) : '')
   );
+  const [partyPhone, setPartyPhone] = useState('');
   const [invoiceNo, setInvoiceNo] = useState('');
   const [date, setDate] = useState(todayISO());
   const [notes, setNotes] = useState('');
@@ -115,6 +121,7 @@ export default function NewSaleScreen() {
   const draftPayload = useMemo<SaleFormDraft>(
     () => ({
       partyName,
+      partyPhone,
       invoiceNo,
       date,
       notes,
@@ -123,7 +130,7 @@ export default function NewSaleScreen() {
       items,
       payments,
     }),
-    [partyName, invoiceNo, date, notes, discount, serviceCharges, items, payments]
+    [partyName, partyPhone, invoiceNo, date, notes, discount, serviceCharges, items, payments]
   );
 
   const { markReady, discardDraft, clearDraftOnSave, hasDraft, noteDraftLoaded } = useFormDraft(
@@ -134,6 +141,7 @@ export default function NewSaleScreen() {
 
   const resetForm = async (productList: Product[]) => {
     setPartyName('');
+    setPartyPhone('');
     setInvoiceNo(await getNextSaleInvoiceNo());
     setDate(todayISO());
     setNotes('');
@@ -141,7 +149,7 @@ export default function NewSaleScreen() {
     setServiceCharges('');
     setPayments([]);
     if (productList.length > 0) {
-      setItems([createLineItem(productList[0])]);
+      setItems([createEmptyLineItem()]);
     } else {
       setItems([]);
     }
@@ -174,24 +182,25 @@ export default function NewSaleScreen() {
         if (cancelled) return;
         if (draft && !isSaleDraftEmpty(draft)) {
           setPartyName(draft.partyName || '');
+          setPartyPhone(draft.partyPhone || '');
           setInvoiceNo(draft.invoiceNo || nextInvoice);
           setDate(isValidISODate(draft.date) ? draft.date : todayISO());
           setNotes(draft.notes || '');
           setDiscount(Number.isFinite(parseFloat(draft.discount)) ? draft.discount : '0');
           setServiceCharges(draft.serviceCharges || '');
-          const validItems = (draft.items ?? []).filter((i) =>
-            p.some((prod) => prod.id === i.product_id)
+          const validItems = (draft.items ?? []).filter(
+            (i) => !i.product_id || p.some((prod) => prod.id === i.product_id)
           );
-          setItems(validItems.length ? validItems : p.length > 0 ? [createLineItem(p[0])] : []);
+          setItems(validItems.length ? validItems : p.length > 0 ? [createEmptyLineItem()] : []);
           setPayments(draft.payments || []);
           noteDraftLoaded();
         } else if (typeof partyNameParam === 'string' && partyNameParam) {
           setPartyName(decodeURIComponent(partyNameParam));
           setInvoiceNo(nextInvoice);
-          if (p.length > 0) setItems([createLineItem(p[0])]);
+          if (p.length > 0) setItems([createEmptyLineItem()]);
         } else {
           setInvoiceNo(nextInvoice);
-          if (p.length > 0) setItems([createLineItem(p[0])]);
+          if (p.length > 0) setItems([createEmptyLineItem()]);
         }
       } catch (e) {
         if (!cancelled) Alert.alert('Error', formatSqliteError(e));
@@ -204,6 +213,23 @@ export default function NewSaleScreen() {
     };
   }, [markReady, noteDraftLoaded, partyNameParam]);
 
+  React.useEffect(() => {
+    let cancelled = false;
+    const name = partyName.trim();
+    if (!name) {
+      setPartyPhone('');
+      return;
+    }
+    getPartyByName(name, 'customer').then((party) => {
+      if (!cancelled && party) {
+        setPartyPhone(party.phone ?? '');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [partyName]);
+
   const subtotal = items.reduce(
     (sum, item) => sum + (parseFloat(item.qty) || 0) * (parseFloat(item.unit_price) || 0),
     0
@@ -214,7 +240,7 @@ export default function NewSaleScreen() {
 
   const addItem = () => {
     if (products.length === 0) return;
-    setItems([...items, createLineItem(products[0])]);
+    setItems([...items, createEmptyLineItem()]);
   };
 
   const updateItem = (index: number, field: 'product_id' | 'qty' | 'unit_price', value: string | number) => {
@@ -264,6 +290,10 @@ export default function NewSaleScreen() {
     // Aggregate quantities per product so split lines are validated together.
     const qtyByProduct = new Map<number, number>();
     for (const item of items) {
+      if (!item.product_id) {
+        Alert.alert('Error', 'Select a product for each line item');
+        return;
+      }
       const qty = parseFloat(item.qty);
       const price = parseFloat(item.unit_price);
       if (!qty || qty <= 0) {
@@ -291,6 +321,7 @@ export default function NewSaleScreen() {
     try {
       const saleId = await createSale({
         party_name: partyName.trim(),
+        party_phone: partyPhone.trim() || undefined,
         invoice_no: invoiceNo.trim(),
         date,
         notes: notes.trim() || undefined,
@@ -330,6 +361,13 @@ export default function NewSaleScreen() {
         placeholder="Auto-generated"
       />
       <CustomerAutocomplete value={partyName} onChange={setPartyName} />
+      <FormInput
+        label="Phone"
+        value={partyPhone}
+        onChangeText={setPartyPhone}
+        keyboardType="phone-pad"
+        placeholder="Customer mobile number"
+      />
       <FormInput label="Date (YYYY-MM-DD)" value={date} onChangeText={setDate} />
       <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
 

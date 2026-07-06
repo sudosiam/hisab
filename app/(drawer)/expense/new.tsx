@@ -10,7 +10,7 @@ import {
 } from '../../../src/components/ui';
 import { AccountPicker } from '../../../src/components/AccountPicker';
 import { DraftBanner } from '../../../src/components/DraftBanner';
-import { createExpense, getSelectableAccounts } from '../../../src/services/banking';
+import { createExpense, getPaymentAccounts } from '../../../src/services/banking';
 import { DRAFT_KEYS, loadDraft, type ExpenseFormDraft } from '../../../src/services/formDrafts';
 import { useFormDraft } from '../../../src/hooks/useFormDraft';
 import { formatSqliteError } from '../../../src/db/database';
@@ -94,7 +94,7 @@ export default function NewExpenseScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const a = await getSelectableAccounts();
+        const a = await getPaymentAccounts();
         if (cancelled) return;
         setAccounts(a);
         const defaultAccount = a[0]?.id ?? 0;

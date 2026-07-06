@@ -10,6 +10,7 @@ import {
   getMonthRange,
 } from '../utils/date';
 import { addMoney, roundMoney, subMoney } from '../utils/money';
+import { SALE_LINE_UNIT_COST_SQL } from './financials';
 
 export interface GrowthSnapshot {
   netWorth: number;
@@ -85,17 +86,19 @@ async function getFiscalYearFinancialsByMonth(
 
   const [revenueRows, cogsRows, expenseRows, otherRows] = await Promise.all([
     db.getAllAsync<{ month_key: string; total: number }>(
-      `SELECT substr(date, 1, 7) as month_key, COALESCE(SUM(total_amount), 0) as total
-       FROM sales WHERE date >= ? AND date <= ?
+      `SELECT substr(s.date, 1, 7) as month_key, COALESCE(SUM(s.total_amount), 0) as total
+       FROM sales s
+       WHERE s.date >= ? AND s.date <= ?
+         AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id)
        GROUP BY month_key`,
       [fyStart, fyEnd]
     ),
     db.getAllAsync<{ month_key: string; total: number }>(
       `SELECT substr(s.date, 1, 7) as month_key, COALESCE(SUM(
-         si.unit_cost * si.qty *
-         CASE WHEN s.subtotal > 0 THEN (s.subtotal - s.discount_amount) / s.subtotal ELSE 1 END
+         ${SALE_LINE_UNIT_COST_SQL} * si.qty
        ), 0) as total
        FROM sale_items si JOIN sales s ON s.id = si.sale_id
+       JOIN products p ON p.id = si.product_id
        WHERE s.date >= ? AND s.date <= ?
        GROUP BY month_key`,
       [fyStart, fyEnd]

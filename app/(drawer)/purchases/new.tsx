@@ -19,7 +19,7 @@ import { ProductPicker } from '../../../src/components/ProductPicker';
 import { PaymentSplitForm, PaymentRow } from '../../../src/components/PaymentSplitForm';
 import { DraftBanner } from '../../../src/components/DraftBanner';
 import { getProducts } from '../../../src/services/inventory';
-import { getSelectableAccounts } from '../../../src/services/banking';
+import { getPaymentAccounts } from '../../../src/services/banking';
 import { createPurchase } from '../../../src/services/purchases';
 import { getNextPurchaseInvoiceNo } from '../../../src/services/invoiceNumbers';
 import { DRAFT_KEYS, loadDraft, type PurchaseFormDraft } from '../../../src/services/formDrafts';
@@ -41,13 +41,13 @@ interface LineItem {
 }
 
 let lineItemCounter = 0;
-function createLineItem(product: Product): LineItem {
+function createEmptyLineItem(): LineItem {
   lineItemCounter += 1;
   return {
     key: `purchase-item-${Date.now()}-${lineItemCounter}`,
-    product_id: product.id,
+    product_id: 0,
     qty: '1',
-    unit_cost: formatAmountInput(product.avg_cost),
+    unit_cost: '',
   };
 }
 
@@ -60,8 +60,11 @@ function isPurchaseDraftEmpty(d: PurchaseFormDraft): boolean {
     d.payments.length > 0;
   if (hasText) return false;
   if (d.items.length === 0) return true;
-  if (d.items.length > 1) return false;
-  return d.items[0].qty === '1';
+  if (d.items.length === 1) {
+    const item = d.items[0];
+    return !item.product_id && item.qty === '1' && !item.unit_cost.trim();
+  }
+  return false;
 }
 
 export default function NewPurchaseScreen() {
@@ -141,7 +144,7 @@ export default function NewPurchaseScreen() {
     setDiscount('0');
     setPayments([]);
     if (productList.length > 0) {
-      setItems([createLineItem(productList[0])]);
+      setItems([createEmptyLineItem()]);
     } else {
       setItems([]);
     }
@@ -165,7 +168,7 @@ export default function NewPurchaseScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const [p, a] = await Promise.all([getProducts(), getSelectableAccounts()]);
+        const [p, a] = await Promise.all([getProducts(), getPaymentAccounts()]);
         if (cancelled) return;
         setProducts(p);
         setAccounts(a);
@@ -179,19 +182,19 @@ export default function NewPurchaseScreen() {
           setVendorInvoiceNo(draft.vendorInvoiceNo || '');
           setNotes(draft.notes || '');
           setDiscount(Number.isFinite(parseFloat(draft.discount)) ? draft.discount : '0');
-          const validItems = (draft.items ?? []).filter((i) =>
-            p.some((prod) => prod.id === i.product_id)
+          const validItems = (draft.items ?? []).filter(
+            (i) => !i.product_id || p.some((prod) => prod.id === i.product_id)
           );
-          setItems(validItems.length ? validItems : p.length > 0 ? [createLineItem(p[0])] : []);
+          setItems(validItems.length ? validItems : p.length > 0 ? [createEmptyLineItem()] : []);
           setPayments(draft.payments || []);
           noteDraftLoaded();
         } else if (typeof supplierNameParam === 'string' && supplierNameParam) {
           setSupplierName(decodeURIComponent(supplierNameParam));
           setInvoiceNo(nextInvoice);
-          if (p.length > 0) setItems([createLineItem(p[0])]);
+          if (p.length > 0) setItems([createEmptyLineItem()]);
         } else {
           setInvoiceNo(nextInvoice);
-          if (p.length > 0) setItems([createLineItem(p[0])]);
+          if (p.length > 0) setItems([createEmptyLineItem()]);
         }
       } catch (e) {
         if (!cancelled) Alert.alert('Error', formatSqliteError(e));
@@ -213,7 +216,7 @@ export default function NewPurchaseScreen() {
 
   const addItem = () => {
     if (products.length === 0) return;
-    setItems([...items, createLineItem(products[0])]);
+    setItems([...items, createEmptyLineItem()]);
   };
 
   const updateItem = (index: number, field: 'product_id' | 'qty' | 'unit_cost', value: string | number) => {
@@ -261,6 +264,10 @@ export default function NewPurchaseScreen() {
       }
     }
     for (const item of items) {
+      if (!item.product_id) {
+        Alert.alert('Error', 'Select a product for each line item');
+        return;
+      }
       const qty = parseFloat(item.qty);
       const cost = parseFloat(item.unit_cost);
       if (!qty || qty <= 0) {
@@ -348,6 +355,7 @@ export default function NewPurchaseScreen() {
                 products={products}
                 value={item.product_id}
                 onChange={(id) => updateItem(index, 'product_id', id)}
+                variant="purchase"
               />
               <View style={localStyles.itemRow}>
                 <View style={localStyles.qtyField}>

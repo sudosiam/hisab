@@ -16,7 +16,7 @@ import {
   deletePurchase,
 } from '../../../src/services/purchases';
 import { formatSqliteError } from '../../../src/db/database';
-import { getSelectableAccounts } from '../../../src/services/banking';
+import { getPaymentAccounts } from '../../../src/services/banking';
 import { StatusBadge } from '../../../src/components/StatusBadge';
 import { StatCard } from '../../../src/components/StatCard';
 import { AccountPicker } from '../../../src/components/AccountPicker';
@@ -92,7 +92,7 @@ export default function PurchaseDetailScreen() {
         getPurchaseById(purchaseId),
         getPurchaseItems(purchaseId),
         getPurchasePayments(purchaseId),
-        getSelectableAccounts(),
+        getPaymentAccounts(),
       ]);
       setPurchase(p);
       setItems(i);
@@ -189,6 +189,8 @@ export default function PurchaseDetailScreen() {
   const due = roundMoney(purchase.total_amount - purchase.paid_amount);
   const itemsCost = roundMoney(items.reduce((sum, item) => sum + item.total, 0));
   const totalQty = roundMoney(items.reduce((sum, item) => sum + item.qty, 0));
+  const hasDiscount = (purchase.discount_amount ?? 0) > 0;
+  const subtotal = purchase.subtotal > 0 ? purchase.subtotal : itemsCost;
 
   return (
     <FormScreen>
@@ -200,6 +202,12 @@ export default function PurchaseDetailScreen() {
       <Text style={localStyles.date}>{purchase.date}</Text>
       {purchase.vendor_invoice_no ? (
         <Text style={localStyles.date}>Vendor invoice: {purchase.vendor_invoice_no}</Text>
+      ) : null}
+
+      {hasDiscount ? (
+        <Text style={localStyles.date}>
+          Subtotal {formatCurrency(subtotal)} · Discount {formatCurrency(purchase.discount_amount)}
+        </Text>
       ) : null}
 
       <View style={localStyles.kpiRow}>

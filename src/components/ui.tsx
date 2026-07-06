@@ -594,7 +594,7 @@ interface ShortcutItem {
 const DASHBOARD_SHORTCUTS: ShortcutItem[] = [
   { label: 'New Sale', route: '/(drawer)/sales/new', icon: 'cart-outline' },
   { label: 'Purchase', route: '/(drawer)/purchases/new', icon: 'bag-handle-outline' },
-  { label: 'Expense', route: '/(drawer)/expense', icon: 'receipt-outline' },
+  { label: 'Expense', route: '/(drawer)/expense/new', icon: 'receipt-outline' },
   { label: 'Product', route: '/(drawer)/inventory/new', icon: 'cube-outline' },
 ];
 

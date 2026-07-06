@@ -4,6 +4,7 @@ import {
   recomputeProductStock,
   recordTransaction,
   reduceInventory,
+  repairFinancialDataIntegrity,
   reverseTransactionsByReference,
 } from '../db/database';
 import { isInvoiceNoCollision, resolveSaleInvoiceNo } from './invoiceNumbers';
@@ -73,6 +74,7 @@ export async function getSalePayments(saleId: number): Promise<SalePayment[]> {
 
 export async function createSale(params: {
   party_name: string;
+  party_phone?: string;
   date: string;
   items: SaleItemInput[];
   payments: PaymentInput[];
@@ -129,7 +131,7 @@ export async function createSale(params: {
   const attemptCreate = async (): Promise<void> => {
     await db.withTransactionAsync(async () => {
       const invoiceNo = await resolveSaleInvoiceNo(params.invoice_no);
-      await upsertParty(params.party_name, 'customer', db);
+      await upsertParty(params.party_name, 'customer', db, params.party_phone);
 
       const result = await db.runAsync(
         `INSERT INTO sales (invoice_no, party_name, date, subtotal, discount_amount, service_charges, total_amount, paid_amount, status, notes)
@@ -200,6 +202,7 @@ export async function createSale(params: {
     }
   }
 
+  await repairFinancialDataIntegrity();
   return saleId;
 }
 
@@ -310,4 +313,5 @@ export async function deleteSale(id: number): Promise<void> {
     await db.runAsync('DELETE FROM sales WHERE id = ?', [id]);
   });
 
+  await repairFinancialDataIntegrity();
 }

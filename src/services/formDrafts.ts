@@ -19,6 +19,7 @@ export interface DraftPaymentRow {
 
 export interface SaleFormDraft {
   partyName: string;
+  partyPhone: string;
   invoiceNo: string;
   date: string;
   notes: string;

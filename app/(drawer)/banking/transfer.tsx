@@ -7,7 +7,7 @@ import {
   PrimaryButton,
   useScreenStyles,
 } from '../../../src/components/ui';
-import { getSelectableAccounts, transferBetweenAccounts } from '../../../src/services/banking';
+import { getPaymentAccounts, transferBetweenAccounts } from '../../../src/services/banking';
 import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
@@ -48,7 +48,7 @@ export default function TransferScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    getSelectableAccounts()
+    getPaymentAccounts()
       .then((a) => {
         if (cancelled) return;
         setAccounts(a);

@@ -8,13 +8,8 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
-import {
-  getSaleById,
-  getSaleItems,
-  getSalePayments,
-  addSalePayment,
-  deleteSale,
-} from '../../../src/services/sales';
+import { getSaleById, getSaleItems, getSalePayments, addSalePayment, deleteSale } from '../../../src/services/sales';
+import { calculateSaleCogs, calculateSaleGrossProfit } from '../../../src/services/financials';
 import { formatSqliteError } from '../../../src/db/database';
 import { getSelectableAccounts } from '../../../src/services/banking';
 import { StatusBadge } from '../../../src/components/StatusBadge';
@@ -211,8 +206,8 @@ export default function SaleDetailScreen() {
   }
 
   const due = roundMoney(sale.total_amount - sale.paid_amount);
-  const totalCost = roundMoney(items.reduce((sum, item) => sum + item.unit_cost * item.qty, 0));
-  const grossProfit = roundMoney(sale.total_amount - totalCost);
+  const totalCost = calculateSaleCogs(sale, items);
+  const grossProfit = calculateSaleGrossProfit(sale, items);
   const marginPct =
     sale.total_amount > 0 ? roundMoney((grossProfit / sale.total_amount) * 100) : 0;
   const hasDiscount = (sale.discount_amount ?? 0) > 0;

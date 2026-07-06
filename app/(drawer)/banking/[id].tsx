@@ -386,7 +386,7 @@ export default function AccountDetailScreen() {
           <View style={{ flex: 1, marginRight: spacing.sm }}>
             <Text style={localStyles.excludeLabel}>Exclude from everywhere</Text>
             <Text style={localStyles.excludeHint}>
-              Hidden from pickers and excluded from balance totals
+              Hidden from sales totals and receipts; still usable for expenses, purchases, and transfers
             </Text>
           </View>
           <Switch

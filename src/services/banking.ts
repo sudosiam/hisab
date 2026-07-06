@@ -35,9 +35,19 @@ export async function getSelectableAccounts(): Promise<Account[]> {
   );
 }
 
+/** All accounts for outflows: expenses, purchase payments, and transfers (includes excluded). */
+export async function getPaymentAccounts(): Promise<Account[]> {
+  return getAccounts();
+}
+
 /** Selectable accounts plus one existing account (for edit screens). */
-export async function getAccountsForPicker(includeAccountId?: number): Promise<Account[]> {
-  const accounts = await getSelectableAccounts();
+export async function getAccountsForPicker(
+  includeAccountId?: number,
+  options?: { includeExcluded?: boolean }
+): Promise<Account[]> {
+  const accounts = options?.includeExcluded
+    ? await getPaymentAccounts()
+    : await getSelectableAccounts();
   if (!includeAccountId || accounts.some((a) => a.id === includeAccountId)) {
     return accounts;
   }
@@ -554,9 +564,6 @@ export async function transferBetweenAccounts(params: {
   const fromAccount = await getAccountById(params.from_account_id);
   const toAccount = await getAccountById(params.to_account_id);
   if (!fromAccount || !toAccount) throw new Error('Account not found');
-  if (fromAccount.is_excluded || toAccount.is_excluded) {
-    throw new Error('Cannot transfer using an excluded account');
-  }
   if (fromAccount.current_balance + 0.01 < amount) {
     throw new Error('Insufficient balance in the source account');
   }

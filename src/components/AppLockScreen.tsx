@@ -6,6 +6,8 @@ import {
   StyleSheet,
   Animated,
   ActivityIndicator,
+  AppState,
+  InteractionManager,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,6 +16,7 @@ import {
   clearFailedAttempts,
   getFailedAttemptState,
   PIN_LENGTH,
+  prefetchPinMaterial,
   setFailedAttemptState,
   verifyPin,
 } from '../services/appLock';
@@ -29,6 +32,7 @@ const KEYPAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'] as 
 
 const MAX_ATTEMPTS_BEFORE_LOCKOUT = 5;
 const LOCKOUT_SECONDS = 30;
+const BIOMETRIC_PROMPT_DELAY_MS = 280;
 
 export function AppLockScreen({ biometricEnabled, onUnlock }: Props) {
   const insets = useSafeAreaInsets();
@@ -40,12 +44,15 @@ export function AppLockScreen({ biometricEnabled, onUnlock }: Props) {
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
   const cooldownUntil = useRef(0);
   const shake = useRef(new Animated.Value(0)).current;
+  const biometricInFlight = useRef(false);
+  const biometricTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const lockedOut = cooldownRemaining > 0;
 
   // Restore the persisted attempt counter so force-quitting doesn't reset the cooldown.
   useEffect(() => {
+    void prefetchPinMaterial();
     let cancelled = false;
     getFailedAttemptState().then((state) => {
       if (cancelled) return;
@@ -81,12 +88,55 @@ export function AppLockScreen({ biometricEnabled, onUnlock }: Props) {
     ]).start();
   }, [shake]);
 
-  const tryBiometric = useCallback(async () => {
-    if (!biometricEnabled || checking) return;
+  const promptBiometric = useCallback(
+    async (delayMs = 0) => {
+      if (!biometricEnabled || checking || cooldownUntil.current > Date.now() || biometricInFlight.current) {
+        return;
+      }
+
+      biometricInFlight.current = true;
+      try {
+        if (delayMs > 0) {
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, delayMs);
+          });
+        }
+        if (!biometricEnabled || checking || cooldownUntil.current > Date.now()) return;
+
+        const ok = await authenticateWithBiometrics({ skipCapabilityCheck: true });
+        if (ok) {
+          await clearFailedAttempts();
+          onUnlock();
+        }
+      } finally {
+        biometricInFlight.current = false;
+      }
+    },
+    [biometricEnabled, checking, onUnlock]
+  );
+
+  const scheduleBiometricPrompt = useCallback(
+    (delayMs = BIOMETRIC_PROMPT_DELAY_MS) => {
+      if (!biometricEnabled || cooldownUntil.current > Date.now()) return;
+      if (biometricTimer.current) {
+        clearTimeout(biometricTimer.current);
+      }
+      biometricTimer.current = setTimeout(() => {
+        biometricTimer.current = null;
+        void promptBiometric(0);
+      }, delayMs);
+    },
+    [biometricEnabled, promptBiometric]
+  );
+
+  const tryBiometric = useCallback(() => {
+    if (biometricTimer.current) {
+      clearTimeout(biometricTimer.current);
+      biometricTimer.current = null;
+    }
     setError('');
-    const ok = await authenticateWithBiometrics();
-    if (ok) onUnlock();
-  }, [biometricEnabled, checking, onUnlock]);
+    void promptBiometric(0);
+  }, [promptBiometric]);
 
   const submitPin = useCallback(
     async (value: string) => {
@@ -100,7 +150,7 @@ export function AppLockScreen({ biometricEnabled, onUnlock }: Props) {
           setAttempts(0);
           cooldownUntil.current = 0;
           setCooldownRemaining(0);
-          clearFailedAttempts();
+          clearFailedAttempts().catch(() => {});
           onUnlock();
           return;
         }
@@ -117,7 +167,9 @@ export function AppLockScreen({ biometricEnabled, onUnlock }: Props) {
         } else {
           setError('Incorrect PIN');
         }
-        setFailedAttemptState({ attempts: nextAttempts, cooldownUntil: nextCooldownUntil });
+        setFailedAttemptState({ attempts: nextAttempts, cooldownUntil: nextCooldownUntil }).catch(
+          () => {}
+        );
         runShake();
       } finally {
         setChecking(false);
@@ -133,12 +185,27 @@ export function AppLockScreen({ biometricEnabled, onUnlock }: Props) {
   }, [pin, submitPin]);
 
   useEffect(() => {
-    if (biometricEnabled) {
-      authenticateWithBiometrics().then((ok) => {
-        if (ok) onUnlock();
-      });
-    }
-  }, [biometricEnabled, onUnlock]);
+    if (!biometricEnabled) return;
+
+    const task = InteractionManager.runAfterInteractions(() => {
+      scheduleBiometricPrompt(BIOMETRIC_PROMPT_DELAY_MS);
+    });
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        scheduleBiometricPrompt(BIOMETRIC_PROMPT_DELAY_MS);
+      }
+    });
+
+    return () => {
+      task.cancel();
+      subscription.remove();
+      if (biometricTimer.current) {
+        clearTimeout(biometricTimer.current);
+        biometricTimer.current = null;
+      }
+    };
+  }, [biometricEnabled, scheduleBiometricPrompt]);
 
   const onKeyPress = (key: (typeof KEYPAD)[number]) => {
     if (checking || lockedOut) return;

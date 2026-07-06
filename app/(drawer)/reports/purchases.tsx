@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
-import { getPurchaseReport } from '../../../src/services/reports';
+import { getPurchaseReport, sumReportAmounts } from '../../../src/services/reports';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { formatCurrency } from '../../../src/utils/format';
@@ -59,7 +59,7 @@ export default function PurchaseReportScreen() {
     setRefreshing(false);
   }, [load]);
 
-  const total = rows.reduce((s, r) => s + r.total_amount, 0);
+  const total = sumReportAmounts(rows);
 
   if (error) {
     return <ErrorState message={error} onRetry={load} />;

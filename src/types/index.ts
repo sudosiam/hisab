@@ -91,6 +91,8 @@ export interface Purchase {
   supplier_name: string;
   vendor_invoice_no: string | null;
   date: string;
+  subtotal: number;
+  discount_amount: number;
   total_amount: number;
   paid_amount: number;
   status: PaymentStatus;

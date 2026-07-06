@@ -102,7 +102,7 @@ export default function ExpenseDetailScreen() {
     }
     try {
       const e = await getExpenseById(expenseId);
-      const a = await getAccountsForPicker(e?.account_id);
+      const a = await getAccountsForPicker(e?.account_id, { includeExcluded: true });
       setExpense(e);
       setAccounts(a);
       if (e) fillForm(e);

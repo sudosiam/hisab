@@ -3,6 +3,7 @@ import {
   getPaymentStatus,
   recomputeProductStock,
   recordTransaction,
+  repairFinancialDataIntegrity,
   reverseTransactionsByReference,
   updateWeightedAvgCost,
 } from '../db/database';
@@ -107,7 +108,17 @@ export async function createPurchase(params: {
   }
 
   const discount = roundMoney(Math.max(0, params.discount_amount ?? 0));
+  if (discount > subtotal + 0.01) {
+    throw new Error('Discount cannot exceed subtotal');
+  }
   const totalAmount = roundMoney(Math.max(0, subMoney(subtotal, discount)));
+
+  // Spread invoice discount into each line's inventory cost (what you actually paid).
+  const costFactor = subtotal > 0 ? roundMoney(subMoney(subtotal, discount) / subtotal) : 1;
+  for (const item of itemDetails) {
+    item.unit_cost = roundMoney(item.unit_cost * costFactor);
+    item.total = mulMoney(item.qty, item.unit_cost);
+  }
 
   let paidAmount = 0;
   for (const payment of params.payments) {
@@ -120,21 +131,21 @@ export async function createPurchase(params: {
   const status = getPaymentStatus(totalAmount, paidAmount);
   let purchaseId = 0;
 
-  // Invoice number is resolved inside the transaction so a concurrent create
-  // cannot read the same next-sequence; retry once on auto-number collision.
   const attemptCreate = async (): Promise<void> => {
     await db.withTransactionAsync(async () => {
       const invoiceNo = await resolvePurchaseInvoiceNo(params.invoice_no);
       await upsertParty(params.supplier_name, 'vendor', db);
 
       const result = await db.runAsync(
-        `INSERT INTO purchases (invoice_no, supplier_name, vendor_invoice_no, date, total_amount, paid_amount, status, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO purchases (invoice_no, supplier_name, vendor_invoice_no, date, subtotal, discount_amount, total_amount, paid_amount, status, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           invoiceNo,
           params.supplier_name,
           params.vendor_invoice_no?.trim() || null,
           params.date,
+          subtotal,
+          discount,
           totalAmount,
           paidAmount,
           status,
@@ -188,6 +199,7 @@ export async function createPurchase(params: {
     }
   }
 
+  await repairFinancialDataIntegrity();
   return purchaseId;
 }
 
@@ -229,7 +241,6 @@ export async function addPurchasePayment(
       purchaseId,
     ]);
   });
-
 }
 
 export async function deletePurchase(id: number): Promise<void> {
@@ -241,8 +252,6 @@ export async function deletePurchase(id: number): Promise<void> {
   const productIds = Array.from(new Set(items.map((i) => i.product_id)));
 
   await db.withTransactionAsync(async () => {
-    // Drop this purchase's own inventory movements so the recomputed stock and
-    // cost basis exclude it entirely, then recompute affected products exactly.
     await db.runAsync(
       `DELETE FROM inventory_movements WHERE reference_type = 'purchase' AND reference_id = ?`,
       [id]
@@ -267,4 +276,5 @@ export async function deletePurchase(id: number): Promise<void> {
     await db.runAsync('DELETE FROM purchases WHERE id = ?', [id]);
   });
 
+  await repairFinancialDataIntegrity();
 }

@@ -17,6 +17,9 @@ import {
 } from '../services/appLock';
 import { useDatabase } from './DatabaseContext';
 
+/** Stay unlocked if the app is reopened within this window after leaving. */
+const LOCK_GRACE_MS = 30_000;
+
 interface AppLockContextValue {
   lockEnabled: boolean;
   locked: boolean;
@@ -50,6 +53,24 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
   const [lockSupported, setLockSupported] = useState(false);
   const sessionUnlocked = useRef(false);
   const appState = useRef(AppState.currentState);
+  const lockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backgroundAt = useRef<number | null>(null);
+
+  const clearLockTimer = useCallback(() => {
+    if (lockTimer.current) {
+      clearTimeout(lockTimer.current);
+      lockTimer.current = null;
+    }
+  }, []);
+
+  const scheduleLockAfterGrace = useCallback(() => {
+    clearLockTimer();
+    lockTimer.current = setTimeout(() => {
+      lockTimer.current = null;
+      sessionUnlocked.current = false;
+      setLocked(true);
+    }, LOCK_GRACE_MS);
+  }, [clearLockTimer]);
 
   const refreshLockSettings = useCallback(async () => {
     const supported = await isAppLockSupported();
@@ -99,20 +120,31 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
       const returningActive = nextState === 'active' && appState.current !== 'active';
 
       if (wasActive && goingBackground) {
-        sessionUnlocked.current = false;
-        // Lock immediately so the OS app-switcher snapshot doesn't leak data.
-        setLocked(true);
+        backgroundAt.current = Date.now();
+        scheduleLockAfterGrace();
       }
 
-      if (returningActive && lockEnabled) {
-        setLocked(true);
+      if (returningActive) {
+        const leftAt = backgroundAt.current;
+        backgroundAt.current = null;
+        const awayMs = leftAt != null ? Date.now() - leftAt : LOCK_GRACE_MS;
+
+        clearLockTimer();
+
+        if (awayMs >= LOCK_GRACE_MS) {
+          sessionUnlocked.current = false;
+          setLocked(true);
+        }
       }
 
       appState.current = nextState;
     });
 
-    return () => subscription.remove();
-  }, [lockEnabled]);
+    return () => {
+      subscription.remove();
+      clearLockTimer();
+    };
+  }, [clearLockTimer, lockEnabled, scheduleLockAfterGrace]);
 
   const unlock = useCallback(() => {
     sessionUnlocked.current = true;

@@ -284,6 +284,16 @@ export async function getPartyById(id: number): Promise<Party | null> {
   return db.getFirstAsync<Party>('SELECT * FROM parties WHERE id = ?', [id]);
 }
 
+export async function getPartyByName(name: string, type: PartyType): Promise<Party | null> {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  const db = await getDatabase();
+  return db.getFirstAsync<Party>(
+    'SELECT * FROM parties WHERE name = ? COLLATE NOCASE AND type = ?',
+    [trimmed, type]
+  );
+}
+
 export async function searchPartyNames(query: string, type: PartyType): Promise<string[]> {
   const db = await getDatabase();
   const q = query.trim();
@@ -325,7 +335,8 @@ export async function searchPartyNames(query: string, type: PartyType): Promise<
 export async function upsertParty(
   name: string,
   type: PartyType,
-  dbHandle?: SQLite.SQLiteDatabase
+  dbHandle?: SQLite.SQLiteDatabase,
+  phone?: string
 ): Promise<void> {
   const trimmed = name.trim();
   if (!trimmed) return;
@@ -335,9 +346,19 @@ export async function upsertParty(
     'SELECT id FROM parties WHERE name = ? COLLATE NOCASE AND type = ?',
     [trimmed, type]
   );
-  if (existing) return;
+  const phoneValue = phone?.trim() || null;
+  if (existing) {
+    if (phoneValue) {
+      await db.runAsync('UPDATE parties SET phone = ? WHERE id = ?', [phoneValue, existing.id]);
+    }
+    return;
+  }
 
-  await db.runAsync('INSERT INTO parties (name, type) VALUES (?, ?)', [trimmed, type]);
+  await db.runAsync('INSERT INTO parties (name, type, phone) VALUES (?, ?, ?)', [
+    trimmed,
+    type,
+    phoneValue,
+  ]);
 }
 
 export async function syncPartiesFromTransactions(): Promise<void> {

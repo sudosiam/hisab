@@ -93,6 +93,10 @@ export default function EditSaleScreen() {
       Alert.alert('Error', 'Enter a valid service charge amount');
       return;
     }
+    if (discountValue > sale.subtotal + 0.01) {
+      Alert.alert('Error', 'Discount cannot exceed subtotal');
+      return;
+    }
     setSaving(true);
     try {
       await updateSale(sale.id, {
