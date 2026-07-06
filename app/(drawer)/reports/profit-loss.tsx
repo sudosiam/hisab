@@ -48,18 +48,19 @@ export default function ProfitLossReportScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    void refreshKey;
     try {
       setData(await getProfitLossReport(monthKey));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load report');
     }
-  }, [monthKey]);
+  }, [monthKey, refreshKey]);
 
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load, refreshKey])
+    }, [load])
   );
 
   if (error && !data) {

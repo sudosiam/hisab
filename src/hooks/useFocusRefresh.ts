@@ -44,8 +44,6 @@ export function useFocusRefresh(loader: () => Promise<void>, deps: unknown[]): F
       });
   }, []);
 
-  const depsKey = JSON.stringify(deps);
-
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -53,7 +51,9 @@ export function useFocusRefresh(loader: () => Promise<void>, deps: unknown[]): F
       return () => {
         active = false;
       };
-    }, [run, depsKey])
+      // Caller-controlled dependency list triggers reload when inputs change.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [run, ...deps])
   );
 
   const retry = useCallback(() => {

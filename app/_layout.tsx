@@ -1,5 +1,6 @@
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { DatabaseProvider } from '../src/context/DatabaseContext';
 import { FinancialYearProvider } from '../src/context/FinancialYearContext';
 import { AppLockProvider } from '../src/context/AppLockContext';
@@ -24,20 +25,22 @@ function ThemedRoot({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout() {
   return (
-    <ThemeProvider>
-      <ThemedRoot>
-        <ErrorBoundary>
-          <AppLockProvider>
-            <DatabaseProvider>
-              <FinancialYearProvider>
-                <ThemedStatusBar />
-                <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }} />
-              </FinancialYearProvider>
-            </DatabaseProvider>
-          </AppLockProvider>
-        </ErrorBoundary>
-      </ThemedRoot>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <ThemedRoot>
+          <ErrorBoundary>
+            <AppLockProvider>
+              <DatabaseProvider>
+                <FinancialYearProvider>
+                  <ThemedStatusBar />
+                  <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }} />
+                </FinancialYearProvider>
+              </DatabaseProvider>
+            </AppLockProvider>
+          </ErrorBoundary>
+        </ThemedRoot>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }
 

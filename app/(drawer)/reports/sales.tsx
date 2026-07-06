@@ -44,15 +44,16 @@ export default function SalesReportScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    void refreshKey;
     try {
       setRows(await getSalesReport(monthKey));
       setError(null);
     } catch (e) {
       setError(formatSqliteError(e));
     }
-  }, [monthKey]);
+  }, [monthKey, refreshKey]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load, refreshKey]));
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

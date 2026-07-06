@@ -65,7 +65,7 @@ export function ProductPicker({
     if (selected) {
       setCategoryFilter(categoryLabel(selected));
     }
-  }, [selected?.id]);
+  }, [selected?.id, selected]);
 
   const filteredProducts = useMemo(() => {
     const pool =
