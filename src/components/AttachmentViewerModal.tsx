@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import {
   Modal,
   View,
@@ -36,6 +36,14 @@ export function AttachmentViewerModal({ item, onClose, onDeleted, onDelete }: Pr
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const [busy, setBusy] = useState<'open' | 'share' | 'download' | 'delete' | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const styles = useMemo(
     () =>
@@ -145,9 +153,13 @@ export function AttachmentViewerModal({ item, onClose, onDeleted, onDelete }: Pr
         Alert.alert('Download', message);
       }
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Action failed');
+      if (mountedRef.current) {
+        Alert.alert('Error', e instanceof Error ? e.message : 'Action failed');
+      }
     } finally {
-      setBusy(null);
+      if (mountedRef.current) {
+        setBusy(null);
+      }
     }
   };
 

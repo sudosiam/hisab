@@ -1,5 +1,5 @@
 import { getDatabase, repairFinancialDataIntegrity } from '../db/database';
-import { roundMoney } from '../utils/money';
+import { addMoney, mulMoney, roundMoney } from '../utils/money';
 import { resolvePeriodRange } from '../utils/period';
 import type { Sale, SaleItem } from '../types';
 
@@ -21,7 +21,7 @@ export function calculateSaleCogs(
   items: Pick<SaleItem, 'unit_cost' | 'qty'>[]
 ): number {
   // Discount reduces what the customer pays, not what the goods cost you.
-  return roundMoney(items.reduce((sum, item) => sum + item.unit_cost * item.qty, 0));
+  return addMoney(...items.map((item) => mulMoney(item.unit_cost, item.qty)));
 }
 
 export function calculateSaleGrossProfit(

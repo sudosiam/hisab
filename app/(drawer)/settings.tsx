@@ -498,7 +498,10 @@ export default function SettingsScreen() {
       await refreshLockSettings();
       unlock();
       closePinModal();
-      Alert.alert('App lock enabled', 'Your PIN is set. The app locks when you leave it.');
+      Alert.alert(
+        'App lock enabled',
+        'Your PIN is set. The app locks after 30 seconds in the background, or immediately when reopened after that.'
+      );
       return;
     }
 

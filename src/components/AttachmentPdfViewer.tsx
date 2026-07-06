@@ -1,7 +1,8 @@
+import * as FileSystem from 'expo-file-system/legacy';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { openAttachmentExternal, readAttachmentBase64 } from '../services/attachments';
+import { openAttachmentExternal } from '../services/attachments';
 import type { Attachment } from '../types';
 
 interface Props {
@@ -9,114 +10,52 @@ interface Props {
   uri: string;
 }
 
-const PDF_VIEWER_HTML = `<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=4.0" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <style>
-      html, body { margin: 0; padding: 0; background: #2d2d2d; }
-      body { padding: 10px 8px 24px; }
-      #status {
-        color: #d1d5db;
-        text-align: center;
-        padding: 24px 16px;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        font-size: 14px;
-      }
-      canvas {
-        display: block;
-        width: 100% !important;
-        height: auto !important;
-        margin: 0 auto 14px;
-        background: #ffffff;
-        border-radius: 4px;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="status">Loading PDF…</div>
-    <div id="pages"></div>
-    <script>
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
-      window.renderPdfFromApp = function (base64) {
-        var status = document.getElementById('status');
-        var container = document.getElementById('pages');
-        container.innerHTML = '';
-
-        try {
-          var raw = atob(base64);
-          var bytes = new Uint8Array(raw.length);
-          for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-
-          pdfjsLib.getDocument({ data: bytes }).promise.then(function (pdf) {
-            status.textContent = '';
-            var scale = Math.max(1, Math.min(2.2, (window.innerWidth - 16) / 595));
-
-            function renderPage(pageNum) {
-              if (pageNum > pdf.numPages) return Promise.resolve();
-              return pdf.getPage(pageNum).then(function (page) {
-                var viewport = page.getViewport({ scale: scale });
-                var canvas = document.createElement('canvas');
-                var ctx = canvas.getContext('2d');
-                canvas.width = viewport.width;
-                canvas.height = viewport.height;
-                container.appendChild(canvas);
-                return page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function () {
-                  return renderPage(pageNum + 1);
-                });
-              });
-            }
-
-            return renderPage(1);
-          }).catch(function (err) {
-            status.textContent = 'Could not render PDF.';
-            window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: String(err) }));
-          });
-        } catch (err) {
-          status.textContent = 'Could not render PDF.';
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: String(err) }));
-        }
-      };
-    </script>
-  </body>
-</html>`;
+const LOAD_TIMEOUT_MS = 12_000;
 
 export function AttachmentPdfViewer({ item, uri }: Props) {
-  const webRef = useRef<WebView>(null);
-  const [base64, setBase64] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [webUri, setWebUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [opening, setOpening] = useState(false);
 
+  const markFailed = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    setFailed(true);
+  };
+
   useEffect(() => {
     let active = true;
-    setReady(false);
     setFailed(false);
-    setBase64(null);
+    setWebUri(null);
 
-    readAttachmentBase64(item)
-      .then((data) => {
-        if (active) setBase64(data);
-      })
-      .catch(() => {
-        if (active) setFailed(true);
-      });
+    timeoutRef.current = setTimeout(() => {
+      if (active) markFailed();
+    }, LOAD_TIMEOUT_MS);
+
+    (async () => {
+      try {
+        const info = await FileSystem.getInfoAsync(uri);
+        if (!info.exists) throw new Error('File not found');
+
+        const resolved =
+          Platform.OS === 'android' ? await FileSystem.getContentUriAsync(uri) : uri;
+        if (active) setWebUri(resolved);
+      } catch {
+        if (active) markFailed();
+      }
+    })();
 
     return () => {
       active = false;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     };
   }, [item, uri]);
-
-  const injectPdf = () => {
-    if (!base64 || !webRef.current) return;
-    webRef.current.injectJavaScript(
-      `window.renderPdfFromApp(${JSON.stringify(base64)}); true;`
-    );
-  };
 
   const handleOpenExternal = async () => {
     setOpening(true);
@@ -142,7 +81,7 @@ export function AttachmentPdfViewer({ item, uri }: Props) {
     );
   }
 
-  if (!base64) {
+  if (!webUri) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator color="#FFFFFF" size="large" />
@@ -153,28 +92,19 @@ export function AttachmentPdfViewer({ item, uri }: Props) {
   return (
     <View style={styles.wrap}>
       <WebView
-        ref={webRef}
-        source={{ html: PDF_VIEWER_HTML }}
+        source={{ uri: webUri }}
         style={styles.viewer}
         originWhitelist={['*']}
-        javaScriptEnabled
-        domStorageEnabled
-        mixedContentMode="always"
+        javaScriptEnabled={false}
         setSupportMultipleWindows={false}
         onLoadEnd={() => {
-          setReady(true);
-          injectPdf();
-        }}
-        onMessage={(event) => {
-          try {
-            const payload = JSON.parse(event.nativeEvent.data);
-            if (payload.type === 'error') setFailed(true);
-          } catch {
-            setFailed(true);
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
           }
         }}
-        onError={() => setFailed(true)}
-        onHttpError={() => setFailed(true)}
+        onError={() => markFailed()}
+        onHttpError={() => markFailed()}
         startInLoadingState
         renderLoading={() => (
           <View style={styles.loading}>
@@ -182,11 +112,6 @@ export function AttachmentPdfViewer({ item, uri }: Props) {
           </View>
         )}
       />
-      {!ready ? (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator color="#FFFFFF" size="large" />
-        </View>
-      ) : null}
       {Platform.OS === 'android' ? (
         <TouchableOpacity style={styles.floatingOpen} onPress={handleOpenExternal} disabled={opening}>
           <Text style={styles.floatingOpenText}>{opening ? 'Opening…' : 'Open in PDF app'}</Text>
@@ -208,12 +133,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#2d2d2d',
-  },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(45,45,45,0.85)',
   },
   center: {
     flex: 1,

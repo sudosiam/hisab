@@ -8,14 +8,22 @@ interface Props {
 
 interface State {
   error: Error | null;
+  resetKey: number;
 }
 
 export class ErrorBoundary extends React.Component<Props, State> {
-  state: State = { error: null };
+  state: State = { error: null, resetKey: 0 };
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Pick<State, 'error'> {
     return { error };
   }
+
+  private reset = () => {
+    this.setState((state) => ({
+      error: null,
+      resetKey: state.resetKey + 1,
+    }));
+  };
 
   render() {
     if (this.state.error) {
@@ -23,13 +31,13 @@ export class ErrorBoundary extends React.Component<Props, State> {
         <View style={styles.center}>
           <Text style={styles.title}>Something went wrong</Text>
           <Text style={styles.message}>{this.state.error.message}</Text>
-          <TouchableOpacity style={styles.btn} onPress={() => this.setState({ error: null })}>
+          <TouchableOpacity style={styles.btn} onPress={this.reset}>
             <Text style={styles.btnText}>Try Again</Text>
           </TouchableOpacity>
         </View>
       );
     }
-    return this.props.children;
+    return <React.Fragment key={this.state.resetKey}>{this.props.children}</React.Fragment>;
   }
 }
 

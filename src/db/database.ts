@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import { deleteDatabaseAsync } from 'expo-sqlite';
+import { waitForDatabaseAccess } from '../services/dbMaintenance';
 import { roundMoney } from '../utils/money';
 
 export const DB_NAME = 'hisab.db';
@@ -15,7 +15,6 @@ export class SchemaMigrationError extends Error {
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 let initPromise: Promise<SQLite.SQLiteDatabase> | null = null;
-let recoveredCorruptDatabase = false;
 
 function isLikelyCorruptDatabaseError(error: unknown): boolean {
   const msg = formatSqliteError(error).toLowerCase();
@@ -37,10 +36,11 @@ export async function invalidateDatabase(): Promise<void> {
   }
   dbInstance = null;
   initPromise = null;
-  recoveredCorruptDatabase = false;
 }
 
 export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
+  await waitForDatabaseAccess();
+
   if (dbInstance) {
     try {
       await dbInstance.getFirstAsync('SELECT 1');
@@ -69,18 +69,10 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
         }
         dbInstance = null;
 
-        if (!recoveredCorruptDatabase && isLikelyCorruptDatabaseError(error)) {
-          recoveredCorruptDatabase = true;
-          try {
-            await deleteDatabaseAsync(DB_NAME);
-          } catch {
-            // Best effort — continue to recreate schema.
-          }
-          db = await SQLite.openDatabaseAsync(DB_NAME);
-          await db.execAsync('PRAGMA foreign_keys = ON;');
-          await initSchema(db);
-          dbInstance = db;
-          return db;
+        if (isLikelyCorruptDatabaseError(error)) {
+          throw new SchemaMigrationError(
+            'Your database file appears damaged. Restore from a backup folder or file in Settings — do not reset unless you have no backup.'
+          );
         }
 
         throw error;
@@ -611,8 +603,25 @@ export async function repairFinancialDataIntegrity(
   db?: SQLite.SQLiteDatabase
 ): Promise<void> {
   const database = db ?? (await getDatabase());
+  await cleanupOrphanTransactions(database);
   await repairSaleItemUnitCosts(database);
   await cleanupOrphanInvoiceHeaders(database);
+}
+
+async function cleanupOrphanTransactions(db: SQLite.SQLiteDatabase): Promise<void> {
+  const statements = [
+    `DELETE FROM transactions WHERE reference_type = 'sale' AND reference_id IS NOT NULL AND reference_id NOT IN (SELECT id FROM sales)`,
+    `DELETE FROM transactions WHERE reference_type = 'purchase' AND reference_id IS NOT NULL AND reference_id NOT IN (SELECT id FROM purchases)`,
+    `DELETE FROM transactions WHERE reference_type = 'expense' AND reference_id IS NOT NULL AND reference_id NOT IN (SELECT id FROM expenses)`,
+    `DELETE FROM transactions WHERE reference_type = 'other_income' AND reference_id IS NOT NULL AND reference_id NOT IN (SELECT id FROM other_income)`,
+  ];
+  for (const sql of statements) {
+    try {
+      await db.execAsync(sql);
+    } catch {
+      // Table may not exist on very old schemas.
+    }
+  }
 }
 
 async function getSchemaVersion(db: SQLite.SQLiteDatabase): Promise<number> {

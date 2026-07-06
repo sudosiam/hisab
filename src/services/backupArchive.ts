@@ -4,13 +4,15 @@ import {
   getAttachmentFileUri,
   MEDIA_ROOT,
 } from './attachments';
+import { backupDbPathInZip, fullBackupZipName, isZipBackupBase64 } from './backupNames';
+
+export { backupDbPathInZip, fullBackupZipName, isZipBackupBase64 } from './backupNames';
 
 async function loadJSZip() {
   const { default: JSZip } = await import('jszip');
   return JSZip;
 }
 
-const BACKUP_PREFIX = 'hisab-backup-';
 const BACKUP_MEDIA_DIR = 'media';
 const MANIFEST_NAME = 'backup-manifest.json';
 
@@ -21,28 +23,10 @@ export interface FullBackupManifest {
   missingLocal: number;
 }
 
-export function fullBackupZipName(dateKey: string): string {
-  return `hisab-full-${dateKey}.zip`;
-}
-
-export function backupDbPathInZip(dateKey: string): string {
-  return `database/${BACKUP_PREFIX}${dateKey}.db`;
-}
-
 function mediaPathInZip(relativePath: string): string {
   return `${BACKUP_MEDIA_DIR}/${relativePath}`;
 }
 
-export function isZipBackupBase64(base64: string): boolean {
-  try {
-    const header = atob(base64.slice(0, 8));
-    return header.startsWith('PK');
-  } catch {
-    return false;
-  }
-}
-
-/** Build a zip containing the database file and all attachment media. */
 export async function buildFullBackupZipFromDb(
   dateKey: string,
   dbBase64: string
@@ -115,6 +99,7 @@ export async function extractFullBackupZipFromBase64(base64: string): Promise<Ex
   const zip = await JSZip.loadAsync(base64, { base64: true });
   let dbBase64: string | null = null;
   let dbLabel = 'backup.db';
+  const dbPaths: string[] = [];
   const mediaFiles: { relativePath: string; base64: string }[] = [];
 
   for (const path of Object.keys(zip.files)) {
@@ -124,6 +109,7 @@ export async function extractFullBackupZipFromBase64(base64: string): Promise<Ex
     if (path === MANIFEST_NAME) continue;
 
     if (path.startsWith('database/') && path.endsWith('.db')) {
+      dbPaths.push(path);
       dbBase64 = await entry.async('base64');
       dbLabel = path.split('/').pop() ?? dbLabel;
       continue;
@@ -138,8 +124,13 @@ export async function extractFullBackupZipFromBase64(base64: string): Promise<Ex
     }
   }
 
-  if (!dbBase64) {
+  if (!dbBase64 || dbPaths.length === 0) {
     throw new Error('No database file found inside the backup zip.');
+  }
+  if (dbPaths.length > 1) {
+    throw new Error(
+      `Backup zip contains ${dbPaths.length} database files (${dbPaths.join(', ')}). Expected exactly one.`
+    );
   }
 
   let manifest: FullBackupManifest | null = null;

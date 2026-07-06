@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -52,9 +52,15 @@ export function DatePickerField({
 }: Props) {
   const { colors, isDark } = useTheme();
   const [open, setOpen] = useState(false);
-  const initial = isValidISODate(value) ? parseISODate(value) : new Date();
-  const [viewMonth, setViewMonth] = useState(() => startOfMonth(initial));
-  const [draft, setDraft] = useState(initial);
+  const selectedDate = isValidISODate(value) ? parseISODate(value) : new Date();
+  const [viewMonth, setViewMonth] = useState(() => startOfMonth(selectedDate));
+  const [draft, setDraft] = useState(selectedDate);
+
+  useEffect(() => {
+    const next = isValidISODate(value) ? parseISODate(value) : new Date();
+    setDraft(next);
+    setViewMonth(startOfMonth(next));
+  }, [value]);
 
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
 

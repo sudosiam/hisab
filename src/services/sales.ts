@@ -195,6 +195,18 @@ export async function createSale(params: {
           date: payment.date,
         });
       }
+
+      const sumRow = await db.getFirstAsync<{ total: number }>(
+        `SELECT COALESCE(SUM(amount), 0) AS total FROM sale_payments WHERE sale_id = ?`,
+        [saleId]
+      );
+      const actualPaid = roundMoney(sumRow?.total ?? 0);
+      const actualStatus = getPaymentStatus(totalAmount, actualPaid);
+      await db.runAsync('UPDATE sales SET paid_amount = ?, status = ? WHERE id = ?', [
+        actualPaid,
+        actualStatus,
+        saleId,
+      ]);
     });
   };
 

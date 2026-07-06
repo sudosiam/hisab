@@ -1,10 +1,10 @@
-# Hisab v2 — Business Management App
+# Hisab v3 — Business Management App
 
 Android business management app built with **Expo SDK 54** and **SQLite**. All data stays on your device.
 
-**Current version:** `2.0.0` (Android `versionCode` 2)
+**Current version:** `3.1.2` (Android `versionCode` 6)
 
-## What’s in v2
+## What's in v3
 
 - **Financial year settings** — Pick FY year and start month; app auto-advances to the current FY and syncs reports
 - **Growth dashboard** — Net worth, monthly profit charts, equity trend
@@ -15,12 +15,13 @@ Android business management app built with **Expo SDK 54** and **SQLite**. All d
 - **Form drafts** — Resume interrupted sale/purchase/expense entries
 - **Whole-rupee display** — Amounts shown in ₹ without paise
 - **Invoicing prefixes** — Custom sale/purchase invoice prefixes in Settings
-- **Backup & restore** — Folder backup, export/import, daily auto-backup
+- **Backup & restore** — SAF folder backup, full zip export/import, daily auto-backup with WAL checkpoint
+- **Data safety** — Corrupt DB never auto-wiped; restore-first recovery; paid amounts reconciled from payment rows
 
 ## Features
 
 - **Sidebar navigation** — Dashboard, Sales, Purchases, Inventory, Banking, Balance Sheet, Growth, Reports, Settings
-- **SQLite database** — Local-first storage
+- **SQLite database** — Local-first storage (schema v17)
 - **Dashboard** — Sold, Purchased, Gross Profit, Net Profit, Expense, Total Liquid, Receivable (month/FY picker)
 - **Sales & Purchases** — Paid/unpaid lists, split payments, invoice detail with add payment
 - **Inventory** — Weighted average cost, opening stock, movement history
@@ -38,6 +39,14 @@ npx expo start
 
 Scan the QR code with **Expo Go** (SDK 54) on Android, or press `a` for an emulator.
 
+## Quality checks
+
+```bash
+npm run typecheck   # TypeScript
+npm run lint        # ESLint
+npm test            # Unit tests (money, format, backup, financials)
+```
+
 ## Build APK (EAS)
 
 Requires [Expo EAS CLI](https://docs.expo.dev/build/setup/) and an Expo account:
@@ -46,7 +55,7 @@ Requires [Expo EAS CLI](https://docs.expo.dev/build/setup/) and an Expo account:
 cd hisab
 npm install -g eas-cli
 eas login
-eas build:configure   # first time only
+eas build:configure   # first time only — links Expo project
 ```
 
 **Preview APK** (internal testing):
@@ -65,6 +74,19 @@ npm run build:apk:prod
 
 Download the `.apk` from the EAS build page when the build finishes.
 
+### Local debug APK (no EAS account)
+
+Requires Android SDK and JDK 17:
+
+```powershell
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+npx expo prebuild --platform android
+cd android
+.\gradlew assembleDebug
+```
+
+APK output: `android/app/build/outputs/apk/debug/app-debug.apk`
+
 ### Version bumps
 
 Keep these in sync when releasing:
@@ -75,15 +97,6 @@ Keep these in sync when releasing:
 | `package.json` | `version` |
 
 Settings → About reads `app.json` via `expo-constants`.
-
-## Push to GitHub
-
-```bash
-cd hisab
-git add -A
-git commit -m "Release v2.0.0"
-git push origin master
-```
 
 ## First Steps
 
@@ -109,5 +122,6 @@ git push origin master
 | `npm run android` | Run on Android device/emulator |
 | `npm run typecheck` | TypeScript check |
 | `npm run lint` | ESLint |
+| `npm test` | Jest unit tests |
 | `npm run build:apk` | EAS preview APK |
 | `npm run build:apk:prod` | EAS production APK |

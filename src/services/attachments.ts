@@ -18,6 +18,28 @@ export async function clearAllLocalMedia(): Promise<void> {
   }
 }
 
+const PENDING_ATTACHMENT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Remove stale draft attachment folders left after the OS kills the app mid-form. */
+export async function cleanupExpiredPendingAttachments(): Promise<void> {
+  const pendingRoot = `${MEDIA_ROOT}_pending/`;
+  const rootInfo = await FileSystem.getInfoAsync(pendingRoot);
+  if (!rootInfo.exists) return;
+
+  const sessions = await FileSystem.readDirectoryAsync(pendingRoot);
+  const now = Date.now();
+  for (const session of sessions) {
+    const sessionDir = `${pendingRoot}${session}`;
+    const sessionInfo = await FileSystem.getInfoAsync(sessionDir);
+    if (!sessionInfo.exists || !('modificationTime' in sessionInfo) || !sessionInfo.modificationTime) {
+      continue;
+    }
+    if (now - sessionInfo.modificationTime * 1000 > PENDING_ATTACHMENT_TTL_MS) {
+      await FileSystem.deleteAsync(sessionDir, { idempotent: true });
+    }
+  }
+}
+
 function absolutePath(relativePath: string): string {
   return `${MEDIA_ROOT}${relativePath}`;
 }
@@ -392,7 +414,8 @@ export async function openAttachmentExternal(item: Attachment): Promise<void> {
     await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
       data: contentUri,
       type: mimeType,
-      flags: 1,
+      // FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK
+      flags: 0x10000001,
     });
     return;
   }

@@ -18,31 +18,33 @@ export function useFocusRefresh(loader: () => Promise<void>, deps: unknown[]): F
   const [booting, setBooting] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const hasShownData = useRef(false);
+  const loaderRef = useRef(loader);
+  loaderRef.current = loader;
 
-  const run = useCallback(
-    (isActive: () => boolean) => {
-      if (!hasShownData.current) setBooting(true);
+  const run = useCallback((isActive: () => boolean) => {
+    if (!hasShownData.current) setBooting(true);
 
-      loader()
-        .then(() => {
-          if (!isActive()) return;
-          hasShownData.current = true;
-          setError(null);
-        })
-        .catch((e) => {
-          if (!isActive()) return;
-          // Keep showing existing data on refresh failures; only surface a
-          // blocking error when there is nothing on screen yet.
-          if (!hasShownData.current) {
-            setError(e instanceof Error ? e.message : 'Failed to load');
-          }
-        })
-        .finally(() => {
-          if (isActive()) setBooting(false);
-        });
-    },
-    [loader]
-  );
+    loaderRef
+      .current()
+      .then(() => {
+        if (!isActive()) return;
+        hasShownData.current = true;
+        setError(null);
+      })
+      .catch((e) => {
+        if (!isActive()) return;
+        // Keep showing existing data on refresh failures; only surface a
+        // blocking error when there is nothing on screen yet.
+        if (!hasShownData.current) {
+          setError(e instanceof Error ? e.message : 'Failed to load');
+        }
+      })
+      .finally(() => {
+        if (isActive()) setBooting(false);
+      });
+  }, []);
+
+  const depsKey = JSON.stringify(deps);
 
   useFocusEffect(
     useCallback(() => {
@@ -51,8 +53,7 @@ export function useFocusRefresh(loader: () => Promise<void>, deps: unknown[]): F
       return () => {
         active = false;
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [run, ...deps])
+    }, [run, depsKey])
   );
 
   const retry = useCallback(() => {

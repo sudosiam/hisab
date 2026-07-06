@@ -10,6 +10,7 @@ import {
   restoreLatestFromBackupFolder,
 } from '../services/backup';
 import { processRecurringExpenses } from '../services/banking';
+import { cleanupExpiredPendingAttachments } from '../services/attachments';
 import { useTheme } from './ThemeContext';
 import { spacing } from '../constants/theme';
 
@@ -85,6 +86,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         setReady(false);
+        await invalidateDatabase();
         setError(formatSqliteError(err));
         SplashScreen.hideAsync().catch(() => {});
       }
@@ -107,14 +109,17 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const retryInit = useCallback(() => {
-    setError(null);
-    setInitAttempt((a) => a + 1);
+    void invalidateDatabase().then(() => {
+      setError(null);
+      setInitAttempt((a) => a + 1);
+    });
   }, []);
 
   useEffect(() => {
     if (!ready) return;
 
     processRecurringExpenses().catch(() => {});
+    cleanupExpiredPendingAttachments().catch(() => {});
 
     // Defer backup so DB + UI finish mounting first (avoids Android SAF native crashes).
     const backupTimer = setTimeout(() => {
@@ -122,9 +127,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     }, 3000);
 
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        runDailyBackupIfDue().catch(() => {});
-      } else if (state === 'background' || state === 'inactive') {
+      if (state === 'background' || state === 'inactive') {
         backupOnBackground().catch(() => {});
       }
     });

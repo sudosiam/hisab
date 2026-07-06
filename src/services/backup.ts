@@ -5,7 +5,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { checkpointDatabase, closeDatabase, DB_NAME, databaseHasUserData, getDatabase, invalidateDatabase } from '../db/database';
 import { getAllAttachments, getAttachmentFileUri, MEDIA_ROOT, clearAllLocalMedia } from './attachments';
-import { withDbMaintenanceLock } from './dbMaintenance';
+import { withDbMaintenanceLock, withDatabaseRestore } from './dbMaintenance';
 import {
   buildFullBackupZipFromDb,
   extractFullBackupZipFromBase64,
@@ -696,16 +696,17 @@ async function writeDatabaseFromBase64(base64: string): Promise<void> {
 
 // --- Backup to folder ------------------------------------------------------
 
-// Serialize backups so the daily and app-lifecycle backups can't overlap and
-// race on the same file in the SAF folder.
-let backupInFlight: Promise<{ success: boolean; message: string }> | null = null;
+// Serialize backups so the daily and app-lifecycle backups can't overlap.
+const backupInFlight: { current: Promise<{ success: boolean; message: string }> | null } = {
+  current: null,
+};
 
 async function writeBackupToFolder(
   folderUri: string,
   dateKey: string
 ): Promise<{ success: boolean; message: string }> {
-  if (backupInFlight) return backupInFlight;
-  backupInFlight = withDbMaintenanceLock(async () => {
+  if (backupInFlight.current) return backupInFlight.current;
+  backupInFlight.current = withDbMaintenanceLock(async () => {
     const info = await FileSystem.getInfoAsync(getDbPath());
     if (!info.exists) {
       return { success: false, message: 'Database file not found.' };
@@ -755,9 +756,9 @@ async function writeBackupToFolder(
   });
 
   try {
-    return await backupInFlight;
+    return await backupInFlight.current;
   } finally {
-    backupInFlight = null;
+    backupInFlight.current = null;
   }
 }
 
@@ -805,7 +806,7 @@ export async function runAutoBackup(): Promise<{ ran: boolean; message?: string 
   return { ran: false, message: result.message };
 }
 
-/** Back up once per calendar day (used on app launch / when app becomes active). */
+/** Back up once per calendar day (used on app launch). */
 export async function runDailyBackupIfDue(): Promise<{ ran: boolean; message?: string }> {
   const enabled = await isAutoBackupEnabled();
   const folderUri = await getBackupFolderUri();
@@ -816,8 +817,7 @@ export async function runDailyBackupIfDue(): Promise<{ ran: boolean; message?: s
   const today = todayDateKey();
   const last = await getLastDailyBackupDate();
   if (last === today) {
-    // Refresh today's DB backup and sync attachments (not media-only).
-    return runAutoBackup();
+    return { ran: false };
   }
 
   return runAutoBackup();
@@ -884,7 +884,7 @@ export async function exportDatabase(): Promise<{ success: boolean; message: str
 export async function pickBackupFile(): Promise<PickedBackupFile | null> {
   const result = await DocumentPicker.getDocumentAsync({
     type: ['application/zip', 'application/x-sqlite3', 'application/octet-stream', '*/*'],
-    copyToCacheDirectory: true,
+    copyToCacheDirectory: false,
   });
   if (result.canceled || !result.assets?.[0]) return null;
   return { uri: result.assets[0].uri, name: result.assets[0].name };
@@ -909,17 +909,18 @@ async function restoreMediaAfterDbImport(
   isZip: boolean
 ): Promise<{ restored: number; note: string }> {
   try {
-    await clearLocalMediaBeforeRestore();
     let mediaRestored = 0;
+    const folderUri = await getBackupFolderUri();
+
     if (zipMedia.length > 0) {
+      // Only wipe local media once replacement files are ready to write.
+      await clearLocalMediaBeforeRestore();
       mediaRestored = await writeExtractedMediaToLocal(zipMedia);
-    } else {
-      const folderUri = await getBackupFolderUri();
-      if (folderUri) {
-        mediaRestored = await restoreMediaFromBackupFolder(folderUri);
-        if (mediaRestored === 0) {
-          mediaRestored = await restoreMediaFromLatestFullZip(folderUri);
-        }
+    } else if (folderUri) {
+      // Folder restore overwrites matching paths — keep existing files until replaced.
+      mediaRestored = await restoreMediaFromBackupFolder(folderUri);
+      if (mediaRestored === 0) {
+        mediaRestored = await restoreMediaFromLatestFullZip(folderUri);
       }
     }
 
@@ -950,33 +951,40 @@ async function restoreMediaAfterDbImport(
 
 /** Restore the newest backup from the configured backup folder (full zip preferred). */
 export async function restoreLatestFromBackupFolder(): Promise<{ success: boolean; message: string }> {
-  const folderUri = await getBackupFolderUri();
-  if (!folderUri) {
-    return { success: false, message: 'No backup folder selected. Set it in Settings first.' };
-  }
-  if (!isSafUri(folderUri)) {
-    await AsyncStorage.removeItem(BACKUP_FOLDER_KEY);
+  try {
+    const folderUri = await getBackupFolderUri();
+    if (!folderUri) {
+      return { success: false, message: 'No backup folder selected. Set it in Settings first.' };
+    }
+    if (!isSafUri(folderUri)) {
+      await AsyncStorage.removeItem(BACKUP_FOLDER_KEY);
+      return {
+        success: false,
+        message: 'Backup folder access expired. Open Settings and choose the backup folder again.',
+      };
+    }
+
+    const fullFiles = await listFullBackupFiles(folderUri);
+    fullFiles.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+    if (fullFiles.length > 0) {
+      const latest = fullFiles[0];
+      return restoreDatabaseFromUri(latest.uri, fullBackupZipName(latest.dateKey));
+    }
+
+    const dbFiles = await listBackupFiles(folderUri);
+    dbFiles.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+    if (dbFiles.length > 0) {
+      const latest = dbFiles[0];
+      return restoreDatabaseFromUri(latest.uri, backupFileName(latest.dateKey));
+    }
+
+    return { success: false, message: 'No backup files found in the configured folder.' };
+  } catch (error) {
     return {
       success: false,
-      message: 'Backup folder access expired. Open Settings and choose the backup folder again.',
+      message: error instanceof Error ? error.message : 'Restore from backup folder failed.',
     };
   }
-
-  const fullFiles = await listFullBackupFiles(folderUri);
-  fullFiles.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
-  if (fullFiles.length > 0) {
-    const latest = fullFiles[0];
-    return restoreDatabaseFromUri(latest.uri, fullBackupZipName(latest.dateKey));
-  }
-
-  const dbFiles = await listBackupFiles(folderUri);
-  dbFiles.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
-  if (dbFiles.length > 0) {
-    const latest = dbFiles[0];
-    return restoreDatabaseFromUri(latest.uri, backupFileName(latest.dateKey));
-  }
-
-  return { success: false, message: 'No backup files found in the configured folder.' };
 }
 
 async function clearLocalMediaBeforeRestore(): Promise<void> {
@@ -987,10 +995,21 @@ export async function restoreDatabaseFromUri(
   sourceUri: string,
   label: string
 ): Promise<{ success: boolean; message: string }> {
-  return withDbMaintenanceLock(async () => {
-    const rawBase64 = await FileSystem.readAsStringAsync(sourceUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+  return withDatabaseRestore(async () => {
+    let rawBase64: string;
+    try {
+      rawBase64 = await FileSystem.readAsStringAsync(sourceUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    } catch (error) {
+      return {
+        success: false,
+        message:
+          error instanceof Error
+            ? `Could not read backup file: ${error.message}`
+            : 'Could not read backup file.',
+      };
+    }
 
     const isZip =
       isZipBackupBase64(rawBase64) || label.toLowerCase().endsWith('.zip');

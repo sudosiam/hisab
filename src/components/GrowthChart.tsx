@@ -85,7 +85,7 @@ export function GrowthChart({ data, variant, height = 140 }: Props) {
                   stroke={colors.border}
                   strokeWidth={1}
                 />
-                {points.length > 1 ? (
+                {points.length > 1 && polylinePoints.length > 0 ? (
                   <Polyline
                     points={polylinePoints}
                     fill="none"

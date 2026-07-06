@@ -72,11 +72,14 @@ export function AppLockScreen({ biometricEnabled, onUnlock }: Props) {
     const tick = () => {
       const remaining = Math.max(0, Math.ceil((cooldownUntil.current - Date.now()) / 1000));
       setCooldownRemaining(remaining);
+      if (remaining === 0) {
+        cooldownUntil.current = 0;
+      }
     };
     tick();
     const interval = setInterval(tick, 500);
     return () => clearInterval(interval);
-  }, [cooldownRemaining, attempts]);
+  }, [attempts]);
 
   const runShake = useCallback(() => {
     shake.setValue(0);

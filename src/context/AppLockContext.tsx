@@ -63,14 +63,19 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const lockNow = useCallback(() => {
+    clearLockTimer();
+    sessionUnlocked.current = false;
+    setLocked(true);
+  }, [clearLockTimer]);
+
   const scheduleLockAfterGrace = useCallback(() => {
     clearLockTimer();
     lockTimer.current = setTimeout(() => {
       lockTimer.current = null;
-      sessionUnlocked.current = false;
-      setLocked(true);
+      lockNow();
     }, LOCK_GRACE_MS);
-  }, [clearLockTimer]);
+  }, [clearLockTimer, lockNow]);
 
   const refreshLockSettings = useCallback(async () => {
     const supported = await isAppLockSupported();
@@ -116,24 +121,24 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
 
     const subscription = AppState.addEventListener('change', (nextState) => {
       const wasActive = appState.current === 'active';
-      const goingBackground = nextState === 'inactive' || nextState === 'background';
-      const returningActive = nextState === 'active' && appState.current !== 'active';
+      const leavingForeground = nextState === 'inactive' || nextState === 'background';
+      const returningActive = nextState === 'active' && !wasActive;
 
-      if (wasActive && goingBackground) {
-        backgroundAt.current = Date.now();
-        scheduleLockAfterGrace();
+      if (wasActive && leavingForeground) {
+        if (backgroundAt.current === null) {
+          backgroundAt.current = Date.now();
+          scheduleLockAfterGrace();
+        }
       }
 
       if (returningActive) {
         const leftAt = backgroundAt.current;
         backgroundAt.current = null;
-        const awayMs = leftAt != null ? Date.now() - leftAt : LOCK_GRACE_MS;
-
         clearLockTimer();
 
+        const awayMs = leftAt != null ? Date.now() - leftAt : 0;
         if (awayMs >= LOCK_GRACE_MS) {
-          sessionUnlocked.current = false;
-          setLocked(true);
+          lockNow();
         }
       }
 
@@ -144,7 +149,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
       subscription.remove();
       clearLockTimer();
     };
-  }, [clearLockTimer, lockEnabled, scheduleLockAfterGrace]);
+  }, [clearLockTimer, lockEnabled, lockNow, scheduleLockAfterGrace]);
 
   const unlock = useCallback(() => {
     sessionUnlocked.current = true;
@@ -178,7 +183,9 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
   if (!initialized) {
     return (
       <AppLockContext.Provider value={value}>
-        <AppBootScreen />
+        <View style={styles.root}>
+          <AppBootScreen />
+        </View>
       </AppLockContext.Provider>
     );
   }
@@ -187,19 +194,14 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppLockContext.Provider value={value}>
-      <View
-        style={[styles.appContainer, isLocked && styles.hidden]}
-        pointerEvents={isLocked ? 'none' : 'auto'}
-        importantForAccessibility={isLocked ? 'no-hide-descendants' : 'auto'}
-        accessibilityElementsHidden={isLocked}
-      >
-        {children}
+      <View style={styles.root}>
+        {!isLocked ? children : null}
+        {isLocked ? (
+          <View style={styles.lockOverlay} accessibilityViewIsModal>
+            <AppLockScreen biometricEnabled={biometricEnabled} onUnlock={unlock} />
+          </View>
+        ) : null}
       </View>
-      {isLocked ? (
-        <View style={[StyleSheet.absoluteFill, styles.lockOverlay]} pointerEvents="auto">
-          <AppLockScreen biometricEnabled={biometricEnabled} onUnlock={unlock} />
-        </View>
-      ) : null}
     </AppLockContext.Provider>
   );
 }
@@ -209,14 +211,12 @@ export function useAppLock() {
 }
 
 const styles = StyleSheet.create({
-  lockOverlay: {
-    zIndex: 9999,
-    elevation: 9999,
-  },
-  appContainer: {
+  root: {
     flex: 1,
   },
-  hidden: {
-    display: 'none',
+  lockOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 9999,
+    elevation: 9999,
   },
 });

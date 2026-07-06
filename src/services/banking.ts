@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { addMonths, addWeeks, addYears, format, parse } from 'date-fns';
 import {
   getDatabase,
   getPaymentStatus,
@@ -6,7 +8,6 @@ import {
 } from '../db/database';
 import { todayISO } from '../utils/date';
 import { resolvePeriodRange } from '../utils/period';
-import { addMonths, addWeeks, addYears, format, parse } from 'date-fns';
 import { addMoney, roundMoney, subMoney } from '../utils/money';
 import { getPurchaseById } from './purchases';
 import { getSaleById } from './sales';
@@ -480,9 +481,13 @@ export async function deleteTransaction(id: number): Promise<void> {
       if (payment) {
         await db.runAsync('DELETE FROM sale_payments WHERE id = ?', [payment.id]);
       }
+      const sumRow = await db.getFirstAsync<{ total: number }>(
+        `SELECT COALESCE(SUM(amount), 0) AS total FROM sale_payments WHERE sale_id = ?`,
+        [tx.reference_id]
+      );
       const sale = await getSaleById(tx.reference_id);
       if (sale) {
-        const newPaid = Math.max(0, subMoney(sale.paid_amount, tx.amount));
+        const newPaid = roundMoney(sumRow?.total ?? 0);
         const status = getPaymentStatus(sale.total_amount, newPaid);
         await db.runAsync('UPDATE sales SET paid_amount = ?, status = ? WHERE id = ?', [
           newPaid,
@@ -504,9 +509,13 @@ export async function deleteTransaction(id: number): Promise<void> {
       if (payment) {
         await db.runAsync('DELETE FROM purchase_payments WHERE id = ?', [payment.id]);
       }
+      const sumRow = await db.getFirstAsync<{ total: number }>(
+        `SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_payments WHERE purchase_id = ?`,
+        [tx.reference_id]
+      );
       const purchase = await getPurchaseById(tx.reference_id);
       if (purchase) {
-        const newPaid = Math.max(0, subMoney(purchase.paid_amount, paidAmount));
+        const newPaid = roundMoney(sumRow?.total ?? 0);
         const status = getPaymentStatus(purchase.total_amount, newPaid);
         await db.runAsync('UPDATE purchases SET paid_amount = ?, status = ? WHERE id = ?', [
           newPaid,
@@ -678,10 +687,17 @@ function advanceByRecurrence(dateStr: string, recurrence: string): string {
   }
 }
 
+const LAST_RECURRING_PROCESS_KEY = 'last_recurring_process_date';
+
 /** Generate due recurring expense entries that have not yet been created. */
 export async function processRecurringExpenses(): Promise<number> {
-  const db = await getDatabase();
   const today = todayISO();
+  const lastRun = await AsyncStorage.getItem(LAST_RECURRING_PROCESS_KEY);
+  if (lastRun === today) {
+    return 0;
+  }
+
+  const db = await getDatabase();
   let created = 0;
 
   const templates = await db.getAllAsync<Expense>(
@@ -736,5 +752,6 @@ export async function processRecurringExpenses(): Promise<number> {
     }
   }
 
+  await AsyncStorage.setItem(LAST_RECURRING_PROCESS_KEY, today);
   return created;
 }

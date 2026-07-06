@@ -123,6 +123,7 @@ export async function createPurchase(params: {
 
   let paidAmount = 0;
   for (const payment of params.payments) {
+    if (payment.amount <= 0) continue;
     paidAmount = addMoney(paidAmount, payment.amount);
   }
   if (paidAmount > totalAmount + 0.01) {
@@ -189,6 +190,18 @@ export async function createPurchase(params: {
           date: payment.date,
         });
       }
+
+      const sumRow = await db.getFirstAsync<{ total: number }>(
+        `SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_payments WHERE purchase_id = ?`,
+        [purchaseId]
+      );
+      const actualPaid = roundMoney(sumRow?.total ?? 0);
+      const actualStatus = getPaymentStatus(totalAmount, actualPaid);
+      await db.runAsync('UPDATE purchases SET paid_amount = ?, status = ? WHERE id = ?', [
+        actualPaid,
+        actualStatus,
+        purchaseId,
+      ]);
     });
   };
 
