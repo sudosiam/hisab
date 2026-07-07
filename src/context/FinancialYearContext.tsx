@@ -51,6 +51,7 @@ export function FinancialYearProvider({ children }: { children: React.ReactNode 
   const [loaded, setLoaded] = useState(false);
   const [savingFy, setSavingFy] = useState(false);
   const previousSettings = useRef({ month: 4, year: 2025 });
+  const lastForegroundDate = useRef(new Date().toISOString().slice(0, 10));
 
   const reload = useCallback(async () => {
     const startMonth = await getFinancialYearStartMonth();
@@ -78,6 +79,9 @@ export function FinancialYearProvider({ children }: { children: React.ReactNode 
 
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
+        const today = new Date().toISOString().slice(0, 10);
+        if (lastForegroundDate.current === today) return;
+        lastForegroundDate.current = today;
         reload().catch(() => {});
       }
     });

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 
 export interface FocusRefreshState {
@@ -18,8 +18,15 @@ export function useFocusRefresh(loader: () => Promise<void>, deps: unknown[]): F
   const [booting, setBooting] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const hasShownData = useRef(false);
+  const mountedRef = useRef(true);
   const loaderRef = useRef(loader);
   loaderRef.current = loader;
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const run = useCallback((isActive: () => boolean) => {
     if (!hasShownData.current) setBooting(true);
@@ -58,7 +65,7 @@ export function useFocusRefresh(loader: () => Promise<void>, deps: unknown[]): F
 
   const retry = useCallback(() => {
     setError(null);
-    run(() => true);
+    run(() => mountedRef.current);
   }, [run]);
 
   return { booting: booting && !hasShownData.current, error, retry };

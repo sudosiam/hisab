@@ -22,7 +22,10 @@ export async function getDashboardStats(periodKey: string): Promise<DashboardSta
       `SELECT COALESCE(SUM(current_balance), 0) as total FROM accounts WHERE COALESCE(is_excluded, 0) = 0`
     ),
     db.getFirstAsync<{ total: number }>(
-      `SELECT COALESCE(SUM(total_amount - paid_amount), 0) as total FROM sales WHERE paid_amount < total_amount`
+      `SELECT COALESCE(SUM(total_amount - paid_amount), 0) as total
+       FROM sales
+       WHERE total_amount - paid_amount > 0.01
+         AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = sales.id)`
     ),
     getInventoryValue(),
   ]);

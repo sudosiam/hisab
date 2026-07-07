@@ -9,6 +9,8 @@ import {
   SectionHeader,
 } from '../../../src/components/ui';
 import { AccountPicker } from '../../../src/components/AccountPicker';
+import { CategoryPicker } from '../../../src/components/CategoryPicker';
+import { otherIncomeCategorySource } from '../../../src/components/categorySources';
 import { createOtherIncome } from '../../../src/services/otherIncome';
 import { getSelectableAccounts } from '../../../src/services/banking';
 import { formatSqliteError } from '../../../src/db/database';
@@ -48,7 +50,7 @@ export default function NewOtherIncomeScreen() {
     if (loading) return;
     const amt = parsePositiveAmount(amount);
     if (!category.trim() || !description.trim()) {
-      Alert.alert('Error', 'Fill all fields');
+      Alert.alert('Missing details', 'Category, description, amount, and account are required');
       return;
     }
     if (amt === null) {
@@ -56,7 +58,7 @@ export default function NewOtherIncomeScreen() {
       return;
     }
     if (!isValidISODate(date)) {
-      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
+      Alert.alert('Invalid date', 'Select a valid income date');
       return;
     }
     if (!accountId) {
@@ -84,11 +86,10 @@ export default function NewOtherIncomeScreen() {
   return (
     <FormScreen>
       <SectionHeader title="New Other Income" />
-      <FormInput
-        label="Category"
+      <CategoryPicker
         value={category}
-        onChangeText={setCategory}
-        placeholder="Interest, commission, refund..."
+        onChange={setCategory}
+        source={otherIncomeCategorySource}
       />
       <FormInput label="Description" value={description} onChangeText={setDescription} />
       <FormInput

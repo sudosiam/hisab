@@ -9,6 +9,7 @@ import {
 } from '../../../src/components/ui';
 import { createAccount } from '../../../src/services/banking';
 import { formatSqliteError } from '../../../src/db/database';
+import { parseAmountInput } from '../../../src/utils/format';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { radius, spacing } from '../../../src/constants/theme';
@@ -46,7 +47,7 @@ export default function AddAccountScreen() {
       Alert.alert('Error', 'Account name is required');
       return;
     }
-    const openingValue = opening.trim() ? parseFloat(opening) : 0;
+    const openingValue = opening.trim() ? parseAmountInput(opening) : 0;
     if (!Number.isFinite(openingValue)) {
       Alert.alert('Error', 'Enter a valid opening balance');
       return;

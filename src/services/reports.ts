@@ -1,4 +1,4 @@
-import { getDatabase, repairFinancialDataIntegrity } from '../db/database';
+import { getDatabase } from '../db/database';
 import { roundMoney } from '../utils/money';
 import { resolvePeriodRange } from '../utils/period';
 import { getPeriodFinancials } from './financials';
@@ -40,7 +40,6 @@ export interface ProfitLossReport {
 }
 
 export async function getSalesReport(periodKey: string): Promise<SalesReportRow[]> {
-  await repairFinancialDataIntegrity();
   const db = await getDatabase();
   const { start, end } = await resolvePeriodRange(periodKey);
   return db.getAllAsync<SalesReportRow>(
@@ -70,7 +69,7 @@ export async function getInventoryReport(): Promise<InventoryReportRow[]> {
   const db = await getDatabase();
   return db.getAllAsync<InventoryReportRow>(
     `SELECT name, sku, current_qty, avg_cost, sell_price, (current_qty * avg_cost) as value
-     FROM products ORDER BY name ASC`
+     FROM products WHERE COALESCE(is_hidden, 0) = 0 ORDER BY name ASC`
   );
 }
 
@@ -97,7 +96,10 @@ export async function getReceivablesReport(): Promise<
   const db = await getDatabase();
   return db.getAllAsync(
     `SELECT party_name, invoice_no, (total_amount - paid_amount) as due, date
-     FROM sales WHERE paid_amount < total_amount ORDER BY date DESC`
+     FROM sales
+     WHERE total_amount - paid_amount > 0.01
+       AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = sales.id)
+     ORDER BY date DESC`
   );
 }
 
@@ -107,6 +109,9 @@ export async function getPayablesReport(): Promise<
   const db = await getDatabase();
   return db.getAllAsync(
     `SELECT supplier_name, invoice_no, (total_amount - paid_amount) as due, date
-     FROM purchases WHERE paid_amount < total_amount ORDER BY date DESC`
+     FROM purchases
+     WHERE total_amount - paid_amount > 0.01
+       AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = purchases.id)
+     ORDER BY date DESC`
   );
 }

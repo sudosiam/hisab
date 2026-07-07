@@ -7,9 +7,8 @@ import {
   repairFinancialDataIntegrity,
   reverseTransactionsByReference,
 } from '../db/database';
-import { isInvoiceNumberTakenError, resolveSaleInvoiceNo, syncNextInvoiceSettingAfterUse, getNextSaleInvoiceNo } from './invoiceNumbers';
+import { resolveSaleInvoiceNo, syncNextInvoiceSettingAfterUse } from './invoiceNumbers';
 import { upsertParty } from './parties';
-import { deleteAttachmentsForReference } from './attachments';
 import { formatCurrency } from '../utils/format';
 import { addMoney, mulMoney, roundMoney, subMoney } from '../utils/money';
 import type { PaymentInput, Sale, SaleItem, SaleItemInput, SalePayment } from '../types';
@@ -34,15 +33,37 @@ function validatePaymentAmount(
   }
 }
 
-export async function getSales(filter?: 'all' | 'paid' | 'unpaid'): Promise<Sale[]> {
+async function assertActivePaymentAccount(
+  db: Awaited<ReturnType<typeof getDatabase>>,
+  accountId: number
+): Promise<void> {
+  const account = await db.getFirstAsync<{ id: number; is_excluded: number }>(
+    'SELECT id, is_excluded FROM accounts WHERE id = ?',
+    [accountId]
+  );
+  if (!account) throw new Error('Please select a valid bank/cash account');
+  if (account.is_excluded) {
+    throw new Error('Cannot use an excluded account for sale payments');
+  }
+}
+
+export async function getSales(
+  filter?: 'all' | 'paid' | 'unpaid',
+  options?: { limit?: number; offset?: number }
+): Promise<Sale[]> {
   const db = await getDatabase();
   let query = 'SELECT * FROM sales ORDER BY date DESC, id DESC';
-  const params: string[] = [];
+  const params: (string | number)[] = [];
 
   if (filter === 'paid') {
     query = `SELECT * FROM sales WHERE status = 'paid' ORDER BY date DESC, id DESC`;
   } else if (filter === 'unpaid') {
     query = `SELECT * FROM sales WHERE status IN ('unpaid', 'partial') ORDER BY date DESC, id DESC`;
+  }
+
+  if (options?.limit) {
+    query += ' LIMIT ? OFFSET ?';
+    params.push(options.limit, options.offset ?? 0);
   }
 
   return db.getAllAsync<Sale>(query, params);
@@ -130,98 +151,84 @@ export async function createSale(params: {
   const status = getPaymentStatus(totalAmount, paidAmount);
   let saleId = 0;
 
-  // If the unique index trips (race or stale pre-filled number), one retry
-  // picks up a fresh auto-generated number.
-  const attemptCreate = async (forceAutoInvoice = false): Promise<void> => {
-    await db.withTransactionAsync(async () => {
-      const invoiceNo = forceAutoInvoice
-        ? await getNextSaleInvoiceNo()
-        : await resolveSaleInvoiceNo(params.invoice_no);
-      await upsertParty(params.party_name, 'customer', db, params.party_phone);
+  await db.withTransactionAsync(async () => {
+    const invoiceNo = await resolveSaleInvoiceNo(params.invoice_no);
+    const partyId = await upsertParty(params.party_name, 'customer', db, params.party_phone);
 
-      const result = await db.runAsync(
-        `INSERT INTO sales (invoice_no, party_name, date, subtotal, discount_amount, service_charges, total_amount, paid_amount, status, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          invoiceNo,
-          params.party_name,
-          params.date,
-          subtotal,
-          discount,
-          serviceCharges,
-          totalAmount,
-          paidAmount,
-          status,
-          params.notes ?? null,
-        ]
+    const result = await db.runAsync(
+      `INSERT INTO sales (invoice_no, party_id, party_name, date, subtotal, discount_amount, service_charges, total_amount, paid_amount, status, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        invoiceNo,
+        partyId,
+        params.party_name,
+        params.date,
+        subtotal,
+        discount,
+        serviceCharges,
+        totalAmount,
+        paidAmount,
+        status,
+        params.notes ?? null,
+      ]
+    );
+    saleId = result.lastInsertRowId;
+
+    for (let i = 0; i < itemDetails.length; i++) {
+      itemDetails[i].unit_cost = await reduceInventory(
+        db,
+        itemDetails[i].product_id,
+        itemDetails[i].qty
       );
-      saleId = result.lastInsertRowId;
-
-      for (let i = 0; i < itemDetails.length; i++) {
-        itemDetails[i].unit_cost = await reduceInventory(
-          db,
-          itemDetails[i].product_id,
-          itemDetails[i].qty
-        );
-      }
-
-      for (const item of itemDetails) {
-        await db.runAsync(
-          `INSERT INTO sale_items (sale_id, product_id, qty, unit_price, unit_cost, total)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [saleId, item.product_id, item.qty, item.unit_price, item.unit_cost, item.total]
-        );
-        await db.runAsync(
-          `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, reference_id, notes)
-           VALUES (?, 'sale', ?, ?, 'sale', ?, ?)`,
-          [item.product_id, -item.qty, item.unit_cost, saleId, `Sale ${invoiceNo}`]
-        );
-      }
-
-      for (const payment of params.payments) {
-        if (payment.amount <= 0) continue;
-        const paymentResult = await db.runAsync(
-          `INSERT INTO sale_payments (sale_id, account_id, amount, date, notes) VALUES (?, ?, ?, ?, ?)`,
-          [saleId, payment.account_id, roundMoney(payment.amount), payment.date, payment.notes ?? null]
-        );
-        await recordTransaction(db, {
-          account_id: payment.account_id,
-          type: 'sale_payment',
-          amount: roundMoney(payment.amount),
-          reference_type: 'sale',
-          reference_id: saleId,
-          payment_id: paymentResult.lastInsertRowId,
-          description: `Payment for ${invoiceNo} - ${params.party_name}`,
-          date: payment.date,
-        });
-      }
-
-      const sumRow = await db.getFirstAsync<{ total: number }>(
-        `SELECT COALESCE(SUM(amount), 0) AS total FROM sale_payments WHERE sale_id = ?`,
-        [saleId]
-      );
-      const actualPaid = roundMoney(sumRow?.total ?? 0);
-      const actualStatus = getPaymentStatus(totalAmount, actualPaid);
-      await db.runAsync('UPDATE sales SET paid_amount = ?, status = ? WHERE id = ?', [
-        actualPaid,
-        actualStatus,
-        saleId,
-      ]);
-    });
-  };
-
-  try {
-    await attemptCreate();
-  } catch (error) {
-    if (isInvoiceNumberTakenError(error)) {
-      await attemptCreate(true);
-    } else {
-      throw error;
     }
-  }
+
+    for (const item of itemDetails) {
+      await db.runAsync(
+        `INSERT INTO sale_items (sale_id, product_id, qty, unit_price, unit_cost, total)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [saleId, item.product_id, item.qty, item.unit_price, item.unit_cost, item.total]
+      );
+      await db.runAsync(
+        `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, reference_id, notes)
+         VALUES (?, 'sale', ?, ?, 'sale', ?, ?)`,
+        [item.product_id, -item.qty, item.unit_cost, saleId, `Sale ${invoiceNo}`]
+      );
+    }
+
+    for (const payment of params.payments) {
+      if (payment.amount <= 0) continue;
+      await assertActivePaymentAccount(db, payment.account_id);
+      const paymentResult = await db.runAsync(
+        `INSERT INTO sale_payments (sale_id, account_id, amount, date, notes) VALUES (?, ?, ?, ?, ?)`,
+        [saleId, payment.account_id, roundMoney(payment.amount), payment.date, payment.notes ?? null]
+      );
+      await recordTransaction(db, {
+        account_id: payment.account_id,
+        type: 'sale_payment',
+        amount: roundMoney(payment.amount),
+        reference_type: 'sale',
+        reference_id: saleId,
+        payment_id: paymentResult.lastInsertRowId,
+        description: `Payment for ${invoiceNo} - ${params.party_name}`,
+        date: payment.date,
+      });
+    }
+
+    const sumRow = await db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(amount), 0) AS total FROM sale_payments WHERE sale_id = ?`,
+      [saleId]
+    );
+    const actualPaid = roundMoney(sumRow?.total ?? 0);
+    const actualStatus = getPaymentStatus(totalAmount, actualPaid);
+    await db.runAsync('UPDATE sales SET paid_amount = ?, status = ? WHERE id = ?', [
+      actualPaid,
+      actualStatus,
+      saleId,
+    ]);
+  });
 
   try {
-    await repairFinancialDataIntegrity();
+    await repairFinancialDataIntegrity(undefined, { force: true });
   } catch {
     // Sale is saved; repair is best-effort housekeeping.
   }
@@ -243,6 +250,7 @@ export async function updateSale(
   params: {
     party_name: string;
     date: string;
+    invoice_no?: string;
     discount_amount: number;
     service_charges?: number;
     notes?: string;
@@ -252,7 +260,13 @@ export async function updateSale(
   const sale = await getSaleById(saleId);
   if (!sale) throw new Error('Sale not found');
 
+  const invoiceNo = params.invoice_no?.trim() || sale.invoice_no;
+  if (!invoiceNo) throw new Error('Invoice number is required');
+
   const discount = roundMoney(Math.max(0, params.discount_amount));
+  if (discount > sale.subtotal + 0.01) {
+    throw new Error('Discount cannot exceed subtotal');
+  }
   const serviceCharges = roundMoney(Math.max(0, params.service_charges ?? sale.service_charges ?? 0));
   const totalAmount = roundMoney(
     Math.max(0, addMoney(subMoney(sale.subtotal, discount), serviceCharges))
@@ -263,19 +277,44 @@ export async function updateSale(
 
   const status = getPaymentStatus(totalAmount, sale.paid_amount);
   const partyName = params.party_name.trim();
+  const invoiceChanged = invoiceNo !== sale.invoice_no;
 
   await db.withTransactionAsync(async () => {
+    const partyId = await upsertParty(partyName, 'customer', db);
     await db.runAsync(
-      `UPDATE sales SET party_name = ?, date = ?, discount_amount = ?, service_charges = ?, total_amount = ?, status = ?, notes = ? WHERE id = ?`,
-      [partyName, params.date, discount, serviceCharges, totalAmount, status, params.notes ?? null, saleId]
+      `UPDATE sales SET invoice_no = ?, party_id = ?, party_name = ?, date = ?, discount_amount = ?, service_charges = ?, total_amount = ?, status = ?, notes = ? WHERE id = ?`,
+      [
+        invoiceNo,
+        partyId,
+        partyName,
+        params.date,
+        discount,
+        serviceCharges,
+        totalAmount,
+        status,
+        params.notes ?? null,
+        saleId,
+      ]
     );
-    // Keep ledger descriptions in sync with the (possibly renamed) party.
     await db.runAsync(
       `UPDATE transactions SET description = ? WHERE reference_type = 'sale' AND reference_id = ? AND type = 'sale_payment'`,
-      [`Payment for ${sale.invoice_no} - ${partyName}`, saleId]
+      [`Payment for ${invoiceNo} - ${partyName}`, saleId]
     );
-    await upsertParty(partyName, 'customer', db);
+    if (invoiceChanged) {
+      await db.runAsync(
+        `UPDATE inventory_movements SET notes = ? WHERE reference_type = 'sale' AND reference_id = ?`,
+        [`Sale ${invoiceNo}`, saleId]
+      );
+    }
   });
+
+  if (invoiceChanged) {
+    try {
+      await syncNextInvoiceSettingAfterUse('sale', invoiceNo);
+    } catch {
+      // Counter sync failure must not fail an already-updated sale.
+    }
+  }
 }
 
 export async function addSalePayment(
@@ -292,6 +331,7 @@ export async function addSalePayment(
     if (!sale) throw new Error('Sale not found');
 
     validatePaymentAmount(sale.total_amount, sale.paid_amount, payment.amount);
+    await assertActivePaymentAccount(db, payment.account_id);
 
     const amount = roundMoney(payment.amount);
     const paymentResult = await db.runAsync(
@@ -349,6 +389,9 @@ export async function deleteSale(id: number): Promise<void> {
     await db.runAsync('DELETE FROM sales WHERE id = ?', [id]);
   });
 
-  await deleteAttachmentsForReference('sale', id);
-  await repairFinancialDataIntegrity();
+  try {
+    await repairFinancialDataIntegrity(undefined, { force: true });
+  } catch {
+    // The sale was deleted; integrity repair is best-effort housekeeping.
+  }
 }

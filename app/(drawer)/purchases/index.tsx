@@ -58,7 +58,7 @@ export default function PurchasesListScreen() {
     setPurchases(await getPurchases(filter));
   }, [filter]);
 
-  const { booting, error, retry } = useFocusRefresh(load, [refreshKey]);
+  const { booting, error, retry } = useFocusRefresh(load, [refreshKey, filter]);
 
   const renderItem = useCallback(
     ({ item }: { item: Purchase }) => (
@@ -75,9 +75,14 @@ export default function PurchasesListScreen() {
           <Text style={styles.cardSub}>{item.date}</Text>
           <Text style={styles.amount}>{formatCurrency(item.total_amount)}</Text>
         </View>
+        {item.paid_amount < item.total_amount && (
+          <Text style={{ fontSize: 12, color: colors.danger, marginTop: 4 }}>
+            Due: {formatCurrency(item.total_amount - item.paid_amount)}
+          </Text>
+        )}
       </TouchableOpacity>
     ),
-    [router, styles]
+    [colors.danger, router, styles]
   );
 
   if (error) {
@@ -90,7 +95,7 @@ export default function PurchasesListScreen() {
         {(['all', 'paid', 'unpaid'] as Filter[]).map((f) => (
           <FilterChip
             key={f}
-            label={f === 'all' ? 'All' : f === 'paid' ? 'Paid' : 'Unpaid'}
+            label={f === 'all' ? 'All' : f === 'paid' ? 'Paid' : 'Outstanding'}
             active={filter === f}
             onPress={() => setFilter(f)}
           />

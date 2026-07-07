@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Text, TouchableOpacity, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useScreenStyles } from '../../src/components/ui';
+import { ScreenTitle, useScreenStyles } from '../../src/components/ui';
 import { useTheme } from '../../src/context/ThemeContext';
 import { spacing, radius } from '../../src/constants/theme';
 import { cardSurface } from '../../src/constants/shadows';
@@ -20,6 +20,12 @@ const MORE_ITEMS = [
     desc: 'Track property, equipment, and other assets',
     icon: 'layers-outline' as const,
   },
+  {
+    title: 'Loans',
+    route: '/(drawer)/loans',
+    desc: 'Track borrowed money and outstanding balance',
+    icon: 'card-outline' as const,
+  },
 ];
 
 export default function MoreScreen() {
@@ -34,6 +40,7 @@ export default function MoreScreen() {
           flexDirection: 'row',
           alignItems: 'center',
           padding: spacing.md,
+          minHeight: 68,
           marginBottom: spacing.sm,
           gap: spacing.md,
         },
@@ -54,12 +61,18 @@ export default function MoreScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <ScreenTitle
+        title="More"
+        subtitle="Manage long-term money, assets, and liabilities outside day-to-day sales."
+      />
       {MORE_ITEMS.map((item) => (
         <TouchableOpacity
           key={item.route}
           style={localStyles.card}
           onPress={() => router.push(item.route as never)}
           activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel={item.title}
         >
           <View style={localStyles.iconWrap}>
             <Ionicons name={item.icon} size={20} color={colors.primary} />

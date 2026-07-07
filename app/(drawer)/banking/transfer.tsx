@@ -71,8 +71,16 @@ export default function TransferScreen() {
       Alert.alert('Error', 'Enter an amount greater than zero');
       return;
     }
+    if (!fromId || !toId) {
+      Alert.alert('Error', 'Select both accounts. You need at least two accounts to transfer.');
+      return;
+    }
+    if (fromId === toId) {
+      Alert.alert('Error', 'Choose two different accounts');
+      return;
+    }
     if (!isValidISODate(date)) {
-      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
+      Alert.alert('Invalid date', 'Select a valid transfer date');
       return;
     }
     setLoading(true);

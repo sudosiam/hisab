@@ -4,12 +4,16 @@ import { useFocusEffect } from 'expo-router';
 import { getInventoryReport } from '../../../src/services/reports';
 import { formatCurrency } from '../../../src/utils/format';
 import { ErrorState, useScreenStyles } from '../../../src/components/ui';
+import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
+import { roundMoney } from '../../../src/utils/money';
 import { formatSqliteError } from '../../../src/db/database';
 import { radius, spacing } from '../../../src/constants/theme';
+import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 
 export default function InventoryReportScreen() {
   const styles = useScreenStyles();
+  const { refreshKey } = useDatabase();
   const { colors } = useTheme();
   const localStyles = useMemo(
     () =>
@@ -36,13 +40,14 @@ export default function InventoryReportScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    void refreshKey;
     try {
       setRows(await getInventoryReport());
       setError(null);
     } catch (e) {
       setError(formatSqliteError(e));
     }
-  }, []);
+  }, [refreshKey]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -52,7 +57,7 @@ export default function InventoryReportScreen() {
     setRefreshing(false);
   }, [load]);
 
-  const totalValue = rows.reduce((s, r) => s + r.value, 0);
+  const totalValue = roundMoney(rows.reduce((s, r) => s + r.value, 0));
 
   if (error) {
     return <ErrorState message={error} onRetry={load} />;
@@ -63,12 +68,13 @@ export default function InventoryReportScreen() {
       <Text style={localStyles.total}>Total Inventory Value: {formatCurrency(totalValue)}</Text>
       <FlatList
         data={rows}
-        keyExtractor={(item) => item.name}
+        keyExtractor={(item, index) => `${item.name}-${index}`}
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
         ListEmptyComponent={<Text style={styles.empty}>No products in inventory</Text>}
+        {...FLATLIST_PERF}
         renderItem={({ item }) => (
           <View style={localStyles.row}>
             <View>

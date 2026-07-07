@@ -45,7 +45,12 @@ export function DraftBanner({ visible, onDiscard }: Props) {
   return (
     <View style={styles.wrap}>
       <Text style={styles.text}>Draft saved automatically</Text>
-      <TouchableOpacity onPress={onDiscard} hitSlop={8}>
+      <TouchableOpacity
+        onPress={onDiscard}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Discard draft"
+      >
         <Text style={styles.discard}>Discard</Text>
       </TouchableOpacity>
     </View>

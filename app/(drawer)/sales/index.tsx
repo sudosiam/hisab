@@ -51,7 +51,7 @@ export default function SalesListScreen() {
     setSales(await getSales(filter));
   }, [filter]);
 
-  const { booting, error, retry } = useFocusRefresh(load, [refreshKey]);
+  const { booting, error, retry } = useFocusRefresh(load, [refreshKey, filter]);
 
   const renderItem = useCallback(
     ({ item }: { item: Sale }) => (
@@ -88,7 +88,7 @@ export default function SalesListScreen() {
         {(['all', 'paid', 'unpaid'] as Filter[]).map((f) => (
           <FilterChip
             key={f}
-            label={f === 'all' ? 'All' : f === 'paid' ? 'Paid' : 'Unpaid'}
+            label={f === 'all' ? 'All' : f === 'paid' ? 'Paid' : 'Outstanding'}
             active={filter === f}
             onPress={() => setFilter(f)}
           />

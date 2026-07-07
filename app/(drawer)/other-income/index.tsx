@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { ErrorState, SearchField, SectionHeader, useScreenStyles } from '../../../src/components/ui';
 import { getOtherIncome } from '../../../src/services/otherIncome';
@@ -18,6 +18,7 @@ import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { getPeriodTotalLabel } from '../../../src/utils/date';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { spacing, radius } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
@@ -53,25 +54,13 @@ export default function OtherIncomeListScreen() {
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [items, setItems] = useState<OtherIncome[]>([]);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setItems(await getOtherIncome(monthKey));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load income');
-    } finally {
-      setLoading(false);
-    }
+    setItems(await getOtherIncome(monthKey));
   }, [monthKey]);
 
-  // refreshKey re-runs the loader whenever the global data version changes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useFocusEffect(useCallback(() => { load(); }, [load, refreshKey]));
+  const { booting, error, retry } = useFocusRefresh(load, [refreshKey, monthKey]);
 
   const filtered = useMemo(
     () =>
@@ -110,7 +99,7 @@ export default function OtherIncomeListScreen() {
   );
 
   if (error && items.length === 0) {
-    return <ErrorState message={error} onRetry={load} />;
+    return <ErrorState message={error} onRetry={retry} />;
   }
 
   const header = (
@@ -131,14 +120,14 @@ export default function OtherIncomeListScreen() {
       </View>
 
       <SectionHeader title="Other Income" />
-      {loading ? <ActivityIndicator color={colors.primary} /> : null}
+      {booting ? <ActivityIndicator color={colors.primary} /> : null}
     </View>
   );
 
   return (
     <View style={styles.container}>
       <FlatList
-        data={loading ? [] : filtered}
+        data={booting && items.length === 0 ? [] : filtered}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
         contentContainerStyle={styles.content}
@@ -156,7 +145,7 @@ export default function OtherIncomeListScreen() {
         }
         {...FLATLIST_PERF}
         ListEmptyComponent={
-          loading ? null : (
+          booting ? null : (
             <Text style={styles.empty}>
               {search.trim() ? 'No entries match your search.' : 'No other income this month'}
             </Text>

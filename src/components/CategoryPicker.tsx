@@ -14,8 +14,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { spacing, radius } from '../constants/theme';
 import { cardSurface } from '../constants/shadows';
-import { addProductCategory, getProductCategories } from '../services/inventory';
 import { formatSqliteError } from '../db/database';
+import { CategoryPickerSource, productCategorySource } from './categorySources';
 
 interface Props {
   label?: string;
@@ -27,6 +27,10 @@ interface Props {
   placeholder?: string;
   /** Allow adding new categories from the picker. */
   allowAdd?: boolean;
+  /** Allow long-press to delete categories from the list. */
+  allowDelete?: boolean;
+  source?: CategoryPickerSource;
+  onCategoryDeleted?: () => void;
 }
 
 export function CategoryPicker({
@@ -37,6 +41,9 @@ export function CategoryPicker({
   allLabel = 'All categories',
   placeholder = 'Select category',
   allowAdd = true,
+  allowDelete = true,
+  source = productCategorySource,
+  onCategoryDeleted,
 }: Props) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
@@ -44,10 +51,11 @@ export function CategoryPicker({
   const [categories, setCategories] = useState<string[]>([]);
   const [newName, setNewName] = useState('');
   const [adding, setAdding] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const loadCategories = useCallback(async () => {
-    setCategories(await getProductCategories());
-  }, []);
+    setCategories(await source.loadCategories());
+  }, [source]);
 
   const openPicker = async () => {
     setNewName('');
@@ -63,7 +71,7 @@ export function CategoryPicker({
     }
     setAdding(true);
     try {
-      await addProductCategory(trimmed);
+      await source.addCategory(trimmed);
       await loadCategories();
       onChange(trimmed);
       setNewName('');
@@ -75,13 +83,45 @@ export function CategoryPicker({
     }
   };
 
+  const handleDeleteCategory = (name: string) => {
+    if (!allowDelete || deleting) return;
+    Alert.alert('Delete category', source.deleteMessage(name), [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          setDeleting(true);
+          try {
+            await source.deleteCategory(name);
+            await loadCategories();
+            if (value === name) onChange('');
+            onCategoryDeleted?.();
+          } catch (e) {
+            Alert.alert('Error', formatSqliteError(e));
+          } finally {
+            setDeleting(false);
+          }
+        },
+      },
+    ]);
+  };
+
   const displayValue = !value ? (allowAll ? allLabel : placeholder) : value;
   const showPlaceholderStyle = !value && !allowAll;
+  const showDeleteHint = allowDelete && categories.length > 0;
 
   return (
     <View style={styles.wrap}>
       <Text style={styles.label}>{label}</Text>
-      <TouchableOpacity style={styles.trigger} onPress={openPicker} activeOpacity={0.75}>
+      <TouchableOpacity
+        style={styles.trigger}
+        onPress={openPicker}
+        activeOpacity={0.75}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityHint="Opens category selector"
+      >
         <Text style={[styles.triggerText, showPlaceholderStyle && styles.placeholder]}>
           {displayValue}
         </Text>
@@ -112,6 +152,10 @@ export function CategoryPicker({
               </View>
             ) : null}
 
+            {showDeleteHint ? (
+              <Text style={styles.hint}>Long press a category to delete</Text>
+            ) : null}
+
             <FlatList
               data={categories}
               keyExtractor={(item) => item}
@@ -123,6 +167,8 @@ export function CategoryPicker({
                       onChange('');
                       setOpen(false);
                     }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: !value }}
                   >
                     <Text style={styles.optionText}>{allLabel}</Text>
                     {!value ? <Ionicons name="checkmark" size={18} color={colors.primary} /> : null}
@@ -137,18 +183,23 @@ export function CategoryPicker({
                 )
               }
               renderItem={({ item }) => (
-                <TouchableOpacity
+                <Pressable
                   style={[styles.option, item === value && styles.optionActive]}
                   onPress={() => {
                     onChange(item);
                     setOpen(false);
                   }}
+                  onLongPress={() => handleDeleteCategory(item)}
+                  delayLongPress={400}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: item === value }}
+                  accessibilityHint={allowDelete ? 'Long press to delete this category' : undefined}
                 >
                   <Text style={styles.optionText}>{item}</Text>
                   {item === value ? (
                     <Ionicons name="checkmark" size={18} color={colors.primary} />
                   ) : null}
-                </TouchableOpacity>
+                </Pressable>
               )}
             />
           </Pressable>
@@ -187,6 +238,11 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       padding: spacing.md,
     },
     sheetTitle: { fontSize: 16, fontWeight: '700', color: colors.text, marginBottom: spacing.sm },
+    hint: {
+      fontSize: 12,
+      color: colors.textMuted,
+      marginBottom: spacing.sm,
+    },
     addRow: {
       flexDirection: 'row',
       gap: spacing.sm,

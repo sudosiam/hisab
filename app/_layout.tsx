@@ -3,7 +3,6 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { DatabaseProvider } from '../src/context/DatabaseContext';
 import { FinancialYearProvider } from '../src/context/FinancialYearContext';
-import { AppLockProvider } from '../src/context/AppLockContext';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { StatusBar } from 'expo-status-bar';
@@ -29,14 +28,12 @@ export default function RootLayout() {
       <ThemeProvider>
         <ThemedRoot>
           <ErrorBoundary>
-            <AppLockProvider>
-              <DatabaseProvider>
-                <FinancialYearProvider>
-                  <ThemedStatusBar />
-                  <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }} />
-                </FinancialYearProvider>
-              </DatabaseProvider>
-            </AppLockProvider>
+            <DatabaseProvider>
+              <FinancialYearProvider>
+                <ThemedStatusBar />
+                <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }} />
+              </FinancialYearProvider>
+            </DatabaseProvider>
           </ErrorBoundary>
         </ThemedRoot>
       </ThemeProvider>

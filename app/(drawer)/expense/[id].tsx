@@ -20,6 +20,8 @@ import {
 } from '../../../src/components/ui';
 import { StatCard } from '../../../src/components/StatCard';
 import { AccountPicker } from '../../../src/components/AccountPicker';
+import { CategoryPicker } from '../../../src/components/CategoryPicker';
+import { expenseCategorySource } from '../../../src/components/categorySources';
 import {
   deleteExpense,
   getAccountsForPicker,
@@ -119,26 +121,33 @@ export default function ExpenseDetailScreen() {
   const editingRef = React.useRef(false);
   editingRef.current = editing;
 
+  const hasLoadedRef = React.useRef(false);
   useFocusEffect(useCallback(() => {
     // Don't reload over an open edit form — it would wipe unsaved changes.
     if (editingRef.current) return;
-    setLoading(true);
-    load();
+    if (!hasLoadedRef.current) setLoading(true);
+    load().finally(() => {
+      hasLoadedRef.current = true;
+    });
   }, [load]));
 
   const handleSave = async () => {
     if (!expense || saving) return;
     const amt = parsePositiveAmount(amount);
     if (!category.trim() || !description.trim()) {
-      Alert.alert('Error', 'Fill all fields');
+      Alert.alert('Missing details', 'Category, description, amount, and account are required');
       return;
     }
     if (amt === null) {
       Alert.alert('Error', 'Enter an amount greater than zero');
       return;
     }
+    if (!accountId) {
+      Alert.alert('Error', 'Select a bank/cash account');
+      return;
+    }
     if (!isValidISODate(date)) {
-      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
+      Alert.alert('Invalid date', 'Select a valid expense date');
       return;
     }
     setSaving(true);
@@ -209,7 +218,7 @@ export default function ExpenseDetailScreen() {
     return (
       <FormScreen>
         <SectionHeader title="Edit Expense" />
-        <FormInput label="Category" value={category} onChangeText={setCategory} />
+        <CategoryPicker value={category} onChange={setCategory} source={expenseCategorySource} />
         <FormInput label="Description" value={description} onChangeText={setDescription} />
         <FormInput label="Amount (₹)" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
         <DatePickerField label="Date" value={date} onChange={setDate} />
@@ -221,6 +230,7 @@ export default function ExpenseDetailScreen() {
             value={isRecurring}
             onValueChange={setIsRecurring}
             trackColor={{ false: colors.border, true: colors.primary }}
+            accessibilityLabel="Recurring expense"
           />
         </View>
         {isRecurring ? (
@@ -230,6 +240,8 @@ export default function ExpenseDetailScreen() {
                 key={r}
                 style={[localStyles.chip, recurrence === r && localStyles.chipActive]}
                 onPress={() => setRecurrence(r)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: recurrence === r }}
               >
                 <Text style={recurrence === r ? localStyles.chipTextActive : localStyles.chipText}>{r}</Text>
               </TouchableOpacity>

@@ -13,7 +13,8 @@ import { getSaleById, updateSale } from '../../../src/services/sales';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
-import { formatAmountInput } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency, parseAmountInput } from '../../../src/utils/format';
+import { saveWithDuplicateInvoiceWarning } from '../../../src/utils/duplicateInvoice';
 import { isValidISODate } from '../../../src/utils/date';
 import { spacing } from '../../../src/constants/theme';
 import type { Sale } from '../../../src/types';
@@ -26,6 +27,7 @@ export default function EditSaleScreen() {
   const { colors } = useTheme();
   const [sale, setSale] = useState<Sale | null>(null);
   const [partyName, setPartyName] = useState('');
+  const [invoiceNo, setInvoiceNo] = useState('');
   const [date, setDate] = useState('');
   const [discount, setDiscount] = useState('0');
   const [serviceCharges, setServiceCharges] = useState('');
@@ -51,6 +53,7 @@ export default function EditSaleScreen() {
       if (s) {
         setSale(s);
         setPartyName(s.party_name);
+        setInvoiceNo(s.invoice_no);
         setDate(s.date);
         setDiscount(formatAmountInput(s.discount_amount ?? 0));
         setServiceCharges(s.service_charges > 0 ? formatAmountInput(s.service_charges) : '');
@@ -80,12 +83,16 @@ export default function EditSaleScreen() {
       Alert.alert('Error', 'Customer name is required');
       return;
     }
-    if (!isValidISODate(date)) {
-      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
+    if (!invoiceNo.trim()) {
+      Alert.alert('Error', 'Invoice number is required');
       return;
     }
-    const discountValue = discount.trim() ? parseFloat(discount) : 0;
-    const serviceValue = serviceCharges.trim() ? parseFloat(serviceCharges) : 0;
+    if (!isValidISODate(date)) {
+      Alert.alert('Invalid date', 'Select a valid invoice date');
+      return;
+    }
+    const discountValue = discount.trim() ? parseAmountInput(discount) : 0;
+    const serviceValue = serviceCharges.trim() ? parseAmountInput(serviceCharges) : 0;
     if (!Number.isFinite(discountValue) || discountValue < 0) {
       Alert.alert('Error', 'Enter a valid discount amount');
       return;
@@ -98,17 +105,33 @@ export default function EditSaleScreen() {
       Alert.alert('Error', 'Discount cannot exceed subtotal');
       return;
     }
+    const newTotal = Math.max(0, sale.subtotal - discountValue + serviceValue);
+    if (newTotal + 0.01 < sale.paid_amount) {
+      Alert.alert(
+        'Error',
+        `New total (${formatCurrency(newTotal)}) cannot be less than the amount already paid (${formatCurrency(sale.paid_amount)}). Remove payments first.`
+      );
+      return;
+    }
     setSaving(true);
     try {
-      await updateSale(sale.id, {
-        party_name: partyName,
-        date,
-        discount_amount: discountValue,
-        service_charges: serviceValue,
-        notes: notes.trim() || undefined,
-      });
-      refresh();
-      router.back();
+      await saveWithDuplicateInvoiceWarning(
+        'sales',
+        invoiceNo,
+        async () => {
+          await updateSale(sale.id, {
+            party_name: partyName,
+            invoice_no: invoiceNo.trim(),
+            date,
+            discount_amount: discountValue,
+            service_charges: serviceValue,
+            notes: notes.trim() || undefined,
+          });
+          refresh();
+          router.back();
+        },
+        sale.id
+      );
     } catch (e) {
       Alert.alert('Error', formatSqliteError(e));
     } finally {
@@ -137,7 +160,18 @@ export default function EditSaleScreen() {
 
   return (
     <FormScreen>
+      <View style={styles.infoBox}>
+        <Text style={styles.cardSub}>
+          This edits invoice details only. Line items and recorded payments stay unchanged.
+        </Text>
+      </View>
       <CustomerAutocomplete value={partyName} onChange={setPartyName} />
+      <FormInput
+        label="Invoice Number"
+        value={invoiceNo}
+        onChangeText={setInvoiceNo}
+        autoCapitalize="characters"
+      />
       <DatePickerField label="Date" value={date} onChange={setDate} />
       <FormInput
         label="Total Discount (₹)"

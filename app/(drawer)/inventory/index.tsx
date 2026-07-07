@@ -8,7 +8,7 @@ import {
   StyleSheet,
   RefreshControl,
 } from 'react-native';
-import { Link, useFocusEffect, useRouter } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { getProducts, getProductSellPrice } from '../../../src/services/inventory';
 import { ErrorState, SearchField, useScreenStyles } from '../../../src/components/ui';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
@@ -17,6 +17,7 @@ import { formatCurrency, formatQty } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { spacing } from '../../../src/constants/theme';
 import type { Product } from '../../../src/types';
 
@@ -44,8 +45,6 @@ export default function InventoryListScreen() {
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const filteredProducts = useMemo(
@@ -57,27 +56,17 @@ export default function InventoryListScreen() {
   );
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setProducts(await getProducts());
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load products');
-    } finally {
-      setLoading(false);
-    }
+    setProducts(await getProducts());
   }, []);
 
-  // refreshKey re-runs the loader whenever the global data version changes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useFocusEffect(useCallback(() => { load(); }, [load, refreshKey]));
+  const { booting, error, retry } = useFocusRefresh(load, [refreshKey]);
 
   const emptyMessage = search.trim() || categoryFilter
     ? 'No products match your filters.'
     : 'No products. Add your first item.';
 
   if (error && products.length === 0) {
-    return <ErrorState message={error} onRetry={load} />;
+    return <ErrorState message={error} onRetry={retry} />;
   }
 
   return (
@@ -90,6 +79,7 @@ export default function InventoryListScreen() {
           allowAll
           allLabel="All categories"
           placeholder="All categories"
+          onCategoryDeleted={load}
         />
       </View>
 
@@ -99,7 +89,7 @@ export default function InventoryListScreen() {
         placeholder="Search product, SKU, or category..."
       />
 
-      {loading ? (
+      {booting && products.length === 0 ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
       ) : (
         <FlatList

@@ -18,9 +18,14 @@ export function formatCurrency(amount: number): string {
   return safe < 0 ? `-₹${formatted}` : `₹${formatted}`;
 }
 
-/** Whole rupees for input fields — no grouping, no paise. */
+/**
+ * Plain decimal string for prefilling input fields — no grouping, paise and
+ * sign preserved. Rounding paise away here would silently corrupt stored
+ * amounts when the user saves a form without editing the field.
+ */
 export function formatAmountInput(amount: number): string {
-  return formatIndianAmount(amount, false);
+  const safe = Number.isFinite(amount) ? Math.round(amount * 100) / 100 : 0;
+  return String(safe);
 }
 
 export function formatSignedCurrency(amount: number): string {
@@ -51,11 +56,29 @@ export function formatQty(qty: number, unit = ''): string {
 }
 
 /**
+ * Normalize a user-typed amount by stripping grouping separators (commas) and
+ * surrounding whitespace so "1,23,456.50" parses correctly. The decimal point
+ * is always '.', so commas are safe to remove.
+ */
+export function normalizeAmountInput(text: string): string {
+  return text.replace(/,/g, '').trim();
+}
+
+/**
+ * Parse a user-typed decimal (money or quantity), tolerating comma grouping
+ * ("1,23,456.50" → 123456.5). Returns NaN for empty/invalid input. Use this
+ * instead of raw parseFloat, which stops at the first comma ("5,000" → 5).
+ */
+export function parseAmountInput(text: string): number {
+  return parseFloat(normalizeAmountInput(text));
+}
+
+/**
  * Parse a user-typed money/quantity string. Returns null for empty, NaN,
  * zero, or negative input so callers can show a single friendly error.
  */
 export function parsePositiveAmount(text: string): number | null {
-  const parsed = parseFloat(text.trim());
+  const parsed = parseFloat(normalizeAmountInput(text));
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
   return Math.round(parsed * 100) / 100;
 }
@@ -65,7 +88,7 @@ export function getPaymentStatusLabel(status: string): string {
     case 'paid':
       return 'Paid';
     case 'partial':
-      return 'Partial';
+      return 'Part paid';
     case 'unpaid':
       return 'Unpaid';
     default:

@@ -23,6 +23,14 @@ function assertPositiveAmount(amount: number): number {
   return roundMoney(amount);
 }
 
+async function assertActiveAccount(accountId: number, usage: string): Promise<void> {
+  const account = await getAccountById(accountId);
+  if (!account) throw new Error('Account not found');
+  if (account.is_excluded) {
+    throw new Error(`Cannot use an excluded account for ${usage}`);
+  }
+}
+
 export async function getAccounts(): Promise<Account[]> {
   const db = await getDatabase();
   return db.getAllAsync<Account>('SELECT * FROM accounts ORDER BY name ASC');
@@ -36,9 +44,9 @@ export async function getSelectableAccounts(): Promise<Account[]> {
   );
 }
 
-/** All accounts for outflows: expenses, purchase payments, and transfers (includes excluded). */
+/** Accounts for new outflows: deactivated accounts are hidden from new pickers. */
 export async function getPaymentAccounts(): Promise<Account[]> {
-  return getAccounts();
+  return getSelectableAccounts();
 }
 
 /** Selectable accounts plus one existing account (for edit screens). */
@@ -222,6 +230,40 @@ export async function getTotalBalance(): Promise<number> {
   return row?.total ?? 0;
 }
 
+export async function getExpenseCategories(): Promise<string[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{ name: string }>(
+    `SELECT name FROM expense_categories ORDER BY name COLLATE NOCASE ASC`
+  );
+  return rows.map((r) => r.name);
+}
+
+export async function addExpenseCategory(name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Category name is required');
+
+  const db = await getDatabase();
+  await db.runAsync('INSERT OR IGNORE INTO expense_categories (name) VALUES (?)', [trimmed]);
+}
+
+export async function deleteExpenseCategory(name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Category name is required');
+
+  const db = await getDatabase();
+  await db.runAsync('DELETE FROM expense_categories WHERE name = ? COLLATE NOCASE', [trimmed]);
+}
+
+async function ensureExpenseCategory(
+  db: Awaited<ReturnType<typeof getDatabase>>,
+  category: string
+): Promise<string> {
+  const trimmed = category.trim();
+  if (!trimmed) throw new Error('Category is required');
+  await db.runAsync('INSERT OR IGNORE INTO expense_categories (name) VALUES (?)', [trimmed]);
+  return trimmed;
+}
+
 export async function createExpense(params: {
   category: string;
   description: string;
@@ -235,15 +277,17 @@ export async function createExpense(params: {
     throw new Error('Please select a valid bank/cash account');
   }
   const amount = assertPositiveAmount(params.amount);
+  await assertActiveAccount(params.account_id, 'expenses');
 
   const db = await getDatabase();
 
   let expenseId = 0;
   await db.withTransactionAsync(async () => {
+    const category = await ensureExpenseCategory(db, params.category);
     const result = await db.runAsync(
       `INSERT INTO expenses (category, description, amount, account_id, date, is_recurring, recurrence) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
-        params.category,
+        category,
         params.description,
         amount,
         params.account_id,
@@ -259,7 +303,7 @@ export async function createExpense(params: {
       amount: -amount,
       reference_type: 'expense',
       reference_id: expenseId,
-      description: `${params.category}: ${params.description}`,
+      description: `${category}: ${params.description}`,
       date: params.date,
     });
   });
@@ -312,12 +356,14 @@ export async function updateExpense(
     throw new Error('Please select a valid bank/cash account');
   }
   const amount = assertPositiveAmount(params.amount);
+  await assertActiveAccount(params.account_id, 'expenses');
 
   const db = await getDatabase();
   const existing = await getExpenseById(id);
   if (!existing) throw new Error('Expense not found');
 
   await db.withTransactionAsync(async () => {
+    const category = await ensureExpenseCategory(db, params.category);
     const tx = await db.getFirstAsync<Transaction>(
       `SELECT * FROM transactions WHERE reference_type = 'expense' AND reference_id = ? LIMIT 1`,
       [id]
@@ -330,7 +376,7 @@ export async function updateExpense(
     await db.runAsync(
       `UPDATE expenses SET category = ?, description = ?, amount = ?, account_id = ?, date = ?, is_recurring = ?, recurrence = ? WHERE id = ?`,
       [
-        params.category,
+        category,
         params.description,
         amount,
         params.account_id,
@@ -347,7 +393,7 @@ export async function updateExpense(
       amount: -amount,
       reference_type: 'expense',
       reference_id: id,
-      description: `${params.category}: ${params.description}`,
+      description: `${category}: ${params.description}`,
       date: params.date,
     });
   });
@@ -379,15 +425,24 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
   );
 
   const inventory = await db.getFirstAsync<{ total: number }>(
-    'SELECT COALESCE(SUM(current_qty * avg_cost), 0) as total FROM products'
+    'SELECT COALESCE(SUM(current_qty * avg_cost), 0) as total FROM products WHERE COALESCE(is_hidden, 0) = 0'
   );
 
   const receivables = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(total_amount - paid_amount), 0) as total FROM sales WHERE paid_amount < total_amount`
+    `SELECT COALESCE(SUM(total_amount - paid_amount), 0) as total
+     FROM sales
+     WHERE total_amount - paid_amount > 0.01
+       AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = sales.id)`
   );
 
   const payables = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(total_amount - paid_amount), 0) as total FROM purchases WHERE paid_amount < total_amount`
+    `SELECT COALESCE(SUM(total_amount - paid_amount), 0) as total
+     FROM purchases
+     WHERE total_amount - paid_amount > 0.01
+       AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = purchases.id)`
+  );
+  const loans = await db.getFirstAsync<{ total: number }>(
+    `SELECT COALESCE(SUM(outstanding_amount), 0) as total FROM loans`
   );
 
   const fixedAssets = await db.getFirstAsync<{ total: number }>(
@@ -399,8 +454,10 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
   const recv = roundMoney(receivables?.total ?? 0);
   const fixed = roundMoney(fixedAssets?.total ?? 0);
   const pay = roundMoney(payables?.total ?? 0);
+  const loan = roundMoney(loans?.total ?? 0);
   const totalAssets = addMoney(cash, inv, recv, fixed);
-  const equity = subMoney(totalAssets, pay);
+  const totalLiabilities = addMoney(pay, loan);
+  const equity = subMoney(totalAssets, totalLiabilities);
 
   return {
     assets: {
@@ -412,7 +469,8 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
     },
     liabilities: {
       payables: pay,
-      total: pay,
+      loans: loan,
+      total: totalLiabilities,
     },
     equity,
   };
@@ -428,10 +486,14 @@ export async function addFixedAsset(params: {
   value: number;
   notes?: string;
 }): Promise<number> {
+  if (!params.name.trim()) throw new Error('Asset name is required');
+  if (!Number.isFinite(params.value) || params.value < 0) {
+    throw new Error('Asset value cannot be negative');
+  }
   const db = await getDatabase();
   const result = await db.runAsync(
     `INSERT INTO fixed_assets (name, value, notes) VALUES (?, ?, ?)`,
-    [params.name, params.value, params.notes ?? null]
+    [params.name.trim(), roundMoney(params.value), params.notes ?? null]
   );
   return result.lastInsertRowId;
 }
@@ -440,10 +502,14 @@ export async function updateFixedAsset(
   id: number,
   params: { name: string; value: number; notes?: string }
 ): Promise<void> {
+  if (!params.name.trim()) throw new Error('Asset name is required');
+  if (!Number.isFinite(params.value) || params.value < 0) {
+    throw new Error('Asset value cannot be negative');
+  }
   const db = await getDatabase();
   await db.runAsync(`UPDATE fixed_assets SET name = ?, value = ?, notes = ? WHERE id = ?`, [
-    params.name,
-    params.value,
+    params.name.trim(),
+    roundMoney(params.value),
     params.notes ?? null,
     id,
   ]);
@@ -524,6 +590,17 @@ export async function deleteTransaction(id: number): Promise<void> {
         ]);
       }
     } else if (tx.reference_type === 'expense' && tx.reference_id) {
+      // Deleting a recurring template's ledger row would silently stop all
+      // future auto-generated expenses — force an explicit delete instead.
+      const expense = await db.getFirstAsync<{ is_recurring: number }>(
+        'SELECT is_recurring FROM expenses WHERE id = ?',
+        [tx.reference_id]
+      );
+      if (expense?.is_recurring) {
+        throw new Error(
+          'This entry is a recurring expense template. Delete it from the Expenses screen instead.'
+        );
+      }
       // Remove the source expense too, or it would linger unaccounted.
       await db.runAsync('DELETE FROM expenses WHERE id = ?', [tx.reference_id]);
     } else if (tx.reference_type === 'other_income' && tx.reference_id) {
@@ -573,6 +650,9 @@ export async function transferBetweenAccounts(params: {
   const fromAccount = await getAccountById(params.from_account_id);
   const toAccount = await getAccountById(params.to_account_id);
   if (!fromAccount || !toAccount) throw new Error('Account not found');
+  if (fromAccount.is_excluded || toAccount.is_excluded) {
+    throw new Error('Cannot transfer to or from a deactivated account');
+  }
 
   await db.withTransactionAsync(async () => {
     const freshFrom = await db.getFirstAsync<Account>(
@@ -580,7 +660,7 @@ export async function transferBetweenAccounts(params: {
       [params.from_account_id]
     );
     if (!freshFrom) throw new Error('Account not found');
-    if (freshFrom.current_balance + 0.01 < amount) {
+    if (roundMoney(freshFrom.current_balance) < amount) {
       throw new Error('Insufficient balance in the source account');
     }
 
@@ -659,7 +739,7 @@ export async function recordWithdrawal(params: {
       [params.account_id]
     );
     if (!fresh) throw new Error('Account not found');
-    if (fresh.current_balance + 0.01 < amount) {
+    if (roundMoney(fresh.current_balance) < amount) {
       throw new Error('Insufficient balance in this account');
     }
 
@@ -700,8 +780,12 @@ export async function processRecurringExpenses(): Promise<number> {
   const db = await getDatabase();
   let created = 0;
 
+  // Skip templates tied to deactivated accounts — new outflows must never
+  // post to an excluded account.
   const templates = await db.getAllAsync<Expense>(
-    'SELECT * FROM expenses WHERE is_recurring = 1'
+    `SELECT e.* FROM expenses e
+     JOIN accounts a ON a.id = e.account_id
+     WHERE e.is_recurring = 1 AND COALESCE(a.is_excluded, 0) = 0`
   );
 
   for (const template of templates) {

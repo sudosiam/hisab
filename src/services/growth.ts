@@ -104,8 +104,10 @@ async function getFiscalYearFinancialsByMonth(
       [fyStart, fyEnd]
     ),
     db.getAllAsync<{ month_key: string; total: number }>(
-      `SELECT substr(date, 1, 7) as month_key, COALESCE(SUM(amount), 0) as total
-       FROM expenses WHERE date >= ? AND date <= ?
+      `SELECT substr(e.date, 1, 7) as month_key, COALESCE(SUM(e.amount), 0) as total
+       FROM expenses e
+       JOIN accounts a ON a.id = e.account_id
+       WHERE e.date >= ? AND e.date <= ? AND COALESCE(a.is_excluded, 0) = 0
        GROUP BY month_key`,
       [fyStart, fyEnd]
     ),

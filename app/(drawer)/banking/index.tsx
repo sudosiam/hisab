@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { ErrorState, SearchField, useScreenStyles } from '../../../src/components/ui';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 import { getAccounts, getTotalBalance } from '../../../src/services/banking';
@@ -16,6 +16,7 @@ import { formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { spacing, radius, typography } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import type { Account } from '../../../src/types';
@@ -45,11 +46,15 @@ export default function BankingScreen() {
           marginBottom: spacing.md,
         },
         actionBtn: {
-          width: '48%',
+          flexGrow: 1,
+          flexBasis: '47%',
+          minWidth: 140,
           backgroundColor: colors.primary,
           paddingVertical: 12,
+          minHeight: 44,
           borderRadius: radius.md,
           alignItems: 'center',
+          justifyContent: 'center',
         },
         actionBtnAlt: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
         actionBtnSuccess: { backgroundColor: colors.success },
@@ -86,8 +91,6 @@ export default function BankingScreen() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [totalBalance, setTotalBalance] = useState(0);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const filteredAccounts = useMemo(
@@ -96,32 +99,22 @@ export default function BankingScreen() {
   );
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [a, total] = await Promise.all([getAccounts(), getTotalBalance()]);
-      setAccounts(a);
-      setTotalBalance(total);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load accounts');
-    } finally {
-      setLoading(false);
-    }
+    const [a, total] = await Promise.all([getAccounts(), getTotalBalance()]);
+    setAccounts(a);
+    setTotalBalance(total);
   }, []);
 
-  // refreshKey re-runs the loader whenever the global data version changes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useFocusEffect(useCallback(() => { load(); }, [load, refreshKey]));
+  const { booting, error, retry } = useFocusRefresh(load, [refreshKey]);
 
   if (error && accounts.length === 0) {
-    return <ErrorState message={error} onRetry={load} />;
+    return <ErrorState message={error} onRetry={retry} />;
   }
 
   return (
     <View style={styles.container}>
       <View style={localStyles.totalCard}>
         <Text style={localStyles.totalLabel}>Total Balance</Text>
-        <Text style={localStyles.totalHint}>Active accounts only</Text>
+        <Text style={localStyles.totalHint}>Active accounts only; deactivated accounts are excluded</Text>
         <Text style={localStyles.totalValue}>{formatCurrency(totalBalance)}</Text>
       </View>
 
@@ -129,24 +122,32 @@ export default function BankingScreen() {
         <TouchableOpacity
           style={localStyles.actionBtn}
           onPress={() => router.push('/(drawer)/banking/add-account' as never)}
+          accessibilityRole="button"
+          accessibilityLabel="Add account"
         >
           <Text style={localStyles.actionText}>+ Account</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[localStyles.actionBtn, localStyles.actionBtnAlt]}
           onPress={() => router.push('/(drawer)/banking/transfer' as never)}
+          accessibilityRole="button"
+          accessibilityLabel="Transfer between accounts"
         >
           <Text style={localStyles.actionTextAlt}>Transfer</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[localStyles.actionBtn, localStyles.actionBtnSuccess]}
           onPress={() => router.push('/(drawer)/banking/cash?mode=deposit' as never)}
+          accessibilityRole="button"
+          accessibilityLabel="Deposit money"
         >
           <Text style={localStyles.actionText}>Deposit</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[localStyles.actionBtn, localStyles.actionBtnDanger]}
           onPress={() => router.push('/(drawer)/banking/cash?mode=withdraw' as never)}
+          accessibilityRole="button"
+          accessibilityLabel="Withdraw money"
         >
           <Text style={localStyles.actionTextDanger}>Withdraw</Text>
         </TouchableOpacity>
@@ -160,7 +161,7 @@ export default function BankingScreen() {
         placeholder="Search account name or type..."
       />
 
-      {loading ? (
+      {booting && accounts.length === 0 ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
       ) : (
         <FlatList
@@ -189,13 +190,15 @@ export default function BankingScreen() {
               style={localStyles.accountRow}
               onPress={() => router.push(`/(drawer)/banking/${item.id}` as never)}
               activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel={`Open account ${item.name}`}
             >
               <View style={{ flex: 1 }}>
                 <Text style={localStyles.accountName}>{item.name}</Text>
                 <Text style={localStyles.accountType}>{item.type}</Text>
                 {item.is_excluded ? (
                   <View style={localStyles.excludedBadge}>
-                    <Text style={localStyles.excludedText}>Excluded</Text>
+                    <Text style={localStyles.excludedText}>Deactivated</Text>
                   </View>
                 ) : null}
               </View>

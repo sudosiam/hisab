@@ -13,7 +13,6 @@ import { calculateSaleCogs, calculateSaleGrossProfit } from '../../../src/servic
 import { formatSqliteError } from '../../../src/db/database';
 import { getSelectableAccounts } from '../../../src/services/banking';
 import { StatusBadge } from '../../../src/components/StatusBadge';
-import { AttachmentSection } from '../../../src/components/AttachmentSection';
 import { StatCard } from '../../../src/components/StatCard';
 import { AccountPicker } from '../../../src/components/AccountPicker';
 import {
@@ -96,6 +95,7 @@ export default function SaleDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const saleId = useMemo(() => parseRouteId(id), [id]);
 
+  const hasLoadedRef = React.useRef(false);
   const load = useCallback(async () => {
     if (!saleId) {
       setError('Invalid sale');
@@ -114,7 +114,9 @@ export default function SaleDetailScreen() {
       setPayments(p);
       setAccounts(a);
       if (a.length > 0) setSelectedAccount(a[0].id);
-      if (s) {
+      if (s && !hasLoadedRef.current) {
+        // Prefill only on first load — refocusing (e.g. after switching apps)
+        // must not wipe a partially typed payment amount.
         const dueAmt = s.total_amount - s.paid_amount;
         if (dueAmt > 0) setPayAmount(formatAmountInput(dueAmt));
       }
@@ -129,8 +131,12 @@ export default function SaleDetailScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
-      load();
+      if (!hasLoadedRef.current) {
+        setLoading(true);
+      }
+      load().finally(() => {
+        hasLoadedRef.current = true;
+      });
     }, [load])
   );
 
@@ -185,7 +191,7 @@ export default function SaleDetailScreen() {
           try {
             await deleteSale(sale.id);
             refresh();
-            router.back();
+            router.dismissTo('/(drawer)/sales');
           } catch (e) {
             Alert.alert('Error', formatSqliteError(e));
           }
@@ -206,7 +212,7 @@ export default function SaleDetailScreen() {
     return (
       <View style={styles.center}>
         <Text style={styles.cardTitle}>{error ?? 'Sale not found'}</Text>
-        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.back()}>
+        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.dismissTo('/(drawer)/sales')}>
           <Text style={styles.link}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -317,8 +323,6 @@ export default function SaleDetailScreen() {
           <Text style={localStyles.muted}>{sale.notes}</Text>
         </>
       ) : null}
-
-      <AttachmentSection referenceType="sale" referenceId={sale.id} />
 
       <View style={{ marginTop: spacing.lg }}>
         <PrimaryButton title="Delete Sale" onPress={handleDelete} variant="danger" />

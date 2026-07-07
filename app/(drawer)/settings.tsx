@@ -13,16 +13,7 @@ import {
 import { useFocusEffect } from 'expo-router';
 import { FormInput, PrimaryButton, SectionHeader, ThemeOption, useScreenStyles } from '../../src/components/ui';
 import { FinancialYearPicker } from '../../src/components/FinancialYearPicker';
-import { PinEntryModal, type PinModalMode } from '../../src/components/PinEntryModal';
-import { useAppLock } from '../../src/context/AppLockContext';
-import {
-  changePin,
-  disableAppLock,
-  setupPin,
-  setBiometricUnlockEnabled,
-  verifyPin,
-} from '../../src/services/appLock';
-import { resetDatabase } from '../../src/db/database';
+import { resetDatabase, formatSqliteError } from '../../src/db/database';
 import { useDatabase } from '../../src/context/DatabaseContext';
 import { useFinancialYear } from '../../src/context/FinancialYearContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -90,15 +81,6 @@ export default function SettingsScreen() {
     setSelectedFyStartYear,
     reload: reloadFinancialYear,
   } = useFinancialYear();
-  const {
-    lockEnabled,
-    lockSupported,
-    biometricEnabled,
-    biometricAvailable,
-    biometricLabel,
-    refreshLockSettings,
-    unlock,
-  } = useAppLock();
   const { colors, isDark, themeMode, setThemeMode } = useTheme();
   const styles = useScreenStyles();
   const localStyles = useMemo(
@@ -272,44 +254,47 @@ export default function SettingsScreen() {
   const [resetting, setResetting] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importConfirmInput, setImportConfirmInput] = useState('');
-  const [pinModalMode, setPinModalMode] = useState<PinModalMode | null>(null);
-  const [pendingBiometricValue, setPendingBiometricValue] = useState<boolean | null>(null);
-  const [pendingPin, setPendingPin] = useState('');
-  const [currentPinForChange, setCurrentPinForChange] = useState('');
-  const [newPinForChange, setNewPinForChange] = useState('');
   const [salePrefix, setSalePrefix] = useState('S');
   const [purchasePrefix, setPurchasePrefix] = useState('P');
   const [nextSaleInvoice, setNextSaleInvoice] = useState('');
   const [nextPurchaseInvoice, setNextPurchaseInvoice] = useState('');
 
   const load = useCallback(async () => {
-    const uri = await getBackupFolderUri();
-    if (uri) {
-      try {
-        await ensureBackupFolderReady(uri);
-      } catch {
-        // Folder may be temporarily unavailable; backup actions will surface errors.
+    try {
+      const uri = await getBackupFolderUri();
+      if (uri) {
+        try {
+          await ensureBackupFolderReady(uri);
+        } catch {
+          // Folder may be temporarily unavailable; backup actions will surface errors.
+        }
       }
+      setFolderUri(uri);
+      setAutoBackup(await isAutoBackupEnabled());
+      setBackupPaused(await isAutoBackupPaused());
+      setLastBackupAt(await getLastBackupAt());
+      setBackupError(await getBackupLastError());
+      await reloadFinancialYear();
+      setSalePrefix(await getSaleInvoicePrefix());
+      setPurchasePrefix(await getPurchaseInvoicePrefix());
+      setNextSaleInvoice(await getNextSaleInvoiceNo());
+      setNextPurchaseInvoice(await getNextPurchaseInvoiceNo());
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
     }
-    setFolderUri(uri);
-    setAutoBackup(await isAutoBackupEnabled());
-    setBackupPaused(await isAutoBackupPaused());
-    setLastBackupAt(await getLastBackupAt());
-    setBackupError(await getBackupLastError());
-    await reloadFinancialYear();
-    setSalePrefix(await getSaleInvoicePrefix());
-    setPurchasePrefix(await getPurchaseInvoicePrefix());
-    setNextSaleInvoice(await getNextSaleInvoiceNo());
-    setNextPurchaseInvoice(await getNextPurchaseInvoiceNo());
   }, [reloadFinancialYear]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const handlePickFolder = async () => {
-    const uri = await pickBackupFolder();
-    if (uri) {
-      setFolderUri(uri);
-      Alert.alert('Success', 'Backup folder ready (database/, media/, and full/ zip folders created).');
+    try {
+      const uri = await pickBackupFolder();
+      if (uri) {
+        setFolderUri(uri);
+        Alert.alert('Success', 'Backup folder set. Daily backups will be saved here.');
+      }
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
     }
   };
 
@@ -318,20 +303,32 @@ export default function SettingsScreen() {
       Alert.alert('Choose a backup folder', 'Select where backups are saved first.');
       return;
     }
+    if (backingUp) return;
     setBackingUp(true);
-    const result = await backupDatabase();
-    setBackingUp(false);
-    setLastBackupAt(await getLastBackupAt());
-    setBackupError(await getBackupLastError());
-    Alert.alert(result.success ? 'Backup Complete' : 'Backup Failed', result.message);
+    try {
+      const result = await backupDatabase();
+      setLastBackupAt(await getLastBackupAt());
+      setBackupError(await getBackupLastError());
+      Alert.alert(result.success ? 'Backup Complete' : 'Backup Failed', result.message);
+    } catch (e) {
+      Alert.alert('Backup Failed', formatSqliteError(e));
+    } finally {
+      setBackingUp(false);
+    }
   };
 
   const handleExport = async () => {
+    if (exporting) return;
     setExporting(true);
-    const result = await exportDatabase();
-    setExporting(false);
-    if (!result.success) {
-      Alert.alert('Export Failed', result.message);
+    try {
+      const result = await exportDatabase();
+      if (!result.success) {
+        Alert.alert('Export Failed', result.message);
+      }
+    } catch (e) {
+      Alert.alert('Export Failed', formatSqliteError(e));
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -348,11 +345,7 @@ export default function SettingsScreen() {
     setImportConfirmInput('');
   };
 
-  const handleRestoreFromFolder = async () => {
-    if (!folderUri) {
-      Alert.alert('Choose a backup folder', 'Select where backups are saved first.');
-      return;
-    }
+  const performRestoreFromFolder = async () => {
     setRestoring(true);
     try {
       const result = await restoreLatestFromBackupFolder();
@@ -360,13 +353,33 @@ export default function SettingsScreen() {
         await clearAllDrafts().catch(() => {});
         setBackupPaused(false);
         refresh();
+        await load();
         Alert.alert('Imported', result.message);
       } else {
         Alert.alert('Import Failed', result.message);
       }
+    } catch (e) {
+      Alert.alert('Import Failed', formatSqliteError(e));
     } finally {
       setRestoring(false);
     }
+  };
+
+  const handleRestoreFromFolder = () => {
+    if (!folderUri) {
+      Alert.alert('Choose a backup folder', 'Select where backups are saved first.');
+      return;
+    }
+    if (restoring) return;
+    // Restoring replaces the live books — never do it on a single tap.
+    Alert.alert(
+      'Restore from backup folder?',
+      'This replaces ALL current data with the latest backup in your backup folder. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Restore', style: 'destructive', onPress: () => void performRestoreFromFolder() },
+      ]
+    );
   };
 
   const handleRestore = async () => {
@@ -384,21 +397,28 @@ export default function SettingsScreen() {
       } else if (result.message !== 'Import cancelled') {
         Alert.alert('Import Failed', result.message);
       }
+    } catch (e) {
+      Alert.alert('Import Failed', formatSqliteError(e));
     } finally {
       setRestoring(false);
     }
   };
 
   const toggleAuto = async (value: boolean) => {
-    if (value && (await isAutoBackupPaused())) {
-      Alert.alert(
-        'Restore first',
-        'Backup is paused after reset. Restore from your backup folder before turning auto backup on.'
-      );
-      return;
+    try {
+      if (value && (await isAutoBackupPaused())) {
+        Alert.alert(
+          'Restore first',
+          'Backup is paused after reset. Restore from your backup folder before turning auto backup on.'
+        );
+        return;
+      }
+      setAutoBackup(value);
+      await setAutoBackupEnabled(value);
+    } catch (e) {
+      setAutoBackup(!value);
+      Alert.alert('Error', formatSqliteError(e));
     }
-    setAutoBackup(value);
-    await setAutoBackupEnabled(value);
   };
 
   const setMode = (mode: ThemeMode) => setThemeMode(mode);
@@ -475,87 +495,6 @@ export default function SettingsScreen() {
     } finally {
       setResetting(false);
     }
-  };
-
-  const closePinModal = () => {
-    setPinModalMode(null);
-    setPendingPin('');
-    setCurrentPinForChange('');
-    setNewPinForChange('');
-    setPendingBiometricValue(null);
-  };
-
-  const handlePinModalComplete = async ({ pin }: { pin: string }) => {
-    if (pinModalMode === 'setup') {
-      setPendingPin(pin);
-      setPinModalMode('setup-confirm');
-      return;
-    }
-
-    if (pinModalMode === 'setup-confirm') {
-      if (pin !== pendingPin) throw new Error('PINs do not match');
-      await setupPin(pin);
-      await refreshLockSettings();
-      unlock();
-      closePinModal();
-      Alert.alert(
-        'App lock enabled',
-        'Your PIN is set. The app locks after 30 seconds in the background, or immediately when reopened after that.'
-      );
-      return;
-    }
-
-    if (pinModalMode === 'disable') {
-      await disableAppLock(pin);
-      await refreshLockSettings();
-      closePinModal();
-      return;
-    }
-
-    if (pinModalMode === 'change-current') {
-      if (!(await verifyPin(pin))) throw new Error('Current PIN is incorrect');
-      setCurrentPinForChange(pin);
-      setPinModalMode('change-new');
-      return;
-    }
-
-    if (pinModalMode === 'change-new') {
-      setNewPinForChange(pin);
-      setPinModalMode('change-confirm');
-      return;
-    }
-
-    if (pinModalMode === 'change-confirm') {
-      if (pin !== newPinForChange) throw new Error('PINs do not match');
-      await changePin(currentPinForChange, pin);
-      closePinModal();
-      Alert.alert('PIN updated', 'Your new PIN is saved.');
-      return;
-    }
-
-    if (pinModalMode === 'biometric') {
-      if (pendingBiometricValue === null) {
-        closePinModal();
-        return;
-      }
-      await setBiometricUnlockEnabled(pendingBiometricValue, pin);
-      await refreshLockSettings();
-      closePinModal();
-    }
-  };
-
-  const handleLockToggle = (value: boolean) => {
-    if (value) {
-      setPinModalMode('setup');
-      return;
-    }
-    setPinModalMode('disable');
-  };
-
-  const handleBiometricToggle = (value: boolean) => {
-    // Changing biometric unlock always requires the PIN.
-    setPendingBiometricValue(value);
-    setPinModalMode('biometric');
   };
 
   return (
@@ -638,55 +577,6 @@ export default function SettingsScreen() {
         </Text>
       </SettingsSection>
 
-      {lockSupported ? (
-        <SettingsSection title="Security" cardStyle={localStyles.sectionCard}>
-          <View style={localStyles.settingsRow}>
-            <View style={localStyles.rowStack}>
-              <Text style={localStyles.rowLabel}>App lock</Text>
-              <Text style={localStyles.rowMeta}>Require PIN when opening the app</Text>
-            </View>
-            <Switch
-              value={lockEnabled}
-              onValueChange={handleLockToggle}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor={colors.surface}
-            />
-          </View>
-
-          {lockEnabled && biometricAvailable ? (
-            <>
-              <SettingsDivider color={colors.borderLight} />
-              <View style={localStyles.settingsRow}>
-                <View style={localStyles.rowStack}>
-                  <Text style={localStyles.rowLabel}>{biometricLabel}</Text>
-                  <Text style={localStyles.rowMeta}>Unlock with biometrics after PIN is set</Text>
-                </View>
-                <Switch
-                  value={biometricEnabled}
-                  onValueChange={handleBiometricToggle}
-                  trackColor={{ false: colors.border, true: colors.primary }}
-                  thumbColor={colors.surface}
-                />
-              </View>
-            </>
-          ) : null}
-
-          {lockEnabled ? (
-            <>
-              <SettingsDivider color={colors.borderLight} />
-              <TouchableOpacity
-                style={localStyles.settingsRow}
-                onPress={() => setPinModalMode('change-current')}
-                activeOpacity={0.7}
-              >
-                <Text style={localStyles.rowLabel}>Change PIN</Text>
-                <Text style={localStyles.rowAction}>Update</Text>
-              </TouchableOpacity>
-            </>
-          ) : null}
-        </SettingsSection>
-      ) : null}
-
       <SettingsSection title="Backup" cardStyle={localStyles.sectionCard}>
         <TouchableOpacity style={localStyles.settingsRow} onPress={handlePickFolder} activeOpacity={0.7}>
           <View style={localStyles.rowStack}>
@@ -704,7 +594,7 @@ export default function SettingsScreen() {
           <View style={localStyles.rowStack}>
             <Text style={localStyles.rowLabel}>Daily auto backup</Text>
             <Text style={localStyles.rowMeta}>
-              Once a day &amp; when you leave the app · Saves database, photos, and a full zip ·
+              Once a day {'&'} when you leave the app · Saves the database file ·
               Last: {formatLastBackupLabel(lastBackupAt)}
             </Text>
           </View>
@@ -724,8 +614,8 @@ export default function SettingsScreen() {
                 Backup paused after reset
               </Text>
               <Text style={localStyles.rowMeta}>
-                Auto backup is off and won&apos;t overwrite your backup folder until you restore.
-                Use &quot;Restore from backup folder&quot; below.
+                Auto backup is off and won{"'"}t overwrite your backup folder until you restore.
+                Use {'"'}Restore from backup folder{'"'} below.
               </Text>
             </View>
           </>
@@ -764,7 +654,7 @@ export default function SettingsScreen() {
             activeOpacity={0.7}
           >
             <Text style={localStyles.outlineBtnText}>
-              {exporting ? 'Exporting…' : 'Export full backup (zip)'}
+              {exporting ? 'Exporting…' : 'Export database file'}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -846,7 +736,7 @@ export default function SettingsScreen() {
         <Pressable style={localStyles.modalSheet} onPress={(e) => e.stopPropagation()}>
           <Text style={localStyles.modalTitle}>Import backup</Text>
           <Text style={localStyles.modalText}>
-            This replaces all current data with the backup file (.db or full .zip with photos).
+            This replaces all current data with the chosen backup database file (.db).
             A snapshot of your current data is kept during the import in case the file is bad. Type{' '}
             {IMPORT_CONFIRM_TEXT} to confirm.
           </Text>
@@ -874,13 +764,6 @@ export default function SettingsScreen() {
         </Pressable>
       </Pressable>
     </Modal>
-
-    <PinEntryModal
-      visible={pinModalMode !== null}
-      mode={pinModalMode ?? 'setup'}
-      onClose={closePinModal}
-      onComplete={handlePinModalComplete}
-    />
     </>
   );
 }

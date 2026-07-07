@@ -111,6 +111,8 @@ export function DatePickerField({
                 style={styles.navBtn}
                 onPress={() => setViewMonth((m) => addMonths(m, -1))}
                 accessibilityLabel="Previous month"
+                accessibilityRole="button"
+                hitSlop={6}
               >
                 <Ionicons name="chevron-back" size={18} color={colors.primary} />
               </TouchableOpacity>
@@ -119,6 +121,8 @@ export function DatePickerField({
                 style={styles.navBtn}
                 onPress={() => setViewMonth((m) => addMonths(m, 1))}
                 accessibilityLabel="Next month"
+                accessibilityRole="button"
+                hitSlop={6}
               >
                 <Ionicons name="chevron-forward" size={18} color={colors.primary} />
               </TouchableOpacity>
@@ -176,10 +180,17 @@ export function DatePickerField({
                   setViewMonth(startOfMonth(today));
                   confirm(today);
                 }}
+                accessibilityRole="button"
+                accessibilityLabel="Select today"
               >
                 <Text style={styles.footerBtnText}>Today</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.footerBtn} onPress={() => setOpen(false)}>
+              <TouchableOpacity
+                style={styles.footerBtn}
+                onPress={() => setOpen(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel date picker"
+              >
                 <Text style={styles.footerBtnTextMuted}>Cancel</Text>
               </TouchableOpacity>
             </View>
@@ -253,8 +264,8 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       marginBottom: spacing.sm,
     },
     navBtn: {
-      width: 36,
-      height: 36,
+      width: 44,
+      height: 44,
       borderRadius: radius.full,
       backgroundColor: colors.navActive,
       alignItems: 'center',

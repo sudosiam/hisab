@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -7,13 +7,16 @@ import {
   FlatList,
   StyleSheet,
   Pressable,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { spacing, radius } from '../constants/theme';
 import { cardSurface } from '../constants/shadows';
 import { formatCurrency, formatQty } from '../utils/format';
-import { getProductSellPrice } from '../services/inventory';
+import { deleteProductCategory, getProductSellPrice } from '../services/inventory';
+import { formatSqliteError } from '../db/database';
+import { productCategorySource } from './categorySources';
 import type { Product } from '../types';
 
 interface Props {
@@ -23,6 +26,7 @@ interface Props {
   onChange: (productId: number) => void;
   /** Show cost (purchase) or sell price (sale) in the list. */
   variant?: 'sale' | 'purchase';
+  onCategoryDeleted?: () => void;
 }
 
 function categoryLabel(product: Product): string {
@@ -44,6 +48,7 @@ export function ProductPicker({
   value,
   onChange,
   variant = 'sale',
+  onCategoryDeleted,
 }: Props) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
@@ -80,6 +85,33 @@ export function ProductPicker({
     setCategoryOpen(false);
   };
 
+  const handleDeleteCategory = useCallback(
+    (cat: string) => {
+      if (cat === 'All categories' || cat === 'Uncategorized') return;
+      Alert.alert('Delete category', productCategorySource.deleteMessage(cat), [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteProductCategory(cat);
+              if (categoryFilter === cat) setCategoryFilter('All categories');
+              onCategoryDeleted?.();
+            } catch (e) {
+              Alert.alert('Error', formatSqliteError(e));
+            }
+          },
+        },
+      ]);
+    },
+    [categoryFilter, onCategoryDeleted]
+  );
+
+  const deletableCategories = categories.filter(
+    (cat) => cat !== 'All categories' && cat !== 'Uncategorized'
+  );
+
   return (
     <View style={styles.wrap}>
       {categories.length > 1 ? (
@@ -89,6 +121,9 @@ export function ProductPicker({
             style={styles.trigger}
             onPress={() => setCategoryOpen(true)}
             activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Product category"
+            accessibilityHint="Opens category filter"
           >
             <Text style={styles.triggerText}>{categoryFilter}</Text>
             <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
@@ -103,6 +138,9 @@ export function ProductPicker({
           onPress={() => setProductOpen(true)}
           activeOpacity={0.75}
           disabled={filteredProducts.length === 0}
+          accessibilityRole="button"
+          accessibilityLabel={label}
+          accessibilityHint="Opens product selector"
         >
           <View style={{ flex: 1 }}>
             <Text style={[styles.triggerText, !selected && styles.placeholder]}>
@@ -123,19 +161,31 @@ export function ProductPicker({
         <Pressable style={styles.backdrop} onPress={() => setCategoryOpen(false)}>
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.sheetTitle}>Select Category</Text>
+            {deletableCategories.length > 0 ? (
+              <Text style={styles.hint}>Long press a category to delete</Text>
+            ) : null}
             <FlatList
               data={categories}
               keyExtractor={(item) => item}
               renderItem={({ item }) => (
-                <TouchableOpacity
+                <Pressable
                   style={[styles.option, item === categoryFilter && styles.optionActive]}
                   onPress={() => handleCategoryChange(item)}
+                  onLongPress={() => handleDeleteCategory(item)}
+                  delayLongPress={400}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: item === categoryFilter }}
+                  accessibilityHint={
+                    item !== 'All categories' && item !== 'Uncategorized'
+                      ? 'Long press to delete this category'
+                      : undefined
+                  }
                 >
                   <Text style={styles.optionText}>{item}</Text>
                   {item === categoryFilter ? (
                     <Ionicons name="checkmark" size={18} color={colors.primary} />
                   ) : null}
-                </TouchableOpacity>
+                </Pressable>
               )}
             />
           </Pressable>
@@ -167,6 +217,8 @@ export function ProductPicker({
                     setCategoryFilter(categoryLabel(item));
                     setProductOpen(false);
                   }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: item.id === value }}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={styles.optionText}>{item.name}</Text>
@@ -219,6 +271,11 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       padding: spacing.md,
     },
     sheetTitle: { fontSize: 16, fontWeight: '700', color: colors.text, marginBottom: spacing.sm },
+    hint: {
+      fontSize: 12,
+      color: colors.textMuted,
+      marginBottom: spacing.sm,
+    },
     empty: { textAlign: 'center', color: colors.textMuted, paddingVertical: spacing.lg },
     option: {
       flexDirection: 'row',

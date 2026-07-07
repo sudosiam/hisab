@@ -13,6 +13,7 @@ import { useFocusEffect } from 'expo-router';
 import { ErrorState, SectionHeader, useScreenStyles } from '../../src/components/ui';
 import { getBalanceSheet } from '../../src/services/banking';
 import { formatCurrency } from '../../src/utils/format';
+import { useDatabase } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { spacing, typography } from '../../src/constants/theme';
 import { cardSurface } from '../../src/constants/shadows';
@@ -20,6 +21,7 @@ import type { BalanceSheet } from '../../src/types';
 
 export default function BalanceSheetScreen() {
   const styles = useScreenStyles();
+  const { refreshKey } = useDatabase();
   const { colors, isDark } = useTheme();
   const [data, setData] = useState<BalanceSheet | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,6 +51,15 @@ export default function BalanceSheetScreen() {
           paddingTop: spacing.sm,
         },
         equity: { backgroundColor: colors.navActive },
+        info: {
+          backgroundColor: colors.navActive,
+          borderRadius: 16,
+          padding: spacing.md,
+          marginBottom: spacing.lg,
+          borderWidth: isDark ? 1 : 0,
+          borderColor: colors.border,
+        },
+        infoText: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
         row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: spacing.sm },
         rowLabel: { fontSize: 14, color: colors.text },
         rowValue: { fontSize: 14, color: colors.text, fontWeight: '500' },
@@ -59,6 +70,7 @@ export default function BalanceSheetScreen() {
   );
 
   const load = useCallback(async () => {
+    void refreshKey;
     setLoading(true);
     try {
       setData(await getBalanceSheet());
@@ -68,7 +80,7 @@ export default function BalanceSheetScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshKey]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -109,10 +121,16 @@ export default function BalanceSheetScreen() {
       }
     >
       <View style={localStyles.hero}>
-        <Text style={localStyles.heroLabel}>Owner&apos;s Equity</Text>
+        <Text style={localStyles.heroLabel}>Owner{"'"}s Equity</Text>
         <Text style={localStyles.heroValue}>{formatCurrency(data.equity)}</Text>
         <Text style={{ color: colors.textSecondary, marginTop: spacing.sm, fontSize: 13 }}>
           Assets {formatCurrency(data.assets.total)} − Liabilities {formatCurrency(data.liabilities.total)}
+        </Text>
+      </View>
+
+      <View style={localStyles.info}>
+        <Text style={localStyles.infoText}>
+          As of today. Deactivated accounts are excluded from cash/bank totals; inventory uses current stock value, and loans appear under liabilities.
         </Text>
       </View>
 
@@ -130,6 +148,7 @@ export default function BalanceSheetScreen() {
       <SectionHeader title="Liabilities" />
       <View style={localStyles.section}>
         <Row localStyles={rowStyles} label="Accounts Payable" value={data.liabilities.payables} />
+        <Row localStyles={rowStyles} label="Loans" value={data.liabilities.loans} />
         <View style={localStyles.sectionTotal}>
           <Row localStyles={rowStyles} label="Total Liabilities" value={data.liabilities.total} bold />
         </View>

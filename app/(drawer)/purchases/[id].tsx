@@ -18,7 +18,6 @@ import {
 import { formatSqliteError } from '../../../src/db/database';
 import { getPaymentAccounts } from '../../../src/services/banking';
 import { StatusBadge } from '../../../src/components/StatusBadge';
-import { AttachmentSection } from '../../../src/components/AttachmentSection';
 import { StatCard } from '../../../src/components/StatCard';
 import { AccountPicker } from '../../../src/components/AccountPicker';
 import {
@@ -84,6 +83,7 @@ export default function PurchaseDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const purchaseId = useMemo(() => parseRouteId(id), [id]);
 
+  const hasLoadedRef = React.useRef(false);
   const load = useCallback(async () => {
     if (!purchaseId) {
       setError('Invalid purchase');
@@ -102,7 +102,9 @@ export default function PurchaseDetailScreen() {
       setPayments(pay);
       setAccounts(a);
       if (a.length > 0) setSelectedAccount(a[0].id);
-      if (p) {
+      if (p && !hasLoadedRef.current) {
+        // Prefill only on first load — refocusing (e.g. after switching apps)
+        // must not wipe a partially typed payment amount.
         const dueAmt = p.total_amount - p.paid_amount;
         if (dueAmt > 0) setPayAmount(formatAmountInput(dueAmt));
       }
@@ -115,7 +117,16 @@ export default function PurchaseDetailScreen() {
     }
   }, [purchaseId]);
 
-  useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasLoadedRef.current) {
+        setLoading(true);
+      }
+      load().finally(() => {
+        hasLoadedRef.current = true;
+      });
+    }, [load])
+  );
 
   const handleAddPayment = async () => {
     if (!purchase || saving) return;
@@ -165,7 +176,7 @@ export default function PurchaseDetailScreen() {
             try {
               await deletePurchase(purchase.id);
               refresh();
-              router.back();
+              router.dismissTo('/(drawer)/purchases');
             } catch (e) {
               Alert.alert('Error', formatSqliteError(e));
             }
@@ -187,7 +198,7 @@ export default function PurchaseDetailScreen() {
     return (
       <View style={styles.center}>
         <Text style={styles.cardTitle}>{error ?? 'Purchase not found'}</Text>
-        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.back()}>
+        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.dismissTo('/(drawer)/purchases')}>
           <Text style={styles.link}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -204,7 +215,14 @@ export default function PurchaseDetailScreen() {
     <FormScreen>
       <View style={localStyles.header}>
         <Text style={localStyles.invoice}>{purchase.invoice_no}</Text>
-        <StatusBadge status={purchase.status} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+          <TouchableOpacity
+            onPress={() => router.push(`/(drawer)/purchases/edit?id=${purchase.id}` as never)}
+          >
+            <Text style={styles.link}>Edit</Text>
+          </TouchableOpacity>
+          <StatusBadge status={purchase.status} />
+        </View>
       </View>
       <Text style={localStyles.party}>{purchase.supplier_name}</Text>
       <Text style={localStyles.date}>{purchase.date}</Text>
@@ -286,8 +304,6 @@ export default function PurchaseDetailScreen() {
           <Text style={localStyles.muted}>{purchase.notes}</Text>
         </>
       ) : null}
-
-      <AttachmentSection referenceType="purchase" referenceId={purchase.id} />
 
       <PrimaryButton title="Delete Purchase" onPress={handleDelete} variant="danger" />
     </FormScreen>

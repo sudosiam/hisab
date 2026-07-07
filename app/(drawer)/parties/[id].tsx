@@ -295,7 +295,7 @@ export default function PartyDetailScreen() {
 
   useEffect(() => {
     if (rawId === 'index') {
-      router.replace('/parties' as never);
+      router.replace('/(drawer)/parties' as never);
     }
   }, [rawId, router]);
 
@@ -309,20 +309,23 @@ export default function PartyDetailScreen() {
     }
 
     try {
-      const [s, st, h] = await Promise.all([
-        getPartySummary(partyId),
-        getPartyStatement(partyId),
-        getPartyHistory(partyId),
-      ]);
+      const s = await getPartySummary(partyId);
       setSummary(s);
-      setStatement(st);
-      setHistory(h);
+      setStatement([]);
+      setHistory([]);
       setError(s ? null : 'Party not found');
       if (s) {
         setName(s.party.name);
         setType(s.party.type);
         setPhone(s.party.phone ?? '');
         setNotes(s.party.notes ?? '');
+        setLoading(false);
+        const [st, h] = await Promise.all([
+          getPartyStatement(partyId),
+          getPartyHistory(partyId),
+        ]);
+        setStatement(st);
+        setHistory(h);
       }
     } catch (e) {
       setError(formatSqliteError(e));
@@ -335,14 +338,19 @@ export default function PartyDetailScreen() {
   const showEditRef = React.useRef(false);
   showEditRef.current = showEdit;
 
+  const hasLoadedRef = React.useRef(false);
   useFocusEffect(
     useCallback(() => {
       if (rawId === 'index') return;
       // Don't reload over an open edit form — it would wipe unsaved changes.
       if (showEditRef.current) return;
-      setLoading(true);
+      if (!hasLoadedRef.current) {
+        setLoading(true);
+      }
       setError(null);
-      load();
+      load().finally(() => {
+        hasLoadedRef.current = true;
+      });
     }, [load, rawId])
   );
 
@@ -351,6 +359,7 @@ export default function PartyDetailScreen() {
   }, [navigation, summary?.party.name]);
 
   const handleSave = async () => {
+    if (saving) return;
     if (!summary || !name.trim()) {
       Alert.alert('Error', 'Name is required');
       return;

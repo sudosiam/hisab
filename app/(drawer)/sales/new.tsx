@@ -6,7 +6,6 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
-import * as Crypto from 'expo-crypto';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
   FormInput,
@@ -20,11 +19,9 @@ import { CustomerAutocomplete } from '../../../src/components/CustomerAutocomple
 import { ProductPicker } from '../../../src/components/ProductPicker';
 import { PaymentSplitForm, PaymentRow } from '../../../src/components/PaymentSplitForm';
 import { DraftBanner } from '../../../src/components/DraftBanner';
-import { AttachmentSection } from '../../../src/components/AttachmentSection';
 import { getProducts, getProductSellPrice } from '../../../src/services/inventory';
 import { getSelectableAccounts } from '../../../src/services/banking';
 import { createSale } from '../../../src/services/sales';
-import { clearPendingAttachments, commitPendingAttachments } from '../../../src/services/attachments';
 import { getPartyByName } from '../../../src/services/parties';
 import { getNextSaleInvoiceNo } from '../../../src/services/invoiceNumbers';
 import { DRAFT_KEYS, loadDraft, type SaleFormDraft } from '../../../src/services/formDrafts';
@@ -32,11 +29,12 @@ import { useFormDraft } from '../../../src/hooks/useFormDraft';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
-import { formatAmountInput, formatCurrency } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency, parseAmountInput } from '../../../src/utils/format';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
+import { saveWithDuplicateInvoiceWarning } from '../../../src/utils/duplicateInvoice';
 import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import type { Account, PendingAttachment, Product } from '../../../src/types';
+import type { Account, Product } from '../../../src/types';
 
 interface LineItem {
   key: string;
@@ -119,8 +117,6 @@ export default function NewSaleScreen() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [items, setItems] = useState<LineItem[]>([]);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
-  const pendingSessionKey = useMemo(() => Crypto.randomUUID(), []);
-  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [loading, setLoading] = useState(false);
 
   const draftPayload = useMemo<SaleFormDraft>(
@@ -145,8 +141,6 @@ export default function NewSaleScreen() {
   );
 
   const resetForm = async (productList: Product[]) => {
-    await clearPendingAttachments(pendingAttachments);
-    setPendingAttachments([]);
     setPartyName('');
     setPartyPhone('');
     setInvoiceNo(await getNextSaleInvoiceNo());
@@ -175,6 +169,16 @@ export default function NewSaleScreen() {
       },
     ]);
   };
+
+  const reloadProducts = React.useCallback(async () => {
+    try {
+      const p = await getProducts();
+      setProducts(p);
+      refresh();
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
+  }, [refresh]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -226,22 +230,24 @@ export default function NewSaleScreen() {
     if (!name) {
       return;
     }
-    getPartyByName(name, 'customer').then((party) => {
-      if (!cancelled && party) {
-        setPartyPhone((current) => (current.trim() ? current : party.phone ?? ''));
-      }
-    });
+    getPartyByName(name, 'customer')
+      .then((party) => {
+        if (!cancelled && party) {
+          setPartyPhone((current) => (current.trim() ? current : party.phone ?? ''));
+        }
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [partyName]);
 
   const subtotal = items.reduce(
-    (sum, item) => sum + (parseFloat(item.qty) || 0) * (parseFloat(item.unit_price) || 0),
+    (sum, item) => sum + (parseAmountInput(item.qty) || 0) * (parseAmountInput(item.unit_price) || 0),
     0
   );
-  const discountAmount = Math.max(0, parseFloat(discount) || 0);
-  const serviceChargesAmount = Math.max(0, parseFloat(serviceCharges) || 0);
+  const discountAmount = Math.max(0, parseAmountInput(discount) || 0);
+  const serviceChargesAmount = Math.max(0, parseAmountInput(serviceCharges) || 0);
   const total = Math.max(0, subtotal - discountAmount + serviceChargesAmount);
 
   const addItem = () => {
@@ -284,18 +290,28 @@ export default function NewSaleScreen() {
       return;
     }
     if (!isValidISODate(date)) {
-      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
+      Alert.alert('Invalid date', 'Select a valid invoice date');
       return;
     }
     for (const p of payments) {
-      if (parseFloat(p.amount) > 0 && !p.account_id) {
+      const amt = parseAmountInput(p.amount);
+      if (p.amount.trim() && (!Number.isFinite(amt) || amt <= 0)) {
+        Alert.alert('Error', 'Each payment amount must be greater than zero (or leave it empty)');
+        return;
+      }
+      if (amt > 0 && !p.account_id) {
         Alert.alert('Error', 'Select an account for each payment amount');
         return;
       }
-      if (parseFloat(p.amount) > 0 && !isValidISODate(p.date)) {
-        Alert.alert('Error', 'Enter a valid payment date as YYYY-MM-DD');
+      if (amt > 0 && !isValidISODate(p.date)) {
+        Alert.alert('Invalid payment date', 'Select a valid payment date');
         return;
       }
+    }
+    const paidTotal = payments.reduce((sum, p) => sum + (parseAmountInput(p.amount) || 0), 0);
+    if (paidTotal > total + 0.01) {
+      Alert.alert('Payment too high', `Total payments cannot exceed invoice amount (${formatCurrency(total)}).`);
+      return;
     }
     // Aggregate quantities per product so split lines are validated together.
     const qtyByProduct = new Map<number, number>();
@@ -304,8 +320,8 @@ export default function NewSaleScreen() {
         Alert.alert('Error', 'Select a product for each line item');
         return;
       }
-      const qty = parseFloat(item.qty);
-      const price = parseFloat(item.unit_price);
+      const qty = parseAmountInput(item.qty);
+      const price = parseAmountInput(item.unit_price);
       if (!qty || qty <= 0) {
         Alert.alert('Error', 'Each item must have quantity greater than zero');
         return;
@@ -327,50 +343,43 @@ export default function NewSaleScreen() {
       }
     }
 
+    const performSave = async () => {
+      try {
+        const saleId = await createSale({
+          party_name: partyName.trim(),
+          party_phone: partyPhone.trim() || undefined,
+          invoice_no: invoiceNo.trim(),
+          date,
+          notes: notes.trim() || undefined,
+          discount_amount: discountAmount,
+          service_charges: serviceChargesAmount > 0 ? serviceChargesAmount : undefined,
+          items: items.map((i) => ({
+            product_id: i.product_id,
+            qty: parseAmountInput(i.qty) || 0,
+            unit_price: parseAmountInput(i.unit_price) || 0,
+          })),
+          payments: payments
+            .filter((p) => parseAmountInput(p.amount) > 0 && p.account_id > 0)
+            .map((p) => ({
+              account_id: p.account_id,
+              amount: parseAmountInput(p.amount),
+              date: p.date,
+              notes: p.notes || undefined,
+            })),
+        });
+        await clearDraftOnSave();
+        refresh();
+        router.replace(`/(drawer)/sales/${saleId}`);
+      } catch (e) {
+        Alert.alert('Error', formatSqliteError(e));
+      }
+    };
+
+    // Lock the button before the async duplicate-invoice check, or a fast
+    // double-tap can save the same invoice twice.
     setLoading(true);
     try {
-      const saleId = await createSale({
-        party_name: partyName.trim(),
-        party_phone: partyPhone.trim() || undefined,
-        invoice_no: invoiceNo.trim(),
-        date,
-        notes: notes.trim() || undefined,
-        discount_amount: discountAmount,
-        service_charges: serviceChargesAmount > 0 ? serviceChargesAmount : undefined,
-        items: items.map((i) => ({
-          product_id: i.product_id,
-          qty: parseFloat(i.qty) || 0,
-          unit_price: parseFloat(i.unit_price) || 0,
-        })),
-        payments: payments
-          .filter((p) => parseFloat(p.amount) > 0 && p.account_id > 0)
-          .map((p) => ({
-            account_id: p.account_id,
-            amount: parseFloat(p.amount),
-            date: p.date,
-            notes: p.notes || undefined,
-          })),
-      });
-      let attachmentNote = '';
-      if (pendingAttachments.length > 0) {
-        try {
-          await commitPendingAttachments('sale', saleId, pendingAttachments);
-          setPendingAttachments([]);
-        } catch (e) {
-          attachmentNote =
-            e instanceof Error
-              ? `Sale saved, but attachments failed: ${e.message}`
-              : 'Sale saved, but some attachments could not be added.';
-        }
-      }
-      await clearDraftOnSave();
-      refresh();
-      router.replace(`/(drawer)/sales/${saleId}`);
-      if (attachmentNote) {
-        Alert.alert('Note', attachmentNote);
-      }
-    } catch (e) {
-      Alert.alert('Error', formatSqliteError(e));
+      await saveWithDuplicateInvoiceWarning('sales', invoiceNo.trim(), performSave);
     } finally {
       setLoading(false);
     }
@@ -413,6 +422,7 @@ export default function NewSaleScreen() {
                 products={products}
                 value={item.product_id}
                 onChange={(id) => updateItem(index, 'product_id', id)}
+                onCategoryDeleted={reloadProducts}
               />
               <View style={localStyles.itemRow}>
                 <View style={localStyles.qtyField}>
@@ -434,7 +444,9 @@ export default function NewSaleScreen() {
                 <TouchableOpacity
                   onPress={() => removeItem(index)}
                   style={localStyles.removeBtn}
-                  accessibilityLabel="Remove item"
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove line item"
                 >
                   <Text style={localStyles.removeText}>✕</Text>
                 </TouchableOpacity>
@@ -475,13 +487,6 @@ export default function NewSaleScreen() {
         onChange={setPayments}
         totalDue={total}
         defaultDate={isValidISODate(date) ? date : undefined}
-      />
-
-      <AttachmentSection
-        referenceType="sale"
-        pendingSessionKey={pendingSessionKey}
-        pendingAttachments={pendingAttachments}
-        onPendingAttachmentsChange={setPendingAttachments}
       />
 
       <PrimaryButton title="Save Sale" onPress={handleSave} loading={loading} />

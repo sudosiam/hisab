@@ -10,6 +10,8 @@ import {
   useScreenStyles,
 } from '../../../src/components/ui';
 import { AccountPicker } from '../../../src/components/AccountPicker';
+import { CategoryPicker } from '../../../src/components/CategoryPicker';
+import { expenseCategorySource } from '../../../src/components/categorySources';
 import { DraftBanner } from '../../../src/components/DraftBanner';
 import { createExpense, getPaymentAccounts } from '../../../src/services/banking';
 import { DRAFT_KEYS, loadDraft, type ExpenseFormDraft } from '../../../src/services/formDrafts';
@@ -132,7 +134,7 @@ export default function NewExpenseScreen() {
     if (loading) return;
     const amt = parsePositiveAmount(amount);
     if (!category.trim() || !description.trim()) {
-      Alert.alert('Error', 'Fill all fields');
+      Alert.alert('Missing details', 'Category, description, amount, and account are required');
       return;
     }
     if (amt === null) {
@@ -140,7 +142,7 @@ export default function NewExpenseScreen() {
       return;
     }
     if (!isValidISODate(date)) {
-      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
+      Alert.alert('Invalid date', 'Select a valid expense date');
       return;
     }
     if (!accountId) {
@@ -172,7 +174,7 @@ export default function NewExpenseScreen() {
     <FormScreen>
       <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
       <SectionHeader title="New Expense" />
-      <FormInput label="Category" value={category} onChangeText={setCategory} placeholder="Rent, Salary..." />
+      <CategoryPicker value={category} onChange={setCategory} source={expenseCategorySource} />
       <FormInput label="Description" value={description} onChangeText={setDescription} />
       <FormInput label="Amount (₹)" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
       <DatePickerField label="Date" value={date} onChange={setDate} />
@@ -184,6 +186,7 @@ export default function NewExpenseScreen() {
           value={isRecurring}
           onValueChange={setIsRecurring}
           trackColor={{ false: colors.border, true: colors.primary }}
+          accessibilityLabel="Recurring expense"
         />
       </View>
       {isRecurring ? (
@@ -200,6 +203,8 @@ export default function NewExpenseScreen() {
                 backgroundColor: recurrence === r ? colors.primary : colors.surface,
               }}
               onPress={() => setRecurrence(r)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: recurrence === r }}
             >
               <Text style={{ color: recurrence === r ? colors.onPrimary : colors.text, fontWeight: '600', fontSize: 12 }}>
                 {r}

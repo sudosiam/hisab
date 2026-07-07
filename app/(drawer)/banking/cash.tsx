@@ -81,7 +81,7 @@ export default function CashMovementScreen() {
       return;
     }
     if (!isValidISODate(date)) {
-      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
+      Alert.alert('Invalid date', 'Select a valid transaction date');
       return;
     }
     if (!accountId) {

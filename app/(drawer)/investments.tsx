@@ -11,7 +11,7 @@ import {
 } from '../../src/components/ui';
 import { getInvestmentInfo, setOwnerInvestment } from '../../src/services/investments';
 import { formatSqliteError } from '../../src/db/database';
-import { formatAmountInput, formatCurrency } from '../../src/utils/format';
+import { formatAmountInput, formatCurrency, normalizeAmountInput } from '../../src/utils/format';
 import { useDatabase } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { spacing, typography } from '../../src/constants/theme';
@@ -54,26 +54,37 @@ export default function InvestmentsScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedRef = React.useRef(false);
+  const dirtyRef = React.useRef(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     try {
       const data = await getInvestmentInfo();
       setInfo(data);
-      setAmount(data.isSet ? formatAmountInput(data.amount) : '');
+      // Don't clobber a value the user is currently typing.
+      if (!dirtyRef.current) {
+        setAmount(data.isSet ? formatAmountInput(data.amount) : '');
+      }
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load investment info');
     } finally {
       setLoading(false);
+      hasLoadedRef.current = true;
     }
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  const handleAmountChange = (value: string) => {
+    dirtyRef.current = true;
+    setAmount(value);
+  };
+
   const handleSave = async () => {
     if (saving) return;
-    const parsed = parseFloat(amount);
+    const parsed = parseFloat(normalizeAmountInput(amount));
     if (!Number.isFinite(parsed) || parsed < 0) {
       Alert.alert('Error', 'Enter a valid investment amount');
       return;
@@ -81,6 +92,7 @@ export default function InvestmentsScreen() {
     setSaving(true);
     try {
       await setOwnerInvestment(parsed);
+      dirtyRef.current = false;
       refresh();
       await load();
       Alert.alert('Saved', 'Your investment amount has been updated.');
@@ -124,7 +136,7 @@ export default function InvestmentsScreen() {
       <FormInput
         label="Total invested (₹)"
         value={amount}
-        onChangeText={setAmount}
+        onChangeText={handleAmountChange}
         keyboardType="decimal-pad"
         placeholder="0"
       />

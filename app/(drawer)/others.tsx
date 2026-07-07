@@ -145,7 +145,7 @@ export default function OthersScreen() {
   };
 
   const handleDelete = (asset: FixedAsset) => {
-    Alert.alert('Delete Asset', `Remove ${asset.name}?`, [
+    Alert.alert('Delete Asset', `Remove ${asset.name}?\nThis removes ${formatCurrency(asset.value)} from fixed assets on the balance sheet.`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -187,8 +187,17 @@ export default function OthersScreen() {
 
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <SectionHeader title="Fixed Assets" />
-        <TouchableOpacity onPress={() => { resetForm(); setShowAdd(!showAdd); }}>
-          <Text style={styles.link}>{showAdd && !editingId ? 'Cancel' : '+ Add Asset'}</Text>
+        <TouchableOpacity
+          onPress={() => {
+            if (showAdd) {
+              resetForm();
+              return;
+            }
+            resetForm();
+            setShowAdd(true);
+          }}
+        >
+          <Text style={styles.link}>{showAdd ? 'Cancel' : '+ Add Asset'}</Text>
         </TouchableOpacity>
       </View>
 

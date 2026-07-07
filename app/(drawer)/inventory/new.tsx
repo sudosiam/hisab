@@ -5,6 +5,7 @@ import { FormInput, FormScreen, PrimaryButton } from '../../../src/components/ui
 import { CategoryPicker } from '../../../src/components/CategoryPicker';
 import { createProduct } from '../../../src/services/inventory';
 import { formatSqliteError } from '../../../src/db/database';
+import { parseAmountInput } from '../../../src/utils/format';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 
 export default function NewProductScreen() {
@@ -29,9 +30,9 @@ export default function NewProductScreen() {
       Alert.alert('Error', 'Select or add a category');
       return;
     }
-    const qty = openingQty.trim() ? parseFloat(openingQty) : 0;
-    const cost = openingCost.trim() ? parseFloat(openingCost) : 0;
-    const price = sellPrice.trim() ? parseFloat(sellPrice) : undefined;
+    const qty = openingQty.trim() ? parseAmountInput(openingQty) : 0;
+    const cost = openingCost.trim() ? parseAmountInput(openingCost) : 0;
+    const price = sellPrice.trim() ? parseAmountInput(sellPrice) : undefined;
     if (!Number.isFinite(qty) || qty < 0) {
       Alert.alert('Error', 'Opening stock quantity cannot be negative');
       return;

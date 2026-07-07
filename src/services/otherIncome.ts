@@ -6,6 +6,40 @@ import type { OtherIncome, Transaction } from '../types';
 
 const ACTIVE_ACCOUNT_SQL = 'COALESCE(a.is_excluded, 0) = 0';
 
+async function ensureOtherIncomeCategory(
+  db: Awaited<ReturnType<typeof getDatabase>>,
+  category: string
+): Promise<string> {
+  const trimmed = category.trim();
+  if (!trimmed) throw new Error('Category is required');
+  await db.runAsync('INSERT OR IGNORE INTO other_income_categories (name) VALUES (?)', [trimmed]);
+  return trimmed;
+}
+
+export async function getOtherIncomeCategories(): Promise<string[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{ name: string }>(
+    `SELECT name FROM other_income_categories ORDER BY name COLLATE NOCASE ASC`
+  );
+  return rows.map((r) => r.name);
+}
+
+export async function addOtherIncomeCategory(name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Category name is required');
+
+  const db = await getDatabase();
+  await db.runAsync('INSERT OR IGNORE INTO other_income_categories (name) VALUES (?)', [trimmed]);
+}
+
+export async function deleteOtherIncomeCategory(name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Category name is required');
+
+  const db = await getDatabase();
+  await db.runAsync('DELETE FROM other_income_categories WHERE name = ? COLLATE NOCASE', [trimmed]);
+}
+
 async function assertActiveAccount(accountId: number): Promise<void> {
   const account = await getAccountById(accountId);
   if (!account) throw new Error('Account not found');
@@ -75,10 +109,11 @@ export async function createOtherIncome(params: {
   let incomeId = 0;
 
   await db.withTransactionAsync(async () => {
+    const category = await ensureOtherIncomeCategory(db, params.category);
     const result = await db.runAsync(
       `INSERT INTO other_income (category, description, amount, account_id, date)
        VALUES (?, ?, ?, ?, ?)`,
-      [params.category.trim(), params.description.trim(), amount, params.account_id, params.date]
+      [category, params.description.trim(), amount, params.account_id, params.date]
     );
     incomeId = result.lastInsertRowId;
     await recordTransaction(db, {
@@ -87,7 +122,7 @@ export async function createOtherIncome(params: {
       amount,
       reference_type: 'other_income',
       reference_id: incomeId,
-      description: `${params.category.trim()}: ${params.description.trim()}`,
+      description: `${category}: ${params.description.trim()}`,
       date: params.date,
     });
   });
@@ -118,6 +153,7 @@ export async function updateOtherIncome(
   if (!existing) throw new Error('Other income not found');
 
   await db.withTransactionAsync(async () => {
+    const category = await ensureOtherIncomeCategory(db, params.category);
     const tx = await db.getFirstAsync<Transaction>(
       `SELECT * FROM transactions WHERE reference_type = 'other_income' AND reference_id = ? LIMIT 1`,
       [id]
@@ -130,7 +166,7 @@ export async function updateOtherIncome(
     await db.runAsync(
       `UPDATE other_income SET category = ?, description = ?, amount = ?, account_id = ?, date = ? WHERE id = ?`,
       [
-        params.category.trim(),
+        category,
         params.description.trim(),
         amount,
         params.account_id,
@@ -145,7 +181,7 @@ export async function updateOtherIncome(
       amount,
       reference_type: 'other_income',
       reference_id: id,
-      description: `${params.category.trim()}: ${params.description.trim()}`,
+      description: `${category}: ${params.description.trim()}`,
       date: params.date,
     });
   });

@@ -27,7 +27,7 @@ import { StatCard } from '../../../src/components/StatCard';
 import { CategoryPicker } from '../../../src/components/CategoryPicker';
 import { formatSqliteError } from '../../../src/db/database';
 import { parseRouteId } from '../../../src/utils/route';
-import { formatAmountInput, formatCurrency, formatQty } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency, formatQty, parseAmountInput } from '../../../src/utils/format';
 import { roundMoney } from '../../../src/utils/money';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
@@ -112,11 +112,14 @@ export default function ProductDetailScreen() {
   const dirtyRef = useRef(false);
   dirtyRef.current = editing || adjustQty.trim().length > 0 || adjustNotes.trim().length > 0;
 
+  const hasLoadedRef = useRef(false);
   useFocusEffect(useCallback(() => {
     // Don't reload over an open edit form or a half-typed adjustment.
     if (dirtyRef.current) return;
-    setLoading(true);
-    load();
+    if (!hasLoadedRef.current) setLoading(true);
+    load().finally(() => {
+      hasLoadedRef.current = true;
+    });
   }, [load]));
 
   const handleSaveEdit = async () => {
@@ -125,7 +128,7 @@ export default function ProductDetailScreen() {
       Alert.alert('Error', 'Product name is required');
       return;
     }
-    const price = sellPrice.trim() ? parseFloat(sellPrice) : 0;
+    const price = sellPrice.trim() ? parseAmountInput(sellPrice) : 0;
     if (!Number.isFinite(price) || price < 0) {
       Alert.alert('Error', 'Enter a valid sell price');
       return;
@@ -151,7 +154,7 @@ export default function ProductDetailScreen() {
 
   const handleAdjust = async () => {
     if (!product || saving) return;
-    const qty = parseFloat(adjustQty);
+    const qty = parseAmountInput(adjustQty);
     if (!Number.isFinite(qty) || qty === 0) {
       Alert.alert('Error', 'Enter adjustment quantity (+ or -)');
       return;
@@ -173,7 +176,17 @@ export default function ProductDetailScreen() {
 
   const handleDelete = () => {
     if (!product) return;
-    Alert.alert('Delete Product', `Delete "${product.name}"?`, [
+    if (roundMoney(product.current_qty) > 0) {
+      Alert.alert(
+        'Stock on hand',
+        `Adjust stock to zero before deleting "${product.name}".`
+      );
+      return;
+    }
+    Alert.alert(
+      'Delete Product',
+      `Remove "${product.name}" from inventory? Past sales and purchases will not change.`,
+      [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',

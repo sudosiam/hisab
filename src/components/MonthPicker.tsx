@@ -38,16 +38,27 @@ export function MonthPicker({ monthKey, onChange }: Props) {
         style={styles.btn}
         onPress={() => onChange(shiftPeriod(monthKey, -1))}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel="Previous period"
       >
         <Ionicons name="chevron-back" size={16} color={colors.primary} />
       </TouchableOpacity>
-      <TouchableOpacity style={styles.labelWrap} onPress={handleCenterPress} activeOpacity={0.7}>
+      <TouchableOpacity
+        style={styles.labelWrap}
+        onPress={handleCenterPress}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`Current period ${periodKeyToLabel(monthKey)}`}
+        accessibilityHint={isFinancialYear ? 'Switches to current month' : 'Switches to financial year'}
+      >
         <Text style={styles.label}>{periodKeyToLabel(monthKey)}</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={styles.btn}
         onPress={() => onChange(shiftPeriod(monthKey, 1))}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel="Next period"
       >
         <Ionicons name="chevron-forward" size={16} color={colors.primary} />
       </TouchableOpacity>

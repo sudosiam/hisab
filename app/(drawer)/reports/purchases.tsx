@@ -11,6 +11,7 @@ import { ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
 import { radius, spacing } from '../../../src/constants/theme';
+import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 
 export default function PurchaseReportScreen() {
   const { refreshKey } = useDatabase();
@@ -74,12 +75,13 @@ export default function PurchaseReportScreen() {
       </View>
       <FlatList
         data={rows}
-        keyExtractor={(item) => item.invoice_no}
+        keyExtractor={(item, index) => `${item.invoice_no}-${index}`}
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
         ListEmptyComponent={<Text style={styles.empty}>No purchases in this month</Text>}
+        {...FLATLIST_PERF}
         renderItem={({ item }) => (
           <View style={localStyles.row}>
             <View>

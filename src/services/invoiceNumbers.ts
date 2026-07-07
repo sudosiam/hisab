@@ -168,38 +168,41 @@ export function isInvoiceNumberTakenError(error: unknown): boolean {
   return message.includes('Invoice number already exists');
 }
 
-export async function assertUniqueInvoiceNo(
+export async function isInvoiceNumberDuplicate(
   table: 'sales' | 'purchases',
   invoiceNo: string,
   excludeId?: number
-): Promise<void> {
+): Promise<boolean> {
   const trimmed = invoiceNo.trim();
-  if (!trimmed) throw new Error('Invoice number is required');
+  if (!trimmed) return false;
 
   const db = await getDatabase();
   const existing = await db.getFirstAsync<{ id: number }>(
     `SELECT id FROM ${table} WHERE invoice_no = ?`,
     [trimmed]
   );
-  if (existing && existing.id !== excludeId) {
+  return !!existing && existing.id !== excludeId;
+}
+
+/** @deprecated Duplicates are allowed — use isInvoiceNumberDuplicate for UI warnings. */
+export async function assertUniqueInvoiceNo(
+  table: 'sales' | 'purchases',
+  invoiceNo: string,
+  excludeId?: number
+): Promise<void> {
+  if (await isInvoiceNumberDuplicate(table, invoiceNo, excludeId)) {
     throw new Error('Invoice number already exists');
   }
 }
 
 export async function resolveSaleInvoiceNo(requested?: string): Promise<string> {
   const trimmed = requested?.trim();
-  if (trimmed) {
-    await assertUniqueInvoiceNo('sales', trimmed);
-    return trimmed;
-  }
+  if (trimmed) return trimmed;
   return getNextSaleInvoiceNo();
 }
 
 export async function resolvePurchaseInvoiceNo(requested?: string): Promise<string> {
   const trimmed = requested?.trim();
-  if (trimmed) {
-    await assertUniqueInvoiceNo('purchases', trimmed);
-    return trimmed;
-  }
+  if (trimmed) return trimmed;
   return getNextPurchaseInvoiceNo();
 }

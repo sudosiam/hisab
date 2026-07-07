@@ -151,6 +151,7 @@ export default function PartiesScreen() {
   };
 
   const handleSave = async () => {
+    if (saving) return;
     if (!name.trim()) {
       Alert.alert('Error', 'Name is required');
       return;

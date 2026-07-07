@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { ErrorState, SearchField, SectionHeader, useScreenStyles } from '../../../src/components/ui';
 import { getExpenses } from '../../../src/services/banking';
@@ -18,6 +18,7 @@ import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { getPeriodTotalLabel } from '../../../src/utils/date';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { spacing, radius } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
@@ -70,25 +71,13 @@ export default function ExpenseListScreen() {
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setExpenses(await getExpenses(monthKey));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load expenses');
-    } finally {
-      setLoading(false);
-    }
+    setExpenses(await getExpenses(monthKey));
   }, [monthKey]);
 
-  // refreshKey re-runs the loader whenever the global data version changes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useFocusEffect(useCallback(() => { load(); }, [load, refreshKey]));
+  const { booting, error, retry } = useFocusRefresh(load, [refreshKey, monthKey]);
 
   const filteredExpenses = useMemo(
     () =>
@@ -145,7 +134,7 @@ export default function ExpenseListScreen() {
   );
 
   if (error && expenses.length === 0) {
-    return <ErrorState message={error} onRetry={load} />;
+    return <ErrorState message={error} onRetry={retry} />;
   }
 
   const header = (
@@ -165,7 +154,7 @@ export default function ExpenseListScreen() {
         <Text style={styles.amount}>{formatCurrency(monthTotal)}</Text>
       </View>
 
-      {!loading && categoryTotals.length > 0 ? (
+      {!booting && categoryTotals.length > 0 ? (
         <>
           <SectionHeader title="By Category" />
           <View style={localStyles.categoryCard}>
@@ -194,14 +183,14 @@ export default function ExpenseListScreen() {
       ) : null}
 
       <SectionHeader title="Expenses" />
-      {loading ? <ActivityIndicator color={colors.primary} /> : null}
+      {booting ? <ActivityIndicator color={colors.primary} /> : null}
     </View>
   );
 
   return (
     <View style={styles.container}>
       <FlatList
-        data={loading ? [] : filteredExpenses}
+        data={booting && expenses.length === 0 ? [] : filteredExpenses}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
         contentContainerStyle={styles.content}
@@ -219,7 +208,7 @@ export default function ExpenseListScreen() {
         }
         {...FLATLIST_PERF}
         ListEmptyComponent={
-          loading ? null : (
+          booting ? null : (
             <Text style={styles.empty}>
               {search.trim() ? 'No expenses match your search.' : 'No expenses this month'}
             </Text>

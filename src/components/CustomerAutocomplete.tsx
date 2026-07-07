@@ -38,11 +38,18 @@ export function CustomerAutocomplete({
 
   useEffect(() => {
     let active = true;
-    resolveSearch(value).then((names) => {
-      if (active) setSuggestions(names);
-    });
+    const timer = setTimeout(() => {
+      resolveSearch(value)
+        .then((names) => {
+          if (active) setSuggestions(names);
+        })
+        .catch(() => {
+          if (active) setSuggestions([]);
+        });
+    }, 250);
     return () => {
       active = false;
+      clearTimeout(timer);
     };
   }, [value, resolveSearch]);
 
@@ -65,13 +72,16 @@ export function CustomerAutocomplete({
         placeholderTextColor={colors.textMuted}
         onFocus={() => setFocused(true)}
         onBlur={() => setTimeout(() => setFocused(false), 150)}
+        accessibilityLabel={label}
       />
       {focused && (filtered.length > 0 || showCreate) ? (
         <View style={styles.dropdown}>
           {showCreate ? (
             <TouchableOpacity
               style={styles.suggestion}
-              onPressIn={() => onChange(value.trim())}
+              onPress={() => onChange(value.trim())}
+              accessibilityRole="button"
+              accessibilityLabel={`Create new ${partyLabel} ${value.trim()}`}
             >
               <Text style={styles.createText}>
                 Create new {partyLabel}: &ldquo;{value.trim()}&rdquo;
@@ -83,6 +93,8 @@ export function CustomerAutocomplete({
               key={item}
               style={styles.suggestion}
               onPress={() => onChange(item)}
+              accessibilityRole="button"
+              accessibilityLabel={`Select ${item}`}
             >
               <Text style={styles.suggestionText}>{item}</Text>
             </TouchableOpacity>

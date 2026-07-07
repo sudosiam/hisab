@@ -1,11 +1,41 @@
 import React, { useCallback } from 'react';
 import { Platform, Pressable } from 'react-native';
-import { DrawerActions, useNavigation } from '@react-navigation/native';
+import {
+  CommonActions,
+  DrawerActions,
+  type NavigationProp,
+  type ParamListBase,
+  type RouteProp,
+  useNavigation,
+} from '@react-navigation/native';
 import { HeaderBackButton } from '@react-navigation/elements';
 import { Ionicons } from '@expo/vector-icons';
-import type { ParamListBase } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../context/ThemeContext';
+
+const LIST_ROUTE = 'index';
+const FORM_ROUTES = new Set(['new', 'edit', 'add-account', 'transfer', 'cash']);
+
+type StackNavigation = NativeStackNavigationProp<ParamListBase>;
+
+function readNavState(navigation: NavigationProp<ParamListBase>) {
+  try {
+    return navigation.getState();
+  } catch {
+    return undefined;
+  }
+}
+
+function activeRouteName(
+  navigation: StackNavigation,
+  route?: RouteProp<ParamListBase>
+): string {
+  if (route?.name) return route.name;
+  const state = readNavState(navigation);
+  if (!state?.routes?.length) return '';
+  const index = state.index ?? 0;
+  return state.routes[index]?.name ?? '';
+}
 
 export function useHeaderScreenOptions() {
   const { colors } = useTheme();
@@ -29,16 +59,67 @@ export function useHeaderScreenOptions() {
   } as const;
 }
 
-function isStackListRoute(navigation: NativeStackNavigationProp<ParamListBase>): boolean {
-  const state = navigation.getState();
-  const route = state.routes[state.index ?? 0];
-  return route?.name === 'index';
+function openDrawerFromNavigation(navigation: NavigationProp<ParamListBase>): void {
+  let current: NavigationProp<ParamListBase> | undefined = navigation;
+  while (current) {
+    const state = readNavState(current);
+    if (state?.type === 'drawer') {
+      current.dispatch(DrawerActions.openDrawer());
+      return;
+    }
+    current = current.getParent() ?? undefined;
+  }
+  navigation.dispatch(DrawerActions.openDrawer());
+}
+
+function shouldShowDrawerMenu(
+  navigation: StackNavigation,
+  route?: RouteProp<ParamListBase>
+): boolean {
+  const name = activeRouteName(navigation, route);
+  if (name === LIST_ROUTE) return true;
+
+  const state = readNavState(navigation);
+  if (!state?.routes?.length) return name === LIST_ROUTE || name === '';
+  return false;
+}
+
+function resetStackToList(navigation: StackNavigation): void {
+  navigation.dispatch(
+    CommonActions.reset({
+      index: 0,
+      routes: [{ name: LIST_ROUTE }],
+    })
+  );
+}
+
+function handleStackBack(navigation: StackNavigation, route?: RouteProp<ParamListBase>): void {
+  const name = activeRouteName(navigation, route);
+  if (name === LIST_ROUTE) return;
+
+  const state = readNavState(navigation);
+  const stackIndex = state?.index ?? 0;
+  const previousRouteName = stackIndex > 0 ? state?.routes?.[stackIndex - 1]?.name : undefined;
+
+  if (previousRouteName && FORM_ROUTES.has(previousRouteName)) {
+    resetStackToList(navigation);
+    return;
+  }
+
+  if (stackIndex > 0 && state?.routes) {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+  }
+
+  resetStackToList(navigation);
 }
 
 function DrawerMenuButton({ tintColor }: { tintColor: string }) {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const openDrawer = useCallback(() => {
-    navigation.dispatch(DrawerActions.toggleDrawer());
+    openDrawerFromNavigation(navigation);
   }, [navigation]);
 
   return (
@@ -59,21 +140,21 @@ export function useStackScreenOptions() {
   const { colors } = useTheme();
   const base = useHeaderScreenOptions();
 
-  return ({
-    navigation,
-  }: {
-    navigation: NativeStackNavigationProp<ParamListBase>;
+  return (props: {
+    navigation: StackNavigation;
+    route?: RouteProp<ParamListBase>;
   }) => ({
     ...base,
-    headerLeft: (props: React.ComponentProps<typeof HeaderBackButton>) => {
-      if (isStackListRoute(navigation)) {
+    headerLeft: (backProps: React.ComponentProps<typeof HeaderBackButton>) => {
+      const { navigation, route } = props;
+      if (shouldShowDrawerMenu(navigation, route)) {
         return <DrawerMenuButton tintColor={colors.headerText} />;
       }
       return (
         <HeaderBackButton
-          {...props}
+          {...backProps}
           tintColor={colors.headerText}
-          onPress={() => navigation.goBack()}
+          onPress={() => handleStackBack(navigation, route)}
         />
       );
     },

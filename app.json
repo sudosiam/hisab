@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hisab",
     "slug": "hisab",
-    "version": "4.0.1",
+    "version": "7.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "hisab",
@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hisab.app",
-      "buildNumber": "9"
+      "buildNumber": "17"
     },
     "android": {
       "adaptiveIcon": {
@@ -25,7 +25,7 @@
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "package": "com.hisab.app",
-      "versionCode": 9,
+      "versionCode": 17,
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -35,7 +35,6 @@
     "plugins": [
       "expo-router",
       "expo-sqlite",
-      "expo-secure-store",
       [
         "expo-splash-screen",
         {
@@ -50,26 +49,6 @@
         }
       ],
       "expo-system-ui",
-      [
-        "expo-image-picker",
-        {
-          "photosPermission": "Allow Hisab to attach sale and purchase photos from your gallery.",
-          "cameraPermission": "Allow Hisab to take photos of bills and receipts."
-        }
-      ],
-      [
-        "expo-media-library",
-        {
-          "photosPermission": "Allow Hisab to save attachment photos to your gallery.",
-          "savePhotosPermission": "Allow Hisab to save attachment photos to your gallery."
-        }
-      ],
-      [
-        "expo-local-authentication",
-        {
-          "faceIDPermission": "Allow Hisab to use Face ID to unlock your business data."
-        }
-      ],
       [
         "expo-document-picker",
         {

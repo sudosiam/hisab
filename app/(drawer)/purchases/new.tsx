@@ -6,7 +6,6 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
-import * as Crypto from 'expo-crypto';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
   FormInput,
@@ -20,22 +19,21 @@ import { CustomerAutocomplete } from '../../../src/components/CustomerAutocomple
 import { ProductPicker } from '../../../src/components/ProductPicker';
 import { PaymentSplitForm, PaymentRow } from '../../../src/components/PaymentSplitForm';
 import { DraftBanner } from '../../../src/components/DraftBanner';
-import { AttachmentSection } from '../../../src/components/AttachmentSection';
 import { getProducts } from '../../../src/services/inventory';
 import { getPaymentAccounts } from '../../../src/services/banking';
 import { createPurchase } from '../../../src/services/purchases';
-import { clearPendingAttachments, commitPendingAttachments } from '../../../src/services/attachments';
 import { getNextPurchaseInvoiceNo } from '../../../src/services/invoiceNumbers';
 import { DRAFT_KEYS, loadDraft, type PurchaseFormDraft } from '../../../src/services/formDrafts';
 import { useFormDraft } from '../../../src/hooks/useFormDraft';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
-import { formatAmountInput, formatCurrency } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency, parseAmountInput } from '../../../src/utils/format';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
+import { saveWithDuplicateInvoiceWarning } from '../../../src/utils/duplicateInvoice';
 import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import type { Account, PendingAttachment, Product } from '../../../src/types';
+import type { Account, Product } from '../../../src/types';
 
 interface LineItem {
   key: string;
@@ -116,8 +114,6 @@ export default function NewPurchaseScreen() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [items, setItems] = useState<LineItem[]>([]);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
-  const pendingSessionKey = useMemo(() => Crypto.randomUUID(), []);
-  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [loading, setLoading] = useState(false);
 
   const draftPayload = useMemo<PurchaseFormDraft>(
@@ -141,8 +137,6 @@ export default function NewPurchaseScreen() {
   );
 
   const resetForm = async (productList: Product[]) => {
-    await clearPendingAttachments(pendingAttachments);
-    setPendingAttachments([]);
     setSupplierName('');
     setInvoiceNo(await getNextPurchaseInvoiceNo());
     setDate(todayISO());
@@ -170,6 +164,16 @@ export default function NewPurchaseScreen() {
       },
     ]);
   };
+
+  const reloadProducts = React.useCallback(async () => {
+    try {
+      const p = await getProducts();
+      setProducts(p);
+      refresh();
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
+  }, [refresh]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -215,10 +219,10 @@ export default function NewPurchaseScreen() {
   }, [markReady, noteDraftLoaded, supplierNameParam]);
 
   const subtotal = items.reduce(
-    (sum, item) => sum + (parseFloat(item.qty) || 0) * (parseFloat(item.unit_cost) || 0),
+    (sum, item) => sum + (parseAmountInput(item.qty) || 0) * (parseAmountInput(item.unit_cost) || 0),
     0
   );
-  const discountAmount = Math.max(0, parseFloat(discount) || 0);
+  const discountAmount = Math.max(0, parseAmountInput(discount) || 0);
   const total = Math.max(0, subtotal - discountAmount);
 
   const addItem = () => {
@@ -261,26 +265,36 @@ export default function NewPurchaseScreen() {
       return;
     }
     if (!isValidISODate(date)) {
-      Alert.alert('Error', 'Enter a valid date as YYYY-MM-DD');
+      Alert.alert('Invalid date', 'Select a valid purchase date');
       return;
     }
     for (const p of payments) {
-      if (parseFloat(p.amount) > 0 && !p.account_id) {
+      const amt = parseAmountInput(p.amount);
+      if (p.amount.trim() && (!Number.isFinite(amt) || amt <= 0)) {
+        Alert.alert('Error', 'Each payment amount must be greater than zero (or leave it empty)');
+        return;
+      }
+      if (amt > 0 && !p.account_id) {
         Alert.alert('Error', 'Select an account for each payment amount');
         return;
       }
-      if (parseFloat(p.amount) > 0 && !isValidISODate(p.date)) {
-        Alert.alert('Error', 'Enter a valid payment date as YYYY-MM-DD');
+      if (amt > 0 && !isValidISODate(p.date)) {
+        Alert.alert('Invalid payment date', 'Select a valid payment date');
         return;
       }
+    }
+    const paidTotal = payments.reduce((sum, p) => sum + (parseAmountInput(p.amount) || 0), 0);
+    if (paidTotal > total + 0.01) {
+      Alert.alert('Payment too high', `Total payments cannot exceed purchase amount (${formatCurrency(total)}).`);
+      return;
     }
     for (const item of items) {
       if (!item.product_id) {
         Alert.alert('Error', 'Select a product for each line item');
         return;
       }
-      const qty = parseFloat(item.qty);
-      const cost = parseFloat(item.unit_cost);
+      const qty = parseAmountInput(item.qty);
+      const cost = parseAmountInput(item.unit_cost);
       if (!qty || qty <= 0) {
         Alert.alert('Error', 'Each item must have quantity greater than zero');
         return;
@@ -291,49 +305,42 @@ export default function NewPurchaseScreen() {
       }
     }
 
+    const performSave = async () => {
+      try {
+        const id = await createPurchase({
+          supplier_name: supplierName.trim(),
+          invoice_no: invoiceNo.trim(),
+          date,
+          vendor_invoice_no: vendorInvoiceNo.trim() || undefined,
+          notes: notes.trim() || undefined,
+          discount_amount: discountAmount,
+          items: items.map((i) => ({
+            product_id: i.product_id,
+            qty: parseAmountInput(i.qty) || 0,
+            unit_cost: parseAmountInput(i.unit_cost) || 0,
+          })),
+          payments: payments
+            .filter((p) => parseAmountInput(p.amount) > 0 && p.account_id > 0)
+            .map((p) => ({
+              account_id: p.account_id,
+              amount: parseAmountInput(p.amount),
+              date: p.date,
+              notes: p.notes || undefined,
+            })),
+        });
+        await clearDraftOnSave();
+        refresh();
+        router.replace(`/(drawer)/purchases/${id}`);
+      } catch (e) {
+        Alert.alert('Error', formatSqliteError(e));
+      }
+    };
+
+    // Lock the button before the async duplicate-invoice check, or a fast
+    // double-tap can save the same purchase twice.
     setLoading(true);
     try {
-      const id = await createPurchase({
-        supplier_name: supplierName.trim(),
-        invoice_no: invoiceNo.trim(),
-        date,
-        vendor_invoice_no: vendorInvoiceNo.trim() || undefined,
-        notes: notes.trim() || undefined,
-        discount_amount: discountAmount,
-        items: items.map((i) => ({
-          product_id: i.product_id,
-          qty: parseFloat(i.qty) || 0,
-          unit_cost: parseFloat(i.unit_cost) || 0,
-        })),
-        payments: payments
-          .filter((p) => parseFloat(p.amount) > 0 && p.account_id > 0)
-          .map((p) => ({
-            account_id: p.account_id,
-            amount: parseFloat(p.amount),
-            date: p.date,
-            notes: p.notes || undefined,
-          })),
-      });
-      let attachmentNote = '';
-      if (pendingAttachments.length > 0) {
-        try {
-          await commitPendingAttachments('purchase', id, pendingAttachments);
-          setPendingAttachments([]);
-        } catch (e) {
-          attachmentNote =
-            e instanceof Error
-              ? `Purchase saved, but attachments failed: ${e.message}`
-              : 'Purchase saved, but some attachments could not be added.';
-        }
-      }
-      await clearDraftOnSave();
-      refresh();
-      router.replace(`/(drawer)/purchases/${id}`);
-      if (attachmentNote) {
-        Alert.alert('Note', attachmentNote);
-      }
-    } catch (e) {
-      Alert.alert('Error', formatSqliteError(e));
+      await saveWithDuplicateInvoiceWarning('purchases', invoiceNo.trim(), performSave);
     } finally {
       setLoading(false);
     }
@@ -382,6 +389,7 @@ export default function NewPurchaseScreen() {
                 value={item.product_id}
                 onChange={(id) => updateItem(index, 'product_id', id)}
                 variant="purchase"
+                onCategoryDeleted={reloadProducts}
               />
               <View style={localStyles.itemRow}>
                 <View style={localStyles.qtyField}>
@@ -403,7 +411,9 @@ export default function NewPurchaseScreen() {
                 <TouchableOpacity
                   onPress={() => removeItem(index)}
                   style={localStyles.removeBtn}
-                  accessibilityLabel="Remove item"
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove line item"
                 >
                   <Text style={localStyles.removeText}>✕</Text>
                 </TouchableOpacity>
@@ -437,13 +447,7 @@ export default function NewPurchaseScreen() {
         onChange={setPayments}
         totalDue={total}
         defaultDate={isValidISODate(date) ? date : undefined}
-      />
-
-      <AttachmentSection
-        referenceType="purchase"
-        pendingSessionKey={pendingSessionKey}
-        pendingAttachments={pendingAttachments}
-        onPendingAttachmentsChange={setPendingAttachments}
+        mode="pay"
       />
 
       <PrimaryButton title="Save Purchase" onPress={handleSave} loading={loading} />

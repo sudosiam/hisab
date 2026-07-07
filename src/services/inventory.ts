@@ -2,6 +2,8 @@ import { getDatabase } from '../db/database';
 import { mulMoney, roundMoney } from '../utils/money';
 import type { InventoryMovement, Product } from '../types';
 
+const ACTIVE_PRODUCT_SQL = 'COALESCE(is_hidden, 0) = 0';
+
 /** Default sale unit price: stored sell price, or cost + 20% markup. */
 export function getProductSellPrice(product: Pick<Product, 'sell_price' | 'avg_cost'>): number {
   if (product.sell_price > 0) return product.sell_price;
@@ -16,7 +18,7 @@ export async function getProductCategories(): Promise<string[]> {
        SELECT name FROM product_categories
        UNION
        SELECT DISTINCT category AS name FROM products
-       WHERE category IS NOT NULL AND TRIM(category) != ''
+       WHERE category IS NOT NULL AND TRIM(category) != '' AND ${ACTIVE_PRODUCT_SQL}
      )
      ORDER BY name COLLATE NOCASE ASC`
   );
@@ -31,6 +33,17 @@ export async function addProductCategory(name: string): Promise<void> {
   await db.runAsync('INSERT OR IGNORE INTO product_categories (name) VALUES (?)', [trimmed]);
 }
 
+export async function deleteProductCategory(name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Category name is required');
+
+  const db = await getDatabase();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM product_categories WHERE name = ? COLLATE NOCASE', [trimmed]);
+    await db.runAsync('UPDATE products SET category = NULL WHERE category = ? COLLATE NOCASE', [trimmed]);
+  });
+}
+
 async function ensureProductCategory(
   db: Awaited<ReturnType<typeof getDatabase>>,
   category: string | null | undefined
@@ -41,15 +54,27 @@ async function ensureProductCategory(
   return trimmed;
 }
 
-export async function getProducts(category?: string): Promise<Product[]> {
+export async function getProducts(
+  category?: string,
+  options?: { limit?: number; offset?: number }
+): Promise<Product[]> {
   const db = await getDatabase();
+  const page = options?.limit ? ' LIMIT ? OFFSET ?' : '';
   if (category?.trim()) {
+    const params: (string | number)[] = [category.trim()];
+    if (options?.limit) params.push(options.limit, options.offset ?? 0);
     return db.getAllAsync<Product>(
-      'SELECT * FROM products WHERE category = ? COLLATE NOCASE ORDER BY name ASC',
-      [category.trim()]
+      'SELECT * FROM products WHERE category = ? COLLATE NOCASE AND ' +
+        ACTIVE_PRODUCT_SQL +
+        ` ORDER BY name ASC${page}`,
+      params
     );
   }
-  return db.getAllAsync<Product>('SELECT * FROM products ORDER BY name ASC');
+  const params = options?.limit ? [options.limit, options.offset ?? 0] : [];
+  return db.getAllAsync<Product>(
+    `SELECT * FROM products WHERE ${ACTIVE_PRODUCT_SQL} ORDER BY name ASC${page}`,
+    params
+  );
 }
 
 export async function getProductById(id: number): Promise<Product | null> {
@@ -82,7 +107,7 @@ export async function createProduct(params: {
   if (!trimmed) throw new Error('Product name is required');
 
   const duplicate = await db.getFirstAsync<{ id: number }>(
-    'SELECT id FROM products WHERE name = ? COLLATE NOCASE',
+    `SELECT id FROM products WHERE name = ? COLLATE NOCASE AND ${ACTIVE_PRODUCT_SQL}`,
     [trimmed]
   );
   if (duplicate) throw new Error('A product with this name already exists');
@@ -114,7 +139,7 @@ export async function createProduct(params: {
       `INSERT INTO products (name, sku, category, unit, opening_qty, opening_cost, avg_cost, sell_price, current_qty)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        params.name,
+        trimmed,
         params.sku ?? null,
         category,
         params.unit ?? 'pcs',
@@ -149,7 +174,7 @@ export async function updateProduct(
   if (!trimmed) throw new Error('Product name is required');
 
   const duplicate = await db.getFirstAsync<{ id: number }>(
-    'SELECT id FROM products WHERE name = ? COLLATE NOCASE AND id != ?',
+    `SELECT id FROM products WHERE name = ? COLLATE NOCASE AND id != ? AND ${ACTIVE_PRODUCT_SQL}`,
     [trimmed, id]
   );
   if (duplicate) throw new Error('A product with this name already exists');
@@ -211,32 +236,47 @@ export async function adjustStock(
 
 }
 
+async function hardDeleteProduct(
+  db: Awaited<ReturnType<typeof getDatabase>>,
+  id: number
+): Promise<void> {
+  await db.runAsync('DELETE FROM inventory_movements WHERE product_id = ?', [id]);
+  await db.runAsync('DELETE FROM products WHERE id = ?', [id]);
+}
+
 export async function deleteProduct(id: number): Promise<void> {
   const db = await getDatabase();
+  const product = await db.getFirstAsync<Product>('SELECT * FROM products WHERE id = ?', [id]);
+  if (!product) throw new Error('Product not found');
+  if (roundMoney(product.current_qty) > 0) {
+    throw new Error(
+      `Cannot delete while stock remains (${product.current_qty} on hand). Adjust stock to zero first.`
+    );
+  }
 
   const inSales = await db.getFirstAsync<{ id: number }>(
     'SELECT id FROM sale_items WHERE product_id = ? LIMIT 1',
     [id]
   );
-  if (inSales) throw new Error('Product is used in sales and cannot be deleted');
-
   const inPurchases = await db.getFirstAsync<{ id: number }>(
     'SELECT id FROM purchase_items WHERE product_id = ? LIMIT 1',
     [id]
   );
-  if (inPurchases) throw new Error('Product is used in purchases and cannot be deleted');
+
+  if (inSales || inPurchases) {
+    await db.runAsync('UPDATE products SET is_hidden = 1 WHERE id = ?', [id]);
+    return;
+  }
 
   await db.withTransactionAsync(async () => {
-    await db.runAsync('DELETE FROM inventory_movements WHERE product_id = ?', [id]);
-    await db.runAsync('DELETE FROM products WHERE id = ?', [id]);
+    await hardDeleteProduct(db, id);
   });
-
 }
 
 export async function getInventoryValue(): Promise<number> {
   const db = await getDatabase();
   const row = await db.getFirstAsync<{ total: number }>(
-    'SELECT COALESCE(SUM(current_qty * avg_cost), 0) as total FROM products'
+    `SELECT COALESCE(SUM(current_qty * avg_cost), 0) as total FROM products WHERE ${ACTIVE_PRODUCT_SQL}`
   );
   return roundMoney(row?.total ?? 0);
 }

@@ -1,16 +1,12 @@
-import { getDatabase, repairFinancialDataIntegrity } from '../db/database';
+import { getDatabase } from '../db/database';
 import { addMoney, mulMoney, roundMoney } from '../utils/money';
 import { resolvePeriodRange } from '../utils/period';
 import type { Sale, SaleItem } from '../types';
 
-/** Effective unit cost per line — prefers stored cost, then movement, then product avg. */
+/** Effective unit cost per line — repair fills stored costs; product avg is a legacy fallback. */
 export const SALE_LINE_UNIT_COST_SQL = `
   COALESCE(
     NULLIF(si.unit_cost, 0),
-    (SELECT ABS(im.unit_cost) FROM inventory_movements im
-     WHERE im.reference_type = 'sale' AND im.reference_id = si.sale_id
-       AND im.product_id = si.product_id AND im.type = 'sale'
-     LIMIT 1),
     p.avg_cost,
     0
   )
@@ -44,7 +40,6 @@ export async function getPeriodFinancials(
   periodKey: string,
   range?: { start: string; end: string }
 ): Promise<PeriodFinancials> {
-  await repairFinancialDataIntegrity();
   const db = await getDatabase();
   const { start, end } = range ?? (await resolvePeriodRange(periodKey));
 
@@ -67,7 +62,9 @@ export async function getPeriodFinancials(
       [start, end]
     ),
     db.getFirstAsync<{ total: number }>(
-      `SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE date >= ? AND date <= ?`,
+      `SELECT COALESCE(SUM(e.amount), 0) as total FROM expenses e
+       JOIN accounts a ON a.id = e.account_id
+       WHERE e.date >= ? AND e.date <= ? AND COALESCE(a.is_excluded, 0) = 0`,
       [start, end]
     ),
     db.getFirstAsync<{ total: number }>(

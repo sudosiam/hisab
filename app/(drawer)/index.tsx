@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
-import { View, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, ScrollView, RefreshControl, ActivityIndicator, Alert } from 'react-native';
+import { formatSqliteError } from '../../src/db/database';
 import { StatCard } from '../../src/components/StatCard';
 import { MonthPicker } from '../../src/components/MonthPicker';
 import { RecentActivityList } from '../../src/components/RecentActivityList';
@@ -62,7 +63,7 @@ export default function DashboardScreen() {
           onRefresh={() => {
             setRefreshing(true);
             load()
-              .catch(() => {})
+              .catch((e) => Alert.alert('Refresh failed', formatSqliteError(e)))
               .finally(() => setRefreshing(false));
           }}
           colors={[colors.primary]}
@@ -79,7 +80,7 @@ export default function DashboardScreen() {
         <StatCard label="Purchased" value={stats?.purchased ?? 0} color={colors.warning} />
         <StatCard label="Gross Profit" value={stats?.grossProfit ?? 0} color={colors.success} />
         <StatCard label="Net Profit" value={stats?.netProfit ?? 0} color={colors.success} />
-        <StatCard label="Expense" value={stats?.expense ?? 0} color={colors.text} />
+        <StatCard label="Expense" value={stats?.expense ?? 0} color={colors.danger} />
         <StatCard label="Total Liquid" value={stats?.totalLiquid ?? 0} color={colors.text} />
         <StatCard label="Inventory Value" value={stats?.inventoryValue ?? 0} color={colors.text} />
         <StatCard label="Receivable" value={stats?.receivable ?? 0} color={colors.danger} />

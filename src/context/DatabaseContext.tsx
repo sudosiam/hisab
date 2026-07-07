@@ -10,7 +10,6 @@ import {
   restoreLatestFromBackupFolder,
 } from '../services/backup';
 import { processRecurringExpenses } from '../services/banking';
-import { cleanupExpiredPendingAttachments } from '../services/attachments';
 import { useTheme } from './ThemeContext';
 import { spacing } from '../constants/theme';
 
@@ -118,8 +117,9 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!ready) return;
 
-    processRecurringExpenses().catch(() => {});
-    cleanupExpiredPendingAttachments().catch(() => {});
+    const recurringTimer = setTimeout(() => {
+      processRecurringExpenses().catch(() => {});
+    }, 1000);
 
     // Defer backup so DB + UI finish mounting first (avoids Android SAF native crashes).
     const backupTimer = setTimeout(() => {
@@ -133,6 +133,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => {
+      clearTimeout(recurringTimer);
       clearTimeout(backupTimer);
       subscription.remove();
     };
@@ -154,12 +155,25 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
         <DatabaseErrorUI
           error={error}
           onRetry={retryInit}
-          onRestoreFromFolder={async () => {
-            try {
-              reloadAfterRestore(await restoreLatestFromBackupFolder());
-            } catch (err) {
-              setError(formatSqliteError(err));
-            }
+          onRestoreFromFolder={() => {
+            Alert.alert(
+              'Restore from backup folder?',
+              'This replaces all data on this device with the latest backup from your backup folder.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Restore',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      reloadAfterRestore(await restoreLatestFromBackupFolder());
+                    } catch (err) {
+                      setError(formatSqliteError(err));
+                    }
+                  },
+                },
+              ]
+            );
           }}
           onRestoreFromFile={async () => {
             try {

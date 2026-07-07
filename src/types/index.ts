@@ -33,6 +33,7 @@ export interface Product {
   avg_cost: number;
   sell_price: number;
   current_qty: number;
+  is_hidden?: number;
   created_at: string;
 }
 
@@ -52,6 +53,7 @@ export interface InventoryMovement {
 export interface Sale {
   id: number;
   invoice_no: string;
+  party_id: number | null;
   party_name: string;
   date: string;
   subtotal: number;
@@ -88,6 +90,7 @@ export interface SalePayment {
 export interface Purchase {
   id: number;
   invoice_no: string;
+  party_id: number | null;
   supplier_name: string;
   vendor_invoice_no: string | null;
   date: string;
@@ -180,6 +183,7 @@ export interface BalanceSheet {
   };
   liabilities: {
     payables: number;
+    loans: number;
     total: number;
   };
   equity: number;
@@ -189,6 +193,17 @@ export interface FixedAsset {
   id: number;
   name: string;
   value: number;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface Loan {
+  id: number;
+  lender_name: string;
+  principal_amount: number;
+  outstanding_amount: number;
+  interest_rate: number | null;
+  start_date: string | null;
   notes: string | null;
   created_at: string;
 }
@@ -259,24 +274,3 @@ export interface PurchaseItemInput {
   unit_cost: number;
 }
 
-export type AttachmentReferenceType = 'sale' | 'purchase';
-
-export interface Attachment {
-  id: number;
-  reference_type: AttachmentReferenceType;
-  reference_id: number;
-  file_name: string;
-  mime_type: string;
-  storage_path: string;
-  file_size: number;
-  created_at: string;
-}
-
-/** Unsaved attachment held locally until a sale/purchase is created. */
-export interface PendingAttachment {
-  localKey: string;
-  file_name: string;
-  mime_type: string;
-  storage_path: string;
-  file_size: number;
-}

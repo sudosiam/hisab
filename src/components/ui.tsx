@@ -62,7 +62,7 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
     link: { color: colors.accent, fontWeight: '600', fontSize: 14 },
     divider: { height: 1, backgroundColor: colors.borderLight, marginVertical: spacing.sm },
     filters: { flexDirection: 'row', padding: spacing.md, gap: spacing.sm },
-    list: { padding: spacing.md, paddingBottom: 96 },
+    list: { padding: spacing.md, paddingBottom: 120 },
     fab: {
       position: 'absolute',
       bottom: spacing.lg,
@@ -70,7 +70,11 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
       backgroundColor: colors.primary,
       paddingHorizontal: spacing.lg,
       paddingVertical: 15,
+      minHeight: 52,
+      minWidth: 120,
       borderRadius: radius.xl,
+      alignItems: 'center',
+      justifyContent: 'center',
       ...fabShadow(isDark),
     },
     fabText: { color: colors.onPrimary, fontWeight: '700', fontSize: 15, letterSpacing: 0.2 },
@@ -144,6 +148,9 @@ export function PrimaryButton({
       onPress={onPress}
       disabled={disabled || loading}
       activeOpacity={0.8}
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ disabled: disabled || loading, busy: !!loading }}
     >
       {loading ? (
         <ActivityIndicator color={spinnerColor} />
@@ -197,24 +204,28 @@ interface InputProps extends Omit<TextInputProps, 'style'> {
   label: string;
   value: string;
   onChangeText: (v: string) => void;
+  helperText?: string;
 }
 
-export function FormInput({ label, value, onChangeText, multiline, ...rest }: InputProps) {
+export function FormInput({ label, value, onChangeText, multiline, helperText, editable, ...rest }: InputProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createInputStyles(colors), [colors]);
+  const isReadOnly = editable === false;
 
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
-        style={[styles.input, multiline && styles.multiline]}
+        style={[styles.input, multiline && styles.multiline, isReadOnly && styles.inputDisabled]}
         value={value}
         onChangeText={onChangeText}
         multiline={multiline}
+        editable={editable}
         placeholderTextColor={colors.textMuted}
         accessibilityLabel={rest.accessibilityLabel ?? label}
         {...rest}
       />
+      {helperText ? <Text style={styles.helperText}>{helperText}</Text> : null}
     </View>
   );
 }
@@ -234,7 +245,7 @@ export function FormScreen({
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
       keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
     >
       <ScrollView
@@ -295,6 +306,47 @@ export function ErrorState({
   );
 }
 
+export function EmptyState({
+  title,
+  message,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  message?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useScreenStyles();
+  return (
+    <View style={{ alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: 48 }}>
+      <Ionicons name="file-tray-outline" size={36} color={colors.textMuted} />
+      <Text style={[styles.cardTitle, { marginTop: spacing.md, textAlign: 'center' }]}>{title}</Text>
+      {message ? <Text style={styles.empty}>{message}</Text> : null}
+      {actionLabel && onAction ? (
+        <TouchableOpacity
+          onPress={onAction}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel={actionLabel}
+          style={{
+            marginTop: spacing.md,
+            paddingHorizontal: spacing.lg,
+            paddingVertical: 10,
+            borderRadius: radius.md,
+            backgroundColor: colors.primary,
+          }}
+        >
+          <Text style={{ color: colors.onPrimary, fontWeight: '700', fontSize: 14 }}>
+            {actionLabel}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+}
+
 function createInputStyles(colors: ThemeColors) {
   return StyleSheet.create({
     field: { marginBottom: spacing.md },
@@ -314,6 +366,12 @@ function createInputStyles(colors: ThemeColors) {
       color: colors.text,
     },
     multiline: { minHeight: 96, textAlignVertical: 'top', paddingTop: 13 },
+    inputDisabled: { backgroundColor: colors.chip, color: colors.textSecondary },
+    helperText: {
+      ...typography.label,
+      color: colors.textMuted,
+      marginTop: 6,
+    },
   });
 }
 
@@ -332,6 +390,9 @@ export function FilterChip({ label, active, onPress }: FilterChipProps) {
       style={[styles.chip, active && styles.chipActive]}
       onPress={onPress}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={label}
     >
       <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
     </TouchableOpacity>
@@ -408,9 +469,16 @@ export function SearchField({
         autoCorrect={false}
         autoCapitalize="none"
         returnKeyType="search"
+        accessibilityLabel={placeholder}
       />
       {value ? (
-        <TouchableOpacity onPress={() => onChangeText('')} style={styles.clear} hitSlop={8}>
+        <TouchableOpacity
+          onPress={() => onChangeText('')}
+          style={styles.clear}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Clear search"
+        >
           <Ionicons name="close-circle" size={18} color={colors.textMuted} />
         </TouchableOpacity>
       ) : null}
@@ -455,7 +523,12 @@ export function Card({ children, onPress, style }: CardProps) {
 
   if (onPress) {
     return (
-      <TouchableOpacity style={[base, style]} onPress={onPress} activeOpacity={0.7}>
+      <TouchableOpacity
+        style={[base, style]}
+        onPress={onPress}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+      >
         {children}
       </TouchableOpacity>
     );
@@ -497,6 +570,9 @@ export function ThemeOption({
       style={[styles.option, selected && styles.optionActive]}
       onPress={onPress}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      accessibilityLabel={label}
     >
       <Text style={[styles.optionText, selected && styles.optionTextActive]}>{label}</Text>
     </TouchableOpacity>
@@ -581,7 +657,13 @@ export function ScreenTitle({ title, subtitle }: { title: string; subtitle?: str
 export function Fab({ label, onPress }: { label: string; onPress: () => void }) {
   const styles = useScreenStyles();
   return (
-    <TouchableOpacity style={styles.fab} onPress={onPress} activeOpacity={0.85}>
+    <TouchableOpacity
+      style={styles.fab}
+      onPress={onPress}
+      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
       <Text style={styles.fabText}>{label}</Text>
     </TouchableOpacity>
   );
@@ -616,6 +698,7 @@ export function DashboardShortcuts() {
             onPress={() => router.navigate(item.route as never)}
             activeOpacity={0.75}
             accessibilityLabel={item.label}
+            accessibilityRole="button"
           >
             <View style={styles.iconWrap}>
               <Ionicons name={item.icon} size={22} color={colors.primary} />
@@ -647,6 +730,7 @@ function createShortcutStyles(colors: ThemeColors, isDark: boolean) {
       flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
+      minHeight: 72,
     },
     iconWrap: {
       width: 46,
@@ -658,7 +742,7 @@ function createShortcutStyles(colors: ThemeColors, isDark: boolean) {
     },
     itemLabel: {
       marginTop: 6,
-      fontSize: 11,
+      fontSize: 12,
       fontWeight: '600',
       color: colors.textSecondary,
     },

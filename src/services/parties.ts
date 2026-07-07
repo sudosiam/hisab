@@ -10,15 +10,22 @@ import type {
   PartyWithSummary,
 } from '../types';
 
-export async function getParties(filter?: PartyType | 'all'): Promise<Party[]> {
+export async function getParties(
+  filter?: PartyType | 'all',
+  options?: { limit?: number; offset?: number }
+): Promise<Party[]> {
   const db = await getDatabase();
+  const page = options?.limit ? ' LIMIT ? OFFSET ?' : '';
   if (filter && filter !== 'all') {
+    const params: (string | number)[] = [filter];
+    if (options?.limit) params.push(options.limit, options.offset ?? 0);
     return db.getAllAsync<Party>(
-      'SELECT * FROM parties WHERE type = ? ORDER BY name ASC',
-      [filter]
+      `SELECT * FROM parties WHERE type = ? ORDER BY name ASC${page}`,
+      params
     );
   }
-  return db.getAllAsync<Party>('SELECT * FROM parties ORDER BY type ASC, name ASC');
+  const params = options?.limit ? [options.limit, options.offset ?? 0] : [];
+  return db.getAllAsync<Party>(`SELECT * FROM parties ORDER BY type ASC, name ASC${page}`, params);
 }
 
 export async function getPartiesWithSummary(): Promise<PartyWithSummary[]> {
@@ -26,20 +33,20 @@ export async function getPartiesWithSummary(): Promise<PartyWithSummary[]> {
   const customers = await db.getAllAsync<PartyWithSummary>(`
     SELECT p.*,
       COUNT(s.id) as invoice_count,
-      COALESCE(SUM(s.total_amount - s.paid_amount), 0) as balance_due,
+      COALESCE(SUM(CASE WHEN s.total_amount - s.paid_amount > 0.01 THEN s.total_amount - s.paid_amount ELSE 0 END), 0) as balance_due,
       MAX(s.date) as last_activity
     FROM parties p
-    LEFT JOIN sales s ON s.party_name = p.name COLLATE NOCASE
+    LEFT JOIN sales s ON s.party_id = p.id OR (s.party_id IS NULL AND s.party_name = p.name COLLATE NOCASE)
     WHERE p.type = 'customer'
     GROUP BY p.id
   `);
   const vendors = await db.getAllAsync<PartyWithSummary>(`
     SELECT p.*,
       COUNT(pu.id) as invoice_count,
-      COALESCE(SUM(pu.total_amount - pu.paid_amount), 0) as balance_due,
+      COALESCE(SUM(CASE WHEN pu.total_amount - pu.paid_amount > 0.01 THEN pu.total_amount - pu.paid_amount ELSE 0 END), 0) as balance_due,
       MAX(pu.date) as last_activity
     FROM parties p
-    LEFT JOIN purchases pu ON pu.supplier_name = p.name COLLATE NOCASE
+    LEFT JOIN purchases pu ON pu.party_id = p.id OR (pu.party_id IS NULL AND pu.supplier_name = p.name COLLATE NOCASE)
     WHERE p.type = 'vendor'
     GROUP BY p.id
   `);
@@ -65,10 +72,10 @@ export async function getPartySummary(partyId: number): Promise<PartySummary | n
       `SELECT COUNT(*) as count,
               COALESCE(SUM(total_amount), 0) as billed,
               COALESCE(SUM(paid_amount), 0) as paid,
-              COALESCE(SUM(total_amount - paid_amount), 0) as due,
+              COALESCE(SUM(CASE WHEN total_amount - paid_amount > 0.01 THEN total_amount - paid_amount ELSE 0 END), 0) as due,
               MAX(date) as last_date
-       FROM sales WHERE party_name = ? COLLATE NOCASE`,
-      [party.name]
+       FROM sales WHERE party_id = ? OR (party_id IS NULL AND party_name = ? COLLATE NOCASE)`,
+      [party.id, party.name]
     );
     return {
       party,
@@ -90,10 +97,10 @@ export async function getPartySummary(partyId: number): Promise<PartySummary | n
     `SELECT COUNT(*) as count,
             COALESCE(SUM(total_amount), 0) as billed,
             COALESCE(SUM(paid_amount), 0) as paid,
-            COALESCE(SUM(total_amount - paid_amount), 0) as due,
+            COALESCE(SUM(CASE WHEN total_amount - paid_amount > 0.01 THEN total_amount - paid_amount ELSE 0 END), 0) as due,
             MAX(date) as last_date
-     FROM purchases WHERE supplier_name = ? COLLATE NOCASE`,
-    [party.name]
+     FROM purchases WHERE party_id = ? OR (party_id IS NULL AND supplier_name = ? COLLATE NOCASE)`,
+    [party.id, party.name]
   );
   return {
     party,
@@ -138,8 +145,8 @@ export async function getPartyStatement(partyId: number): Promise<PartyStatement
       created_at: string;
     }>(
       `SELECT id, invoice_no, date, total_amount, created_at
-       FROM sales WHERE party_name = ? COLLATE NOCASE`,
-      [party.name]
+       FROM sales WHERE party_id = ? OR (party_id IS NULL AND party_name = ? COLLATE NOCASE)`,
+      [party.id, party.name]
     );
     for (const sale of sales) {
       entries.push({
@@ -164,8 +171,8 @@ export async function getPartyStatement(partyId: number): Promise<PartyStatement
       `SELECT sp.sale_id, sp.amount, sp.date, sp.id as payment_id, s.invoice_no
        FROM sale_payments sp
        JOIN sales s ON s.id = sp.sale_id
-       WHERE s.party_name = ? COLLATE NOCASE`,
-      [party.name]
+       WHERE s.party_id = ? OR (s.party_id IS NULL AND s.party_name = ? COLLATE NOCASE)`,
+      [party.id, party.name]
     );
     for (const payment of payments) {
       entries.push({
@@ -188,8 +195,8 @@ export async function getPartyStatement(partyId: number): Promise<PartyStatement
       created_at: string;
     }>(
       `SELECT id, invoice_no, date, total_amount, created_at
-       FROM purchases WHERE supplier_name = ? COLLATE NOCASE`,
-      [party.name]
+       FROM purchases WHERE party_id = ? OR (party_id IS NULL AND supplier_name = ? COLLATE NOCASE)`,
+      [party.id, party.name]
     );
     for (const purchase of purchases) {
       entries.push({
@@ -214,8 +221,8 @@ export async function getPartyStatement(partyId: number): Promise<PartyStatement
       `SELECT pp.purchase_id, pp.amount, pp.date, pp.id as payment_id, p.invoice_no
        FROM purchase_payments pp
        JOIN purchases p ON p.id = pp.purchase_id
-       WHERE p.supplier_name = ? COLLATE NOCASE`,
-      [party.name]
+       WHERE p.party_id = ? OR (p.party_id IS NULL AND p.supplier_name = ? COLLATE NOCASE)`,
+      [party.id, party.name]
     );
     for (const payment of payments) {
       entries.push({
@@ -265,17 +272,17 @@ export async function getPartyHistory(partyId: number): Promise<PartyHistoryItem
   if (party.type === 'customer') {
     return db.getAllAsync<PartyHistoryItem>(
       `SELECT id, invoice_no, date, total_amount, paid_amount, status, 'sale' as record_type
-       FROM sales WHERE party_name = ? COLLATE NOCASE
+       FROM sales WHERE party_id = ? OR (party_id IS NULL AND party_name = ? COLLATE NOCASE)
        ORDER BY date DESC, id DESC`,
-      [party.name]
+      [party.id, party.name]
     );
   }
 
   return db.getAllAsync<PartyHistoryItem>(
     `SELECT id, invoice_no, date, total_amount, paid_amount, status, 'purchase' as record_type
-     FROM purchases WHERE supplier_name = ? COLLATE NOCASE
+     FROM purchases WHERE party_id = ? OR (party_id IS NULL AND supplier_name = ? COLLATE NOCASE)
      ORDER BY date DESC, id DESC`,
-    [party.name]
+    [party.id, party.name]
   );
 }
 
@@ -337,9 +344,9 @@ export async function upsertParty(
   type: PartyType,
   dbHandle?: SQLite.SQLiteDatabase,
   phone?: string
-): Promise<void> {
+): Promise<number | null> {
   const trimmed = name.trim();
-  if (!trimmed) return;
+  if (!trimmed) return null;
 
   const db = dbHandle ?? (await getDatabase());
   const existing = await db.getFirstAsync<{ id: number }>(
@@ -351,14 +358,15 @@ export async function upsertParty(
     if (phoneValue) {
       await db.runAsync('UPDATE parties SET phone = ? WHERE id = ?', [phoneValue, existing.id]);
     }
-    return;
+    return existing.id;
   }
 
-  await db.runAsync('INSERT INTO parties (name, type, phone) VALUES (?, ?, ?)', [
+  const result = await db.runAsync('INSERT INTO parties (name, type, phone) VALUES (?, ?, ?)', [
     trimmed,
     type,
     phoneValue,
   ]);
+  return result.lastInsertRowId;
 }
 
 export async function syncPartiesFromTransactions(): Promise<void> {
@@ -427,8 +435,9 @@ export async function updateParty(
     const table = existing.type === 'customer' ? 'sales' : 'purchases';
     const column = existing.type === 'customer' ? 'party_name' : 'supplier_name';
     const used = await db.getFirstAsync<{ count: number }>(
-      `SELECT COUNT(*) as count FROM ${table} WHERE ${column} = ? COLLATE NOCASE`,
-      [existing.name]
+      `SELECT COUNT(*) as count FROM ${table}
+       WHERE party_id = ? OR (party_id IS NULL AND ${column} = ? COLLATE NOCASE)`,
+      [existing.id, existing.name]
     );
     if (used && used.count > 0) {
       throw new Error(
@@ -453,12 +462,15 @@ export async function updateParty(
              SELECT 'Payment for ' || s.invoice_no || ' - ' || ? FROM sales s WHERE s.id = transactions.reference_id
            )
            WHERE reference_type = 'sale'
-           AND reference_id IN (SELECT id FROM sales WHERE party_name = ? COLLATE NOCASE)`,
-          [trimmed, existing.name]
+           AND reference_id IN (
+             SELECT id FROM sales
+             WHERE party_id = ? OR (party_id IS NULL AND party_name = ? COLLATE NOCASE)
+           )`,
+          [trimmed, existing.id, existing.name]
         );
         await db.runAsync(
-          'UPDATE sales SET party_name = ? WHERE party_name = ? COLLATE NOCASE',
-          [trimmed, existing.name]
+          'UPDATE sales SET party_name = ?, party_id = ? WHERE party_id = ? OR (party_id IS NULL AND party_name = ? COLLATE NOCASE)',
+          [trimmed, id, existing.id, existing.name]
         );
       }
       if (params.type === 'vendor') {
@@ -467,12 +479,15 @@ export async function updateParty(
              SELECT 'Payment for ' || p.invoice_no || ' - ' || ? FROM purchases p WHERE p.id = transactions.reference_id
            )
            WHERE reference_type = 'purchase'
-           AND reference_id IN (SELECT id FROM purchases WHERE supplier_name = ? COLLATE NOCASE)`,
-          [trimmed, existing.name]
+           AND reference_id IN (
+             SELECT id FROM purchases
+             WHERE party_id = ? OR (party_id IS NULL AND supplier_name = ? COLLATE NOCASE)
+           )`,
+          [trimmed, existing.id, existing.name]
         );
         await db.runAsync(
-          'UPDATE purchases SET supplier_name = ? WHERE supplier_name = ? COLLATE NOCASE',
-          [trimmed, existing.name]
+          'UPDATE purchases SET supplier_name = ?, party_id = ? WHERE party_id = ? OR (party_id IS NULL AND supplier_name = ? COLLATE NOCASE)',
+          [trimmed, id, existing.id, existing.name]
         );
       }
     }
@@ -486,16 +501,16 @@ export async function deleteParty(id: number): Promise<void> {
   const db = await getDatabase();
   if (party.type === 'customer') {
     const used = await db.getFirstAsync<{ count: number }>(
-      'SELECT COUNT(*) as count FROM sales WHERE party_name = ? COLLATE NOCASE',
-      [party.name]
+      'SELECT COUNT(*) as count FROM sales WHERE party_id = ? OR party_name = ? COLLATE NOCASE',
+      [id, party.name]
     );
     if (used && used.count > 0) {
       throw new Error('Cannot delete: this customer has sales records');
     }
   } else {
     const used = await db.getFirstAsync<{ count: number }>(
-      'SELECT COUNT(*) as count FROM purchases WHERE supplier_name = ? COLLATE NOCASE',
-      [party.name]
+      'SELECT COUNT(*) as count FROM purchases WHERE party_id = ? OR supplier_name = ? COLLATE NOCASE',
+      [id, party.name]
     );
     if (used && used.count > 0) {
       throw new Error('Cannot delete: this vendor has purchase records');

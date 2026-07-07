@@ -13,7 +13,7 @@ import { AccountPicker } from './AccountPicker';
 import { DatePickerField } from './DatePickerField';
 import type { Account } from '../types';
 import { todayISO } from '../utils/date';
-import { formatAmountInput, formatCurrency } from '../utils/format';
+import { formatAmountInput, formatCurrency, parseAmountInput } from '../utils/format';
 
 export interface PaymentRow {
   /** Stable render key; older drafts may not have one. */
@@ -31,6 +31,7 @@ interface Props {
   totalDue: number;
   /** Default payment date for new rows (usually the invoice date). */
   defaultDate?: string;
+  mode?: 'receive' | 'pay';
 }
 
 let paymentRowCounter = 0;
@@ -39,12 +40,35 @@ function nextRowKey(): string {
   return `payment-${Date.now()}-${paymentRowCounter}`;
 }
 
-export function PaymentSplitForm({ accounts, payments, onChange, totalDue, defaultDate }: Props) {
+export function PaymentSplitForm({
+  accounts,
+  payments,
+  onChange,
+  totalDue,
+  defaultDate,
+  mode = 'receive',
+}: Props) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
-  const paidTotal = payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+  const paidTotal = payments.reduce((sum, p) => sum + (parseAmountInput(p.amount) || 0), 0);
   const remaining = totalDue - paidTotal;
   const overpaid = remaining < -0.009;
+  const labels =
+    mode === 'pay'
+      ? {
+          title: 'Paid Amount',
+          summary: 'Paid',
+          overpaid: 'Overpaid by',
+          account: 'Payment Account',
+          empty: 'Add payment (leave empty for unpaid/credit)',
+        }
+      : {
+          title: 'Received Payment',
+          summary: 'Received',
+          overpaid: 'Overpaid by',
+          account: 'Receiving Account',
+          empty: 'Add payment (leave empty for unpaid/credit)',
+        };
 
   const addPayment = (prefill?: number) => {
     if (accounts.length === 0) return;
@@ -77,7 +101,7 @@ export function PaymentSplitForm({ accounts, payments, onChange, totalDue, defau
   return (
     <View>
       <View style={styles.header}>
-        <Text style={styles.title}>Received Payment</Text>
+        <Text style={styles.title}>{labels.title}</Text>
         <TouchableOpacity
           onPress={() => addPayment(remaining > 0 ? remaining : undefined)}
           accessibilityLabel="Add payment"
@@ -87,19 +111,19 @@ export function PaymentSplitForm({ accounts, payments, onChange, totalDue, defau
       </View>
       <Text style={[styles.summary, overpaid && styles.summaryOver]}>
         {overpaid
-          ? `Received: ${formatCurrency(paidTotal)} · Overpaid by ${formatCurrency(Math.abs(remaining))}`
-          : `Received: ${formatCurrency(paidTotal)} · Balance: ${formatCurrency(Math.max(0, remaining))}`}
+          ? `${labels.summary}: ${formatCurrency(paidTotal)} · ${labels.overpaid} ${formatCurrency(Math.abs(remaining))}`
+          : `${labels.summary}: ${formatCurrency(paidTotal)} · Balance: ${formatCurrency(Math.max(0, remaining))}`}
       </Text>
 
       {payments.length === 0 ? (
         <TouchableOpacity style={styles.emptyBtn} onPress={() => addPayment()}>
-          <Text style={styles.emptyBtnText}>Add payment (leave empty for unpaid/credit)</Text>
+          <Text style={styles.emptyBtnText}>{labels.empty}</Text>
         </TouchableOpacity>
       ) : (
         payments.map((payment, index) => (
           <View key={payment.key ?? `row-${index}`} style={styles.row}>
             <AccountPicker
-              label="Payment Account"
+              label={labels.account}
               accounts={accounts}
               value={payment.account_id}
               onChange={(id) => updatePayment(index, 'account_id', id)}
@@ -119,7 +143,7 @@ export function PaymentSplitForm({ accounts, payments, onChange, totalDue, defau
                 accessibilityLabel="Fill remaining amount"
                 onPress={() => {
                   const otherPaid = payments.reduce(
-                    (sum, p, i) => (i === index ? sum : sum + (parseFloat(p.amount) || 0)),
+                    (sum, p, i) => (i === index ? sum : sum + (parseAmountInput(p.amount) || 0)),
                     0
                   );
                   const due = Math.max(0, totalDue - otherPaid);
@@ -130,7 +154,9 @@ export function PaymentSplitForm({ accounts, payments, onChange, totalDue, defau
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => removePayment(index)}
+                hitSlop={10}
                 accessibilityLabel="Remove payment"
+                accessibilityRole="button"
               >
                 <Text style={styles.remove}>✕</Text>
               </TouchableOpacity>

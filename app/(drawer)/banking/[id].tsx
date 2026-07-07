@@ -26,7 +26,7 @@ import {
   updateAccount,
   updateOpeningBalance,
 } from '../../../src/services/banking';
-import { formatAmountInput, formatCurrency } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency, parseAmountInput } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
@@ -35,6 +35,7 @@ import { parseRouteId } from '../../../src/utils/route';
 import { roundMoney } from '../../../src/utils/money';
 import { spacing, radius } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
+import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 import type { Account, Transaction } from '../../../src/types';
 
 function roundTwo(value: number): number {
@@ -95,15 +96,19 @@ export default function AccountDetailScreen() {
         actionBtn: {
           flex: 1,
           paddingVertical: 10,
+          minHeight: 44,
           borderRadius: radius.md,
           alignItems: 'center',
+          justifyContent: 'center',
           backgroundColor: colors.success,
         },
         actionBtnAlt: {
           flex: 1,
           paddingVertical: 10,
+          minHeight: 44,
           borderRadius: radius.md,
           alignItems: 'center',
+          justifyContent: 'center',
           backgroundColor: colors.surface,
           borderWidth: 1,
           borderColor: colors.danger,
@@ -192,11 +197,14 @@ export default function AccountDetailScreen() {
   const editingRef = React.useRef(false);
   editingRef.current = editing;
 
+  const hasLoadedRef = React.useRef(false);
   useFocusEffect(useCallback(() => {
     // Don't reload over an open edit form — it would wipe unsaved changes.
     if (editingRef.current) return;
-    setLoading(true);
-    load();
+    if (!hasLoadedRef.current) setLoading(true);
+    load().finally(() => {
+      hasLoadedRef.current = true;
+    });
   }, [load]));
 
   const handleSaveEdit = async () => {
@@ -205,7 +213,7 @@ export default function AccountDetailScreen() {
       Alert.alert('Error', 'Account name is required');
       return;
     }
-    const opening = parseFloat(openingBalance);
+    const opening = parseAmountInput(openingBalance);
     if (!Number.isFinite(opening)) {
       Alert.alert('Error', 'Enter a valid opening balance');
       return;
@@ -232,27 +240,39 @@ export default function AccountDetailScreen() {
 
   const handleExcludeToggle = async (value: boolean) => {
     if (!account) return;
-    const prev = isExcluded;
-    setIsExcluded(value);
-    try {
-      await updateAccount(account.id, {
-        name: account.name,
-        type: account.type,
-        is_excluded: value,
-      });
-      refresh();
-      await load();
-    } catch (e) {
-      setIsExcluded(prev);
-      Alert.alert('Error', formatSqliteError(e));
-    }
+    const action = value ? 'Deactivate account' : 'Reactivate account';
+    const message = value
+      ? `"${account.name}" will be hidden from new payment pickers and excluded from totals. Existing transaction history stays visible.`
+      : `"${account.name}" will be available for new payments and included in totals again.`;
+    Alert.alert(action, message, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: value ? 'Deactivate' : 'Reactivate',
+        onPress: async () => {
+          const prev = isExcluded;
+          setIsExcluded(value);
+          try {
+            await updateAccount(account.id, {
+              name: account.name,
+              type: account.type,
+              is_excluded: value,
+            });
+            refresh();
+            await load();
+          } catch (e) {
+            setIsExcluded(prev);
+            Alert.alert('Account update failed', formatSqliteError(e));
+          }
+        },
+      },
+    ]);
   };
 
   const handleDeleteAccount = () => {
     if (!account) return;
     Alert.alert(
       'Delete Account',
-      `Delete "${account.name}"?\nThis cannot be undone.`,
+      `Delete "${account.name}"?\nAccounts with transaction history are blocked from deletion. Use Deactivate to hide an account while keeping history.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -264,7 +284,7 @@ export default function AccountDetailScreen() {
               refresh();
               router.back();
             } catch (e) {
-              Alert.alert('Error', formatSqliteError(e));
+              Alert.alert('Delete blocked', formatSqliteError(e));
             }
           },
         },
@@ -318,6 +338,9 @@ export default function AccountDetailScreen() {
   let totalIn = 0;
   let totalOut = 0;
   for (const t of transactions) {
+    // Opening balance is shown separately in the subtitle — including it in
+    // "Money In" would double-count it for the reader.
+    if (t.type === 'opening') continue;
     if (t.amount >= 0) totalIn = roundMoney(totalIn + t.amount);
     else totalOut = roundMoney(totalOut + Math.abs(t.amount));
   }
@@ -333,7 +356,7 @@ export default function AccountDetailScreen() {
             </Text>
             {account.is_excluded ? (
               <View style={localStyles.badge}>
-                <Text style={localStyles.badgeText}>Excluded from totals</Text>
+                <Text style={localStyles.badgeText}>Deactivated</Text>
               </View>
             ) : null}
           </>
@@ -384,15 +407,18 @@ export default function AccountDetailScreen() {
       {!editing ? (
         <View style={localStyles.excludeRow}>
           <View style={{ flex: 1, marginRight: spacing.sm }}>
-            <Text style={localStyles.excludeLabel}>Exclude from everywhere</Text>
+            <Text style={localStyles.excludeLabel}>
+              {isExcluded ? 'Account deactivated' : 'Deactivate this account'}
+            </Text>
             <Text style={localStyles.excludeHint}>
-              Hidden from sales totals and receipts; still usable for expenses, purchases, and transfers
+              Deactivated accounts are hidden from new payment pickers and excluded from totals. History remains visible.
             </Text>
           </View>
           <Switch
             value={isExcluded}
             onValueChange={handleExcludeToggle}
             trackColor={{ false: colors.border, true: colors.primary }}
+            accessibilityLabel={isExcluded ? 'Reactivate account' : 'Deactivate account'}
           />
         </View>
       ) : null}
@@ -443,6 +469,7 @@ export default function AccountDetailScreen() {
         keyExtractor={(item) => String(item.id)}
         ListHeaderComponent={listHeader}
         contentContainerStyle={{ paddingBottom: spacing.xl }}
+        {...FLATLIST_PERF}
         ListEmptyComponent={
           <Text style={styles.empty}>
             {search.trim() ? 'No transactions match your search.' : 'No transactions for this account'}
@@ -460,6 +487,7 @@ export default function AccountDetailScreen() {
             <TouchableOpacity
               style={localStyles.deleteBtn}
               onPress={() => handleDelete(item)}
+              accessibilityRole="button"
               accessibilityLabel={`Delete transaction ${item.description}`}
             >
               <Text style={localStyles.deleteText}>Delete</Text>

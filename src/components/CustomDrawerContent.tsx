@@ -66,8 +66,13 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: 'More',
     items: [
-      { label: 'Investments', route: '/investments', icon: 'trending-up-outline', activeIcon: 'trending-up', match: ['/investments'] },
-      { label: 'Fixed Assets', route: '/others', icon: 'business-outline', activeIcon: 'business', match: ['/others'] },
+      {
+        label: 'More',
+        route: '/more',
+        icon: 'grid-outline',
+        activeIcon: 'grid',
+        match: ['/more', '/investments', '/others', '/loans'],
+      },
     ],
   },
   {
@@ -95,7 +100,7 @@ export function CustomDrawerContent(props: DrawerContentComponentProps) {
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const navigate = (route: string) => {
-    router.navigate(route as never);
+    router.replace(route as never);
     props.navigation.closeDrawer();
   };
 
@@ -125,6 +130,9 @@ export function CustomDrawerContent(props: DrawerContentComponentProps) {
                   style={[styles.navItem, active && styles.navItemActive]}
                   onPress={() => navigate(item.route)}
                   activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={item.label}
                 >
                   <View style={[styles.iconWrap, active && styles.iconWrapActive]}>
                     <Ionicons
@@ -133,7 +141,7 @@ export function CustomDrawerContent(props: DrawerContentComponentProps) {
                       color={active ? colors.navActiveText : colors.textSecondary}
                     />
                   </View>
-                  <Text style={[styles.navLabel, active && styles.navLabelActive]}>
+                  <Text style={[styles.navLabel, active && styles.navLabelActive]} numberOfLines={1}>
                     {item.label}
                   </Text>
                 </TouchableOpacity>
@@ -203,8 +211,9 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       alignItems: 'center',
       marginHorizontal: spacing.sm,
       marginVertical: 1,
-      paddingVertical: 7,
+      paddingVertical: spacing.sm,
       paddingHorizontal: spacing.sm,
+      minHeight: 44,
       borderRadius: radius.sm,
     },
     navItemActive: {
