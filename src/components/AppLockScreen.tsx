@@ -2,15 +2,17 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
-  TouchableOpacity,
+  Pressable,
   StyleSheet,
   Animated,
   ActivityIndicator,
   AppState,
   InteractionManager,
+  Dimensions,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   authenticateWithBiometrics,
   clearFailedAttempts,
@@ -34,8 +36,11 @@ const MAX_ATTEMPTS_BEFORE_LOCKOUT = 5;
 const LOCKOUT_SECONDS = 30;
 const BIOMETRIC_PROMPT_DELAY_MS = 280;
 
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const KEYPAD_WIDTH = Math.min(SCREEN_WIDTH - spacing.lg * 2, 320);
+const KEY_SIZE = Math.max(56, Math.floor(KEYPAD_WIDTH / 3));
+
 export function AppLockScreen({ biometricEnabled, onUnlock }: Props) {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
@@ -50,7 +55,6 @@ export function AppLockScreen({ biometricEnabled, onUnlock }: Props) {
 
   const lockedOut = cooldownRemaining > 0;
 
-  // Restore the persisted attempt counter so force-quitting doesn't reset the cooldown.
   useEffect(() => {
     void prefetchPinMaterial();
     let cancelled = false;
@@ -222,96 +226,136 @@ export function AppLockScreen({ biometricEnabled, onUnlock }: Props) {
   };
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top + spacing.xl, paddingBottom: insets.bottom }]}>
-      <Text style={styles.brand}>Hisab</Text>
-      <Text style={styles.subtitle}>Enter your PIN to continue</Text>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      <View style={styles.root} collapsable={false}>
+        <View style={styles.header}>
+          <Text style={styles.brand}>Hisab</Text>
+          <Text style={styles.subtitle}>Enter your PIN to continue</Text>
 
-      <Animated.View style={[styles.dotsRow, { transform: [{ translateX: shake }] }]}>
-        {Array.from({ length: PIN_LENGTH }).map((_, index) => (
-          <View
-            key={index}
-            style={[styles.dot, index < pin.length && styles.dotFilled, error ? styles.dotError : null]}
-          />
-        ))}
-      </Animated.View>
+          <Animated.View style={[styles.dotsRow, { transform: [{ translateX: shake }] }]}>
+            {Array.from({ length: PIN_LENGTH }).map((_, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.dot,
+                  index < pin.length && styles.dotFilled,
+                  error ? styles.dotError : null,
+                  index > 0 ? styles.dotSpacing : null,
+                ]}
+              />
+            ))}
+          </Animated.View>
 
-      {lockedOut ? (
-        <Text style={styles.error}>Too many attempts. Try again in {cooldownRemaining}s</Text>
-      ) : error ? (
-        <Text style={styles.error}>{error}</Text>
-      ) : null}
-      {checking ? <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.sm }} /> : null}
+          {lockedOut ? (
+            <Text style={styles.error}>Too many attempts. Try again in {cooldownRemaining}s</Text>
+          ) : error ? (
+            <Text style={styles.error}>{error}</Text>
+          ) : (
+            <Text style={styles.hint}> </Text>
+          )}
+          {checking ? <ActivityIndicator color={colors.primary} style={styles.spinner} /> : null}
+        </View>
 
-      <View style={styles.keypad}>
-        {KEYPAD.map((key, index) => {
-          if (key === '') {
-            return <View key={`spacer-${index}`} style={styles.key} />;
-          }
-          if (key === 'del') {
+        <View style={styles.keypad} collapsable={false}>
+          {KEYPAD.map((key, index) => {
+            if (key === '') {
+              return <View key={`spacer-${index}`} style={styles.key} />;
+            }
+            if (key === 'del') {
+              return (
+                <Pressable
+                  key="del"
+                  style={({ pressed }) => [styles.key, styles.keyButton, pressed && styles.keyPressed]}
+                  onPress={() => onKeyPress('del')}
+                  android_ripple={{ color: colors.overlay, borderless: true }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete"
+                >
+                  <Text style={styles.delText}>⌫</Text>
+                </Pressable>
+              );
+            }
             return (
-              <TouchableOpacity
-                key="del"
-                style={styles.key}
-                onPress={() => onKeyPress('del')}
-                activeOpacity={0.7}
+              <Pressable
+                key={key}
+                style={({ pressed }) => [styles.key, styles.keyButton, pressed && styles.keyPressed]}
+                onPress={() => onKeyPress(key)}
+                android_ripple={{ color: colors.overlay, borderless: true }}
+                accessibilityRole="button"
+                accessibilityLabel={`Digit ${key}`}
               >
-                <Ionicons name="backspace-outline" size={22} color={colors.text} />
-              </TouchableOpacity>
+                <Text style={styles.keyText}>{key}</Text>
+              </Pressable>
             );
-          }
-          return (
-            <TouchableOpacity
-              key={key}
-              style={styles.key}
-              onPress={() => onKeyPress(key)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.keyText}>{key}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+          })}
+        </View>
 
-      {biometricEnabled ? (
-        <TouchableOpacity style={styles.bioBtn} onPress={tryBiometric} activeOpacity={0.75}>
-          <Ionicons name="finger-print-outline" size={22} color={colors.primary} />
-          <Text style={styles.bioText}>Use Biometrics</Text>
-        </TouchableOpacity>
-      ) : null}
-    </View>
+        {biometricEnabled ? (
+          <Pressable
+            style={({ pressed }) => [styles.bioBtn, pressed && styles.keyPressed]}
+            onPress={tryBiometric}
+            android_ripple={{ color: colors.overlay }}
+            accessibilityRole="button"
+            accessibilityLabel="Use biometrics"
+          >
+            <Ionicons name="finger-print-outline" size={22} color={colors.primary} />
+            <Text style={styles.bioText}>Use Biometrics</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.bioSpacer} />
+        )}
+      </View>
+    </SafeAreaView>
   );
 }
 
 function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
     root: {
       flex: 1,
       backgroundColor: colors.background,
       alignItems: 'center',
+      justifyContent: 'space-between',
       paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.lg,
+    },
+    header: {
+      alignItems: 'center',
+      paddingTop: spacing.xl,
+      width: '100%',
     },
     brand: {
       ...typography.display,
+      fontSize: 32,
       color: colors.primary,
       marginBottom: spacing.xs,
     },
     subtitle: {
-      fontSize: 14,
+      fontSize: 15,
       color: colors.textSecondary,
       marginBottom: spacing.xl,
+      textAlign: 'center',
     },
     dotsRow: {
       flexDirection: 'row',
-      gap: spacing.md,
+      alignItems: 'center',
+      justifyContent: 'center',
       marginBottom: spacing.sm,
     },
     dot: {
-      width: 14,
-      height: 14,
+      width: 16,
+      height: 16,
       borderRadius: radius.full,
       borderWidth: 2,
       borderColor: colors.border,
       backgroundColor: 'transparent',
+    },
+    dotSpacing: {
+      marginLeft: spacing.md,
     },
     dotFilled: {
       backgroundColor: colors.primary,
@@ -323,41 +367,67 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     error: {
       color: colors.danger,
-      fontSize: 13,
+      fontSize: 14,
       fontWeight: '600',
       marginTop: spacing.xs,
+      textAlign: 'center',
+    },
+    hint: {
+      fontSize: 14,
+      marginTop: spacing.xs,
+      color: colors.background,
+    },
+    spinner: {
+      marginTop: spacing.sm,
     },
     keypad: {
-      marginTop: spacing.xl,
-      width: '100%',
-      maxWidth: 300,
+      width: KEYPAD_WIDTH,
       flexDirection: 'row',
       flexWrap: 'wrap',
       justifyContent: 'center',
+      alignSelf: 'center',
     },
     key: {
-      width: '33.33%',
-      aspectRatio: 1.35,
+      width: KEY_SIZE,
+      height: KEY_SIZE,
+    },
+    keyButton: {
       alignItems: 'center',
       justifyContent: 'center',
+      borderRadius: radius.full,
+    },
+    keyPressed: {
+      backgroundColor: colors.overlay,
     },
     keyText: {
-      fontSize: 28,
-      fontWeight: '500',
+      fontSize: 30,
+      fontWeight: '600',
       color: colors.text,
+      ...(Platform.OS === 'android' ? { includeFontPadding: false as const } : {}),
+    },
+    delText: {
+      fontSize: 26,
+      fontWeight: '600',
+      color: colors.text,
+      ...(Platform.OS === 'android' ? { includeFontPadding: false as const } : {}),
     },
     bioBtn: {
-      marginTop: spacing.lg,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: spacing.xs,
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.md,
+      justifyContent: 'center',
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.lg,
+      borderRadius: radius.md,
+      minHeight: 48,
     },
     bioText: {
-      fontSize: 15,
+      fontSize: 16,
       fontWeight: '600',
       color: colors.primary,
+      marginLeft: spacing.xs,
+    },
+    bioSpacer: {
+      height: 48,
     },
   });
 }

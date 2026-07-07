@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { AppState, View, StyleSheet } from 'react-native';
+import { AppState, Modal, View, StyleSheet } from 'react-native';
 import { AppBootScreen } from '../components/AppBootScreen';
 import { AppLockScreen } from '../components/AppLockScreen';
 import {
@@ -196,12 +196,17 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     <AppLockContext.Provider value={value}>
       <View style={styles.root}>
         {!isLocked ? children : null}
-        {isLocked ? (
-          <View style={styles.lockOverlay} accessibilityViewIsModal>
-            <AppLockScreen biometricEnabled={biometricEnabled} onUnlock={unlock} />
-          </View>
-        ) : null}
       </View>
+      <Modal
+        visible={isLocked}
+        animationType="fade"
+        transparent={false}
+        statusBarTranslucent
+        onRequestClose={() => {}}
+        hardwareAccelerated
+      >
+        <AppLockScreen biometricEnabled={biometricEnabled} onUnlock={unlock} />
+      </Modal>
     </AppLockContext.Provider>
   );
 }
@@ -213,10 +218,5 @@ export function useAppLock() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-  },
-  lockOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 9999,
-    elevation: 9999,
   },
 });
