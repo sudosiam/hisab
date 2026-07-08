@@ -9,6 +9,7 @@ import {
 import { todayISO } from '../utils/date';
 import { resolvePeriodRange } from '../utils/period';
 import { addMoney, roundMoney, subMoney } from '../utils/money';
+import { isLinkedTransferLeg, pickLegacyTransferPair } from '../utils/transferPair';
 import { getPurchaseById } from './purchases';
 import { getSaleById } from './sales';
 import type { Account, BalanceSheet, Expense, FixedAsset, Transaction } from '../types';
@@ -608,20 +609,23 @@ export async function deleteTransaction(id: number): Promise<void> {
     } else if (tx.type === 'transfer') {
       // A transfer has two legs; deleting one must delete its pair or the two
       // accounts fall out of sync.
-      const pair =
-        tx.reference_type === 'transfer' && tx.reference_id
-          ? await db.getFirstAsync<Transaction>(
-              `SELECT * FROM transactions WHERE reference_type = 'transfer' AND reference_id = ? AND id != ?`,
-              [tx.reference_id, id]
-            )
-          : await db.getFirstAsync<Transaction>(
-              `SELECT * FROM transactions WHERE type = 'transfer' AND date = ? AND amount = ? AND id != ? ORDER BY ABS(id - ?) ASC LIMIT 1`,
-              [tx.date, -tx.amount, id, id]
-            );
-      if (pair) {
-        await updateAccountBalance(db, pair.account_id, -pair.amount);
-        await db.runAsync('DELETE FROM transactions WHERE id = ?', [pair.id]);
+      let pair: Transaction | null = null;
+      if (isLinkedTransferLeg(tx)) {
+        pair = await db.getFirstAsync<Transaction>(
+          `SELECT * FROM transactions WHERE reference_type = 'transfer' AND reference_id = ? AND id != ?`,
+          [tx.reference_id, id]
+        );
+      } else {
+        const candidates = await db.getAllAsync<Transaction>(
+          `SELECT * FROM transactions WHERE type = 'transfer'`
+        );
+        pair = pickLegacyTransferPair(tx, candidates);
       }
+      if (!pair) {
+        throw new Error('Could not find the matching transfer leg to delete together.');
+      }
+      await updateAccountBalance(db, pair.account_id, -pair.amount);
+      await db.runAsync('DELETE FROM transactions WHERE id = ?', [pair.id]);
     }
 
     await db.runAsync('DELETE FROM transactions WHERE id = ?', [id]);

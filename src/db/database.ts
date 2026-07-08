@@ -230,6 +230,7 @@ async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Pr
   await ensureUniqueInvoiceNumbers(db);
   await ensureInvoiceNumberIndexes(db);
   await ensureTransactionsPaymentIdColumn(db);
+  await ensureTransferReferenceLinks(db);
   await dropAttachmentsTable(db);
   await ensureLoansTable(db);
   await ensureProductsIsHiddenColumn(db);
@@ -262,6 +263,37 @@ async function ensureTransactionsPaymentIdColumn(db: SQLite.SQLiteDatabase): Pro
   const names = new Set(columns.map((col) => col.name));
   if (!names.has('payment_id')) {
     await db.execAsync('ALTER TABLE transactions ADD COLUMN payment_id INTEGER');
+  }
+}
+
+/** Link legacy transfer legs so deleting one side always removes the correct pair. */
+async function ensureTransferReferenceLinks(db: SQLite.SQLiteDatabase): Promise<void> {
+  const table = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'`
+  );
+  if (!table) return;
+
+  const outs = await db.getAllAsync<{ id: number; account_id: number; amount: number; date: string }>(
+    `SELECT id, account_id, amount, date FROM transactions
+     WHERE type = 'transfer' AND amount < 0
+       AND COALESCE(reference_type, '') != 'transfer'`
+  );
+
+  for (const out of outs) {
+    const candidates = await db.getAllAsync<{ id: number }>(
+      `SELECT id FROM transactions
+       WHERE type = 'transfer' AND amount = ? AND date = ?
+         AND account_id != ?
+         AND COALESCE(reference_type, '') != 'transfer'
+         AND id != ?`,
+      [roundMoney(-out.amount), out.date, out.account_id, out.id]
+    );
+    if (candidates.length !== 1) continue;
+
+    await db.runAsync(
+      `UPDATE transactions SET reference_type = 'transfer', reference_id = ? WHERE id IN (?, ?)`,
+      [out.id, out.id, candidates[0].id]
+    );
   }
 }
 
