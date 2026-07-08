@@ -710,8 +710,31 @@ async function repairSaleItemUnitCosts(db: SQLite.SQLiteDatabase): Promise<void>
 }
 
 async function cleanupOrphanInvoiceHeaders(db: SQLite.SQLiteDatabase): Promise<void> {
+  const saleItemCount = await db.getFirstAsync<{ c: number }>(
+    'SELECT COUNT(*) AS c FROM sale_items'
+  );
+  const saleCount = await db.getFirstAsync<{ c: number }>('SELECT COUNT(*) AS c FROM sales');
+  if ((saleItemCount?.c ?? 0) === 0 && (saleCount?.c ?? 0) > 0) {
+    // Empty line-item table with invoice headers usually means a partial restore
+    // or corruption — deleting every sale would wipe the user's books.
+    return;
+  }
+
+  const purchaseItemCount = await db.getFirstAsync<{ c: number }>(
+    'SELECT COUNT(*) AS c FROM purchase_items'
+  );
+  const purchaseCount = await db.getFirstAsync<{ c: number }>(
+    'SELECT COUNT(*) AS c FROM purchases'
+  );
+  if ((purchaseItemCount?.c ?? 0) === 0 && (purchaseCount?.c ?? 0) > 0) {
+    return;
+  }
+
   const orphanSales = await db.getAllAsync<{ id: number }>(
-    `SELECT id FROM sales WHERE id NOT IN (SELECT DISTINCT sale_id FROM sale_items)`
+    `SELECT id FROM sales
+     WHERE id NOT IN (SELECT DISTINCT sale_id FROM sale_items WHERE sale_id IS NOT NULL)
+       AND id NOT IN (SELECT DISTINCT sale_id FROM sale_payments)
+       AND COALESCE(total_amount, 0) = 0`
   );
   for (const { id } of orphanSales) {
     const productIds = await db.getAllAsync<{ product_id: number }>(
@@ -732,7 +755,10 @@ async function cleanupOrphanInvoiceHeaders(db: SQLite.SQLiteDatabase): Promise<v
   }
 
   const orphanPurchases = await db.getAllAsync<{ id: number }>(
-    `SELECT id FROM purchases WHERE id NOT IN (SELECT DISTINCT purchase_id FROM purchase_items)`
+    `SELECT id FROM purchases
+     WHERE id NOT IN (SELECT DISTINCT purchase_id FROM purchase_items WHERE purchase_id IS NOT NULL)
+       AND id NOT IN (SELECT DISTINCT purchase_id FROM purchase_payments)
+       AND COALESCE(total_amount, 0) = 0`
   );
   for (const { id } of orphanPurchases) {
     const productIds = await db.getAllAsync<{ product_id: number }>(
@@ -755,6 +781,17 @@ async function cleanupOrphanInvoiceHeaders(db: SQLite.SQLiteDatabase): Promise<v
 
 async function cleanupOrphanChildRows(db: SQLite.SQLiteDatabase): Promise<void> {
   try {
+    const orphanSaleProductIds = await db.getAllAsync<{ product_id: number }>(
+      `SELECT DISTINCT product_id FROM inventory_movements
+       WHERE reference_type = 'sale'
+         AND reference_id NOT IN (SELECT id FROM sales)`
+    );
+    const orphanPurchaseProductIds = await db.getAllAsync<{ product_id: number }>(
+      `SELECT DISTINCT product_id FROM inventory_movements
+       WHERE reference_type = 'purchase'
+         AND reference_id NOT IN (SELECT id FROM purchases)`
+    );
+
     const statements = [
     `DELETE FROM sale_items WHERE sale_id NOT IN (SELECT id FROM sales)`,
     `DELETE FROM sale_payments WHERE sale_id NOT IN (SELECT id FROM sales)`,
@@ -770,6 +807,14 @@ async function cleanupOrphanChildRows(db: SQLite.SQLiteDatabase): Promise<void> 
       // Table may not exist yet on very old schemas; other migrations create it.
     }
   }
+
+    const affectedProductIds = new Set<number>();
+    for (const { product_id } of [...orphanSaleProductIds, ...orphanPurchaseProductIds]) {
+      affectedProductIds.add(product_id);
+    }
+    for (const productId of affectedProductIds) {
+      await recomputeProductStock(db, productId);
+    }
 
     await repairSaleItemUnitCosts(db);
     await cleanupOrphanInvoiceHeaders(db);
