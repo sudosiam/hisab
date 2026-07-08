@@ -11,7 +11,7 @@ import {
   getDatabase,
   invalidateDatabase,
 } from '../db/database';
-import { withDbMaintenanceLock, withDatabaseRestore } from './dbMaintenance';
+import { withDatabaseBackup, withDatabaseRestore } from './dbMaintenance';
 
 export interface PickedBackupFile {
   uri: string;
@@ -299,6 +299,8 @@ async function readDatabaseBase64(): Promise<string> {
   // A backup taken after a failed checkpoint would silently miss the newest
   // transactions, so fail loudly instead.
   await checkpointDatabase({ strict: true });
+  // Close the connection so no new WAL pages land between checkpoint and read.
+  await invalidateDatabase();
   return FileSystem.readAsStringAsync(getDbPath(), {
     encoding: FileSystem.EncodingType.Base64,
   });
@@ -347,7 +349,7 @@ async function writeBackupToFolder(
   dateKey: string
 ): Promise<{ success: boolean; message: string }> {
   if (backupInFlight.current) return backupInFlight.current;
-  backupInFlight.current = withDbMaintenanceLock(async () => {
+  backupInFlight.current = withDatabaseBackup(async () => {
     if (!isSafUri(folderUri)) {
       return { success: false, message: 'Backup folder access expired. Re-select the folder in Settings.' };
     }
@@ -455,7 +457,7 @@ export async function exportDatabase(): Promise<{ success: boolean; message: str
   }
 
   try {
-    return await withDbMaintenanceLock(async () => {
+    return await withDatabaseBackup(async () => {
       const base64 = await readDatabaseBase64();
       const exportPath = `${FileSystem.cacheDirectory}${backupFileName(todayDateKey())}`;
       await FileSystem.writeAsStringAsync(exportPath, base64, {
