@@ -230,6 +230,7 @@ async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Pr
   await ensureUniqueInvoiceNumbers(db);
   await ensureInvoiceNumberIndexes(db);
   await ensureTransactionsPaymentIdColumn(db);
+  await ensureTransactionPaymentLinks(db);
   await dropAttachmentsTable(db);
   await ensureLoansTable(db);
   await ensureProductsIsHiddenColumn(db);
@@ -263,6 +264,58 @@ async function ensureTransactionsPaymentIdColumn(db: SQLite.SQLiteDatabase): Pro
   if (!names.has('payment_id')) {
     await db.execAsync('ALTER TABLE transactions ADD COLUMN payment_id INTEGER');
   }
+}
+
+/** Backfill payment_id on legacy sale/purchase payment transactions when unambiguous. */
+async function ensureTransactionPaymentLinks(db: SQLite.SQLiteDatabase): Promise<void> {
+  const table = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'`
+  );
+  if (!table) return;
+
+  await db.execAsync(`
+    UPDATE transactions
+    SET payment_id = (
+      SELECT sp.id FROM sale_payments sp
+      WHERE sp.sale_id = transactions.reference_id
+        AND sp.account_id = transactions.account_id
+        AND sp.amount = transactions.amount
+        AND sp.date = transactions.date
+      LIMIT 1
+    )
+    WHERE type = 'sale_payment'
+      AND reference_type = 'sale'
+      AND reference_id IS NOT NULL
+      AND payment_id IS NULL
+      AND (
+        SELECT COUNT(*) FROM sale_payments sp
+        WHERE sp.sale_id = transactions.reference_id
+          AND sp.account_id = transactions.account_id
+          AND sp.amount = transactions.amount
+          AND sp.date = transactions.date
+      ) = 1;
+
+    UPDATE transactions
+    SET payment_id = (
+      SELECT pp.id FROM purchase_payments pp
+      WHERE pp.purchase_id = transactions.reference_id
+        AND pp.account_id = transactions.account_id
+        AND pp.amount = ABS(transactions.amount)
+        AND pp.date = transactions.date
+      LIMIT 1
+    )
+    WHERE type = 'purchase_payment'
+      AND reference_type = 'purchase'
+      AND reference_id IS NOT NULL
+      AND payment_id IS NULL
+      AND (
+        SELECT COUNT(*) FROM purchase_payments pp
+        WHERE pp.purchase_id = transactions.reference_id
+          AND pp.account_id = transactions.account_id
+          AND pp.amount = ABS(transactions.amount)
+          AND pp.date = transactions.date
+      ) = 1;
+  `);
 }
 
 async function ensurePartiesColumns(db: SQLite.SQLiteDatabase): Promise<void> {

@@ -9,6 +9,7 @@ import {
 import { todayISO } from '../utils/date';
 import { resolvePeriodRange } from '../utils/period';
 import { addMoney, roundMoney, subMoney } from '../utils/money';
+import { pickLegacyPaymentMatch } from '../utils/paymentPair';
 import { getPurchaseById } from './purchases';
 import { getSaleById } from './sales';
 import type { Account, BalanceSheet, Expense, FixedAsset, Transaction } from '../types';
@@ -540,9 +541,12 @@ export async function deleteTransaction(id: number): Promise<void> {
             'SELECT id FROM sale_payments WHERE id = ?',
             [tx.payment_id]
           )
-        : await db.getFirstAsync<{ id: number }>(
-            `SELECT id FROM sale_payments WHERE sale_id = ? AND account_id = ? AND amount = ? AND date = ? ORDER BY id DESC LIMIT 1`,
-            [tx.reference_id, tx.account_id, tx.amount, tx.date]
+        : pickLegacyPaymentMatch(
+            await db.getAllAsync<{ id: number }>(
+              `SELECT id FROM sale_payments
+               WHERE sale_id = ? AND account_id = ? AND amount = ? AND date = ?`,
+              [tx.reference_id, tx.account_id, tx.amount, tx.date]
+            )
           );
       if (payment) {
         await db.runAsync('DELETE FROM sale_payments WHERE id = ?', [payment.id]);
@@ -568,9 +572,12 @@ export async function deleteTransaction(id: number): Promise<void> {
             'SELECT id FROM purchase_payments WHERE id = ?',
             [tx.payment_id]
           )
-        : await db.getFirstAsync<{ id: number }>(
-            `SELECT id FROM purchase_payments WHERE purchase_id = ? AND account_id = ? AND amount = ? AND date = ? ORDER BY id DESC LIMIT 1`,
-            [tx.reference_id, tx.account_id, paidAmount, tx.date]
+        : pickLegacyPaymentMatch(
+            await db.getAllAsync<{ id: number }>(
+              `SELECT id FROM purchase_payments
+               WHERE purchase_id = ? AND account_id = ? AND amount = ? AND date = ?`,
+              [tx.reference_id, tx.account_id, paidAmount, tx.date]
+            )
           );
       if (payment) {
         await db.runAsync('DELETE FROM purchase_payments WHERE id = ?', [payment.id]);
