@@ -110,23 +110,69 @@ export async function resetDatabase(): Promise<void> {
   await pauseAutoBackupAfterReset();
 }
 
+/** Row counts that mean the user has real books beyond seeded empty defaults. */
+export function hasUserDataFromCounts(counts: {
+  sales: number;
+  purchases: number;
+  products: number;
+  parties: number;
+  expenses: number;
+  otherIncome: number;
+  fixedAssets: number;
+  loans: number;
+  transactions: number;
+}): boolean {
+  const total =
+    counts.sales +
+    counts.purchases +
+    counts.products +
+    counts.parties +
+    counts.expenses +
+    counts.otherIncome +
+    counts.fixedAssets +
+    counts.loans +
+    counts.transactions;
+  return total > 0;
+}
+
 /** True when the database has real user data (not just default empty accounts). */
 export async function databaseHasUserData(): Promise<boolean> {
   try {
     const db = await getDatabase();
-    const row = await db.getFirstAsync<{ total: number }>(
-      `SELECT (
-        (SELECT COUNT(*) FROM sales) +
-        (SELECT COUNT(*) FROM purchases) +
-        (SELECT COUNT(*) FROM products) +
-        (SELECT COUNT(*) FROM parties) +
-        (SELECT COUNT(*) FROM expenses) +
-        (SELECT COUNT(*) FROM other_income) +
-        (SELECT COUNT(*) FROM fixed_assets) +
-        (SELECT COUNT(*) FROM loans)
-      ) AS total`
+    const row = await db.getFirstAsync<{
+      sales: number;
+      purchases: number;
+      products: number;
+      parties: number;
+      expenses: number;
+      other_income: number;
+      fixed_assets: number;
+      loans: number;
+      transactions: number;
+    }>(
+      `SELECT
+        (SELECT COUNT(*) FROM sales) AS sales,
+        (SELECT COUNT(*) FROM purchases) AS purchases,
+        (SELECT COUNT(*) FROM products) AS products,
+        (SELECT COUNT(*) FROM parties) AS parties,
+        (SELECT COUNT(*) FROM expenses) AS expenses,
+        (SELECT COUNT(*) FROM other_income) AS other_income,
+        (SELECT COUNT(*) FROM fixed_assets) AS fixed_assets,
+        (SELECT COUNT(*) FROM loans) AS loans,
+        (SELECT COUNT(*) FROM transactions) AS transactions`
     );
-    return (row?.total ?? 0) > 0;
+    if (!row) return false;
+    return hasUserDataFromCounts({
+      sales: row.sales,
+      purchases: row.purchases,
+      products: row.products,
+      parties: row.parties,
+      expenses: row.expenses,
+      otherIncome: row.other_income,
+      fixedAssets: row.fixed_assets,
+      loans: row.loans,
+      transactions: row.transactions,
+    });
   } catch {
     return false;
   }
