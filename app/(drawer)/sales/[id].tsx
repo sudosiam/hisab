@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
-import { getSaleById, getSaleItems, getSalePayments, addSalePayment, deleteSale } from '../../../src/services/sales';
+import { getSaleById, getSaleItems, getSalePayments, addSalePayment, removeSalePayment, deleteSale } from '../../../src/services/sales';
 import { calculateSaleCogs, calculateSaleGrossProfit } from '../../../src/services/financials';
 import { formatSqliteError } from '../../../src/db/database';
 import { getSelectableAccounts } from '../../../src/services/banking';
@@ -92,6 +92,7 @@ export default function SaleDetailScreen() {
   const [selectedAccount, setSelectedAccount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [removingPaymentId, setRemovingPaymentId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const saleId = useMemo(() => parseRouteId(id), [id]);
 
@@ -178,6 +179,33 @@ export default function SaleDetailScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleRemovePayment = (payment: SalePayment) => {
+    if (!sale || removingPaymentId !== null) return;
+    Alert.alert(
+      'Remove Payment',
+      `Remove ${formatCurrency(payment.amount)} from ${payment.account_name}? The invoice due will increase.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setRemovingPaymentId(payment.id);
+            try {
+              await removeSalePayment(sale.id, payment.id);
+              refresh();
+              await load();
+            } catch (e) {
+              Alert.alert('Error', e instanceof Error ? e.message : 'Could not remove payment');
+            } finally {
+              setRemovingPaymentId(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleDelete = () => {
@@ -284,8 +312,21 @@ export default function SaleDetailScreen() {
       ) : (
         payments.map((p) => (
           <View key={p.id} style={localStyles.itemRow}>
-            <Text style={styles.value}>{p.account_name}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.value}>{p.account_name}</Text>
+              <Text style={localStyles.itemMeta}>{p.date}</Text>
+            </View>
             <Text style={styles.amount}>{formatCurrency(p.amount)}</Text>
+            <TouchableOpacity
+              onPress={() => handleRemovePayment(p)}
+              disabled={removingPaymentId === p.id}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove payment ${formatCurrency(p.amount)}`}
+            >
+              <Text style={[styles.link, { color: colors.danger }]}>
+                {removingPaymentId === p.id ? '…' : 'Remove'}
+              </Text>
+            </TouchableOpacity>
           </View>
         ))
       )}

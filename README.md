@@ -2,58 +2,59 @@
 
 Android business management app built with **Expo SDK 54** and **SQLite**. All data stays on your device.
 
-**Current version:** `7.1.0` (Android `versionCode` 18)
+**Current version:** `8.0.0` (Android `versionCode` 19)
 
 ## What's in Hisab
 
 - **Full offline accounting** — Sales, purchases, inventory, banking, parties, reports
+- **Double-entry general ledger** — Journal entries with balance enforcement; debounced rebuild after writes
 - **Financial year settings** — FY picker with auto-advance; all reports stay in sync
 - **Growth dashboard** — Net worth, monthly profit charts, equity trend
-- **Other income & fixed assets** — Complete balance sheet beyond inventory
-- **Backup & restore** — Daily auto-backup of the database file to a chosen folder, plus manual export/restore, all WAL-checkpointed
-- **Data safety** — Corrupt DB never auto-wiped; restore-first recovery; payment amounts reconciled from ledger rows
-- **Unit tests** — Money, format, and financial calculations
+- **Other income, loans & fixed assets** — Complete balance sheet beyond inventory
+- **Backup & restore** — Daily auto-backup with WAL checkpoint; exclusive backup/restore lock
+- **Data safety** — Corrupt DB never auto-wiped; restore-first recovery; integrity repair on boot
+- **Automated tests** — 35 unit + integration tests (money, payments, sale/purchase flows)
 
-## What's new in 7.0.0 — reliability release
+## What's new in 8.0.0
 
-Full audit of every screen, service, and the SQLite layer, focused on making the books trustworthy for real business use:
+**Ledger & reports**
+- General ledger, trial balance, day book, cash flow, customer/vendor statements (with PDF export)
+- Expanded reports hub — P&L, receivables, payables, expense categories, operational summaries
+- Ledger refresh scheduled after every sale/purchase write (create, edit, add/remove payment) — no more stale GL after common actions
 
-**Data integrity (SQLite layer)**
-- Startup orphan-transaction cleanup now reverses each orphan's effect on the account balance before deleting it, so cash/bank balances can no longer drift from the ledger
-- A database whose `schema_version` marker is missing but which still contains business data is never rebuilt (previously this wiped all tables); the app now asks you to restore from backup instead
-- Deleting a party now also checks invoices linked by `party_id`, not just by name
-- Recent Activity no longer lists empty/corrupt invoice headers
+**Mobile performance**
+- Post-save work no longer runs a full integrity repair + ledger rebuild on every tap — debounced 400ms coalesced refresh keeps saves responsive on large books
 
-**Money math & input parsing**
-- All amount fields now parse comma-grouped input correctly (`5,000` used to be read as `5`)
-- Input prefills preserve paise and sign — editing a sale with a ₹10.75 discount no longer silently rounds it to ₹11 on save
-- Transfers and withdrawals can no longer overdraw an account by ₹0.01
-- Report footer totals are rounded consistently with row amounts
+**Data integrity (fixes from audit PRs #1–#5)**
+- Backup guard counts `transactions` — opening-balance-only books back up correctly
+- Legacy transfer delete throws on ambiguous pairs instead of corrupting balances
+- Backup and restore serialized via unified maintenance lock; WAL checkpoint before snapshot
+- Orphan invoice cleanup guarded when line-item tables are empty (partial restore)
+- Legacy payment delete uses strict `payment_id` matching with backfill migration
 
-**Safer workflows**
-- Double-tapping Save on a new sale/purchase can no longer create duplicate invoices
-- "Restore from backup folder" (Settings and the boot-error screen) now requires explicit confirmation before replacing your data
-- Deleting a ledger transaction that backs a recurring expense template is blocked with a clear message (delete it from Expenses instead)
-- Recurring expenses stop auto-posting to deactivated accounts
-- Payment rows with invalid/negative amounts are rejected instead of silently dropped
-- Editing a sale's discount/service charges below the amount already paid is caught before save
-- Loans: outstanding amount can no longer exceed principal; Cancel button shown while editing
-- Bank transfer screen validates account selection before submitting
-- Sale/purchase detail screens no longer wipe a half-typed payment amount when you switch apps and come back
-- Account detail "Money In" no longer double-counts the opening balance
-- Balance sheet, receivables, payables, and inventory reports refresh automatically after data changes elsewhere
-- Dashboard pull-to-refresh surfaces errors instead of silently showing stale numbers
+**Invoice payments**
+- **Remove payment** button on sale and purchase detail screens — no Banking workaround needed
+- `removeSalePayment` / `removePurchasePayment` delete by payment ID with account balance + status sync
+
+**UX polish**
+- Unsaved-changes guards on edit screens; iOS keyboard Done bar; form drafts on new sale/purchase
+- Human-readable dates on lists; loading states on P&L, cash flow, and statement reports
+- Drawer uses `router.navigate` (no stack replace freeze); boot restore requires typing `IMPORT`
+
+**Testing**
+- Integration tests: sale/purchase create → stock → cash → payment add/remove (in-memory SQLite via `better-sqlite3`)
+- `npm run verify` — typecheck + lint + 35 tests
 
 ## Features
 
 - **Sidebar navigation** — Dashboard, Sales, Purchases, Inventory, Banking, Balance Sheet, Growth, Reports, Settings
-- **SQLite database** — Local-first storage (schema v22)
-- **Dashboard** — Sold, Purchased, Gross Profit, Net Profit, Expense, Total Liquid, Receivable
-- **Sales & Purchases** — Paid/unpaid lists, split payments, invoice detail with add payment
-- **Inventory** — Weighted average cost, opening stock, movement history
-- **Banking** — Cash/bank accounts, expenses, transfers, transaction ledger
+- **SQLite database** — Local-first storage (schema v23)
+- **Dashboard** — Revenue, purchases, profit, expense, liquid cash, receivable, payable, inventory, net worth
+- **Sales & Purchases** — Paid/unpaid lists, split payments, edit with stock checks, invoice detail with add/remove payment
+- **Inventory** — Weighted average cost, opening stock, movement history, soft-delete when referenced
+- **Banking** — Cash/bank accounts, expenses (incl. recurring), transfers, transaction ledger
 - **Parties** — Customers/suppliers with statements and balances
-- **Reports** — Sales, Purchases, Inventory, P&L, Receivables, Payables
+- **Reports** — P&L, cash flow, trial balance, general ledger, day book, receivables, payables, sales/purchase/inventory summaries, party statements (PDF)
 
 ## Quick Start (development)
 
@@ -78,6 +79,10 @@ npm test
 
 After building, copy the APK to `releases/` for distribution (APKs are gitignored). Install on your phone from that folder or share directly.
 
+```powershell
+adb install "android\app\build\outputs\apk\release\app-release.apk"
+```
+
 ## Build APK locally
 
 Requires Android SDK and JDK 17:
@@ -86,9 +91,7 @@ Requires Android SDK and JDK 17:
 cd hisab
 npm run verify
 $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
-npx expo prebuild --platform android --no-install
-cd android
-.\gradlew assembleRelease
+npm run build:apk:local
 ```
 
 APK output: `android/app/build/outputs/apk/release/app-release.apk`
@@ -98,8 +101,6 @@ APK output: `android/app/build/outputs/apk/release/app-release.apk`
 ```bash
 npm run verify          # run first — must pass before every release
 npm run build:apk:prod  # EAS cloud production APK
-# or locally:
-npm run build:apk:local # prebuild + assembleRelease
 ```
 
 ## Version bumps
@@ -110,6 +111,7 @@ Keep these in sync when releasing:
 |------|--------|
 | `app.json` | `expo.version`, `android.versionCode`, `ios.buildNumber` |
 | `package.json` | `version` |
+| `src/constants/appVersion.ts` | fallback string (optional) |
 
 Settings → About reads `app.json` via `expo-constants`.
 
@@ -124,9 +126,9 @@ Settings → About reads `app.json` via `expo-constants`.
 
 - Expo SDK 54 / React Native 0.81
 - expo-router (drawer sidebar)
-- expo-sqlite
+- expo-sqlite (schema v23, 23 migrations)
 - expo-file-system (SAF backup on Android)
-- Jest unit tests
+- Jest — unit + integration tests (`better-sqlite3` harness)
 
 ## Scripts
 
@@ -137,6 +139,14 @@ Settings → About reads `app.json` via `expo-constants`.
 | `npm run verify` | Full pre-release check |
 | `npm run typecheck` | TypeScript check |
 | `npm run lint` | ESLint |
-| `npm test` | Jest unit tests |
+| `npm test` | Jest (unit + integration) |
 | `npm run build:apk` | EAS preview APK |
 | `npm run build:apk:prod` | EAS production APK |
+| `npm run build:apk:local` | Local prebuild + assembleRelease |
+
+## Known limits
+
+- Money stored as SQLite `REAL` (rupees); `roundMoney()` used throughout — not integer paise columns
+- No receivables/payables aging buckets (flat outstanding lists only)
+- Loans are manual balance-sheet memos — not linked to banking repayments
+- General Ledger UI running-balance column not implemented (always shows 0)

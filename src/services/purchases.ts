@@ -4,6 +4,7 @@ import {
   recomputeProductStock,
   recordTransaction,
   reverseTransactionsByReference,
+  updateAccountBalance,
   updateWeightedAvgCost,
 } from '../db/database';
 import { resolvePurchaseInvoiceNo, syncNextInvoiceSettingAfterUse } from './invoiceNumbers';
@@ -11,6 +12,7 @@ import { upsertParty } from './parties';
 import { formatCurrency } from '../utils/format';
 import { addMoney, mulMoney, roundMoney, subMoney } from '../utils/money';
 import { resolvePeriodRange } from '../utils/period';
+import { pickLegacyPaymentMatch } from '../utils/paymentPair';
 import type {
   PaymentInput,
   Purchase,
@@ -425,13 +427,11 @@ export async function updatePurchase(
     }
   });
 
-  if (params.items !== undefined) {
-    try {
-      const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-      scheduleGeneralLedgerRefresh();
-    } catch {
-      // Purchase is updated; ledger refresh is best-effort housekeeping.
-    }
+  try {
+    const { scheduleGeneralLedgerRefresh } = await import('./ledger');
+    scheduleGeneralLedgerRefresh();
+  } catch {
+    // Purchase is updated; ledger refresh is best-effort housekeeping.
   }
 
   if (invoiceChanged) {
@@ -490,6 +490,81 @@ export async function addPurchasePayment(
       purchaseId,
     ]);
   });
+
+  try {
+    const { scheduleGeneralLedgerRefresh } = await import('./ledger');
+    scheduleGeneralLedgerRefresh();
+  } catch {
+    // Payment recorded; ledger refresh is best-effort housekeeping.
+  }
+}
+
+export async function removePurchasePayment(purchaseId: number, paymentId: number): Promise<void> {
+  const db = await getDatabase();
+
+  await db.withTransactionAsync(async () => {
+    const payment = await db.getFirstAsync<{
+      purchase_id: number;
+      account_id: number;
+      amount: number;
+      date: string;
+    }>(
+      'SELECT purchase_id, account_id, amount, date FROM purchase_payments WHERE id = ?',
+      [paymentId]
+    );
+    if (!payment || payment.purchase_id !== purchaseId) {
+      throw new Error('Payment not found');
+    }
+
+    const linkedTx = await db.getFirstAsync<{ id: number; account_id: number; amount: number }>(
+      `SELECT id, account_id, amount FROM transactions
+       WHERE payment_id = ? AND reference_type = 'purchase' AND reference_id = ? AND type = 'purchase_payment'`,
+      [paymentId, purchaseId]
+    );
+
+    if (linkedTx) {
+      await updateAccountBalance(db, linkedTx.account_id, -linkedTx.amount);
+      await db.runAsync('DELETE FROM transactions WHERE id = ?', [linkedTx.id]);
+    } else {
+      const legacy = pickLegacyPaymentMatch(
+        await db.getAllAsync<{ id: number }>(
+          `SELECT id FROM transactions
+           WHERE reference_type = 'purchase' AND reference_id = ? AND type = 'purchase_payment'
+             AND account_id = ? AND amount = ? AND date = ? AND payment_id IS NULL`,
+          [purchaseId, payment.account_id, -payment.amount, payment.date]
+        )
+      );
+      await updateAccountBalance(db, payment.account_id, -(-payment.amount));
+      await db.runAsync('DELETE FROM transactions WHERE id = ?', [legacy.id]);
+    }
+
+    await db.runAsync('DELETE FROM purchase_payments WHERE id = ?', [paymentId]);
+
+    const purchase = await db.getFirstAsync<{ total_amount: number }>(
+      'SELECT total_amount FROM purchases WHERE id = ?',
+      [purchaseId]
+    );
+    if (!purchase) throw new Error('Purchase not found');
+
+    const sumRow = await db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_payments WHERE purchase_id = ?`,
+      [purchaseId]
+    );
+    const newPaid = roundMoney(sumRow?.total ?? 0);
+    const status = getPaymentStatus(purchase.total_amount, newPaid);
+    await db.runAsync('UPDATE purchases SET paid_amount = ?, status = ? WHERE id = ?', [
+      newPaid,
+      status,
+      purchaseId,
+    ]);
+  });
+
+  try {
+    const { scheduleGeneralLedgerRefresh } = await import('./ledger');
+    scheduleGeneralLedgerRefresh();
+  } catch {
+    // Purchase payment removed; ledger refresh is best-effort housekeeping.
+  }
 }
 
 export async function deletePurchase(id: number): Promise<void> {

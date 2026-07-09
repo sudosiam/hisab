@@ -116,6 +116,19 @@ export async function resetDatabase(): Promise<void> {
   await pauseAutoBackupAfterReset();
 }
 
+/** Open a fresh in-memory schema for integration tests (skips migration side effects). */
+export async function initializeFreshDatabase(): Promise<SQLite.SQLiteDatabase> {
+  await invalidateDatabase();
+  await SQLite.deleteDatabaseAsync(DB_NAME);
+  const db = await SQLite.openDatabaseAsync(DB_NAME);
+  await db.execAsync('PRAGMA foreign_keys = ON;');
+  await rebuildSchema(db);
+  dbInstance = db;
+  initPromise = Promise.resolve(db);
+  financialIntegrityRepaired = true;
+  return db;
+}
+
 /** Remove stale WAL/SHM after reset so old pages cannot replay into a fresh DB. */
 async function clearSqliteSidecarFiles(): Promise<void> {
   try {

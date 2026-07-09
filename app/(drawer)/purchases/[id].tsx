@@ -13,6 +13,7 @@ import {
   getPurchaseItems,
   getPurchasePayments,
   addPurchasePayment,
+  removePurchasePayment,
   deletePurchase,
 } from '../../../src/services/purchases';
 import { formatSqliteError } from '../../../src/db/database';
@@ -80,6 +81,7 @@ export default function PurchaseDetailScreen() {
   const [selectedAccount, setSelectedAccount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [removingPaymentId, setRemovingPaymentId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const purchaseId = useMemo(() => parseRouteId(id), [id]);
 
@@ -162,11 +164,38 @@ export default function PurchaseDetailScreen() {
     }
   };
 
+  const handleRemovePayment = (payment: PurchasePayment) => {
+    if (!purchase || removingPaymentId !== null) return;
+    Alert.alert(
+      'Remove Payment',
+      `Remove ${formatCurrency(payment.amount)} from ${payment.account_name}? The invoice due will increase.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setRemovingPaymentId(payment.id);
+            try {
+              await removePurchasePayment(purchase.id, payment.id);
+              refresh();
+              await load();
+            } catch (e) {
+              Alert.alert('Error', e instanceof Error ? e.message : 'Could not remove payment');
+            } finally {
+              setRemovingPaymentId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleDelete = () => {
     if (!purchase) return;
     Alert.alert(
       'Delete Purchase',
-      `Delete ${purchase.invoice_no}? Stock will be reduced and payments reversed.`,
+      `Delete ${purchase.invoice_no}? Stock will be restored and payments reversed.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -271,8 +300,21 @@ export default function PurchaseDetailScreen() {
       ) : (
         payments.map((p) => (
           <View key={p.id} style={localStyles.itemRow}>
-            <Text style={styles.value}>{p.account_name}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.value}>{p.account_name}</Text>
+              <Text style={localStyles.itemMeta}>{p.date}</Text>
+            </View>
             <Text style={styles.amount}>{formatCurrency(p.amount)}</Text>
+            <TouchableOpacity
+              onPress={() => handleRemovePayment(p)}
+              disabled={removingPaymentId === p.id}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove payment ${formatCurrency(p.amount)}`}
+            >
+              <Text style={[styles.link, { color: colors.warning }]}>
+                {removingPaymentId === p.id ? '…' : 'Remove'}
+              </Text>
+            </TouchableOpacity>
           </View>
         ))
       )}
