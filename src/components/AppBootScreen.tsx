@@ -40,9 +40,9 @@ export function AppBootScreen() {
         },
         brand: {
           ...typography.display,
-          fontSize: 34,
-          color: colors.primary,
-          letterSpacing: -0.8,
+          fontSize: 28,
+          color: colors.text,
+          letterSpacing: -0.3,
         },
         tagline: {
           marginTop: spacing.sm,
@@ -64,7 +64,7 @@ export function AppBootScreen() {
   return (
     <View style={styles.root}>
       <Text style={styles.brand}>Hisab</Text>
-      <Text style={styles.tagline}>Simple business accounts</Text>
+      <Text style={styles.tagline}>Business accounts</Text>
       <Animated.View style={[styles.indicator, { opacity: pulse }]} />
     </View>
   );

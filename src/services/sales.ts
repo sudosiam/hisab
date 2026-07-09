@@ -4,13 +4,13 @@ import {
   recomputeProductStock,
   recordTransaction,
   reduceInventory,
-  repairFinancialDataIntegrity,
   reverseTransactionsByReference,
 } from '../db/database';
 import { resolveSaleInvoiceNo, syncNextInvoiceSettingAfterUse } from './invoiceNumbers';
 import { upsertParty } from './parties';
 import { formatCurrency } from '../utils/format';
 import { addMoney, mulMoney, roundMoney, subMoney } from '../utils/money';
+import { resolvePeriodRange } from '../utils/period';
 import type { PaymentInput, Sale, SaleItem, SaleItemInput, SalePayment } from '../types';
 
 function validateSaleItems(items: SaleItemInput[]): void {
@@ -49,17 +49,26 @@ async function assertActivePaymentAccount(
 
 export async function getSales(
   filter?: 'all' | 'paid' | 'unpaid',
-  options?: { limit?: number; offset?: number }
+  options?: { limit?: number; offset?: number; periodKey?: string }
 ): Promise<Sale[]> {
   const db = await getDatabase();
-  let query = 'SELECT * FROM sales ORDER BY date DESC, id DESC';
+  const conditions: string[] = [];
   const params: (string | number)[] = [];
 
-  if (filter === 'paid') {
-    query = `SELECT * FROM sales WHERE status = 'paid' ORDER BY date DESC, id DESC`;
-  } else if (filter === 'unpaid') {
-    query = `SELECT * FROM sales WHERE status IN ('unpaid', 'partial') ORDER BY date DESC, id DESC`;
+  if (options?.periodKey) {
+    const { start, end } = await resolvePeriodRange(options.periodKey);
+    conditions.push('date >= ? AND date <= ?');
+    params.push(start, end);
   }
+
+  if (filter === 'paid') {
+    conditions.push("status = 'paid'");
+  } else if (filter === 'unpaid') {
+    conditions.push("status IN ('unpaid', 'partial')");
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  let query = `SELECT * FROM sales ${where} ORDER BY date DESC, id DESC`;
 
   if (options?.limit) {
     query += ' LIMIT ? OFFSET ?';
@@ -228,9 +237,10 @@ export async function createSale(params: {
   });
 
   try {
-    await repairFinancialDataIntegrity(undefined, { force: true });
+    const { scheduleGeneralLedgerRefresh } = await import('./ledger');
+    scheduleGeneralLedgerRefresh();
   } catch {
-    // Sale is saved; repair is best-effort housekeeping.
+    // Sale is saved; ledger refresh is best-effort housekeeping.
   }
 
   try {
@@ -245,15 +255,105 @@ export async function createSale(params: {
   return saleId;
 }
 
+async function replaceSaleItems(
+  db: Awaited<ReturnType<typeof getDatabase>>,
+  saleId: number,
+  invoiceNo: string,
+  items: SaleItemInput[]
+): Promise<number> {
+  validateSaleItems(items);
+
+  const oldItems = await db.getAllAsync<{ product_id: number }>(
+    'SELECT product_id FROM sale_items WHERE sale_id = ?',
+    [saleId]
+  );
+  const affectedProducts = new Set([
+    ...oldItems.map((row) => row.product_id),
+    ...items.map((item) => item.product_id),
+  ]);
+
+  await db.runAsync(
+    `DELETE FROM inventory_movements WHERE reference_type = 'sale' AND reference_id = ?`,
+    [saleId]
+  );
+  await db.runAsync('DELETE FROM sale_items WHERE sale_id = ?', [saleId]);
+
+  for (const productId of affectedProducts) {
+    await recomputeProductStock(db, productId);
+  }
+
+  const qtyByProduct = new Map<number, number>();
+  for (const item of items) {
+    qtyByProduct.set(item.product_id, (qtyByProduct.get(item.product_id) ?? 0) + item.qty);
+  }
+  for (const [productId, qty] of qtyByProduct) {
+    const product = await db.getFirstAsync<{ current_qty: number; name: string }>(
+      'SELECT current_qty, name FROM products WHERE id = ?',
+      [productId]
+    );
+    if (product && product.current_qty + 0.0001 < qty) {
+      throw new Error(
+        `Insufficient stock for ${product.name} (only ${product.current_qty} available)`
+      );
+    }
+  }
+
+  let subtotal = 0;
+  const itemDetails: {
+    product_id: number;
+    qty: number;
+    unit_price: number;
+    unit_cost: number;
+    total: number;
+  }[] = [];
+
+  for (const item of items) {
+    const total = mulMoney(item.qty, item.unit_price);
+    subtotal = addMoney(subtotal, total);
+    itemDetails.push({
+      product_id: item.product_id,
+      qty: item.qty,
+      unit_price: item.unit_price,
+      unit_cost: 0,
+      total,
+    });
+  }
+
+  for (let i = 0; i < itemDetails.length; i++) {
+    itemDetails[i].unit_cost = await reduceInventory(
+      db,
+      itemDetails[i].product_id,
+      itemDetails[i].qty
+    );
+  }
+
+  for (const item of itemDetails) {
+    await db.runAsync(
+      `INSERT INTO sale_items (sale_id, product_id, qty, unit_price, unit_cost, total)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [saleId, item.product_id, item.qty, item.unit_price, item.unit_cost, item.total]
+    );
+    await db.runAsync(
+      `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, reference_id, notes)
+       VALUES (?, 'sale', ?, ?, 'sale', ?, ?)`,
+      [item.product_id, -item.qty, item.unit_cost, saleId, `Sale ${invoiceNo}`]
+    );
+  }
+
+  return subtotal;
+}
+
 export async function updateSale(
   saleId: number,
   params: {
     party_name: string;
+    party_phone?: string;
     date: string;
     invoice_no?: string;
     discount_amount: number;
     service_charges?: number;
     notes?: string;
+    items?: SaleItemInput[];
   }
 ): Promise<void> {
   const db = await getDatabase();
@@ -263,31 +363,39 @@ export async function updateSale(
   const invoiceNo = params.invoice_no?.trim() || sale.invoice_no;
   if (!invoiceNo) throw new Error('Invoice number is required');
 
-  const discount = roundMoney(Math.max(0, params.discount_amount));
-  if (discount > sale.subtotal + 0.01) {
-    throw new Error('Discount cannot exceed subtotal');
-  }
-  const serviceCharges = roundMoney(Math.max(0, params.service_charges ?? sale.service_charges ?? 0));
-  const totalAmount = roundMoney(
-    Math.max(0, addMoney(subMoney(sale.subtotal, discount), serviceCharges))
-  );
-  if (totalAmount + 0.01 < sale.paid_amount) {
-    throw new Error('Discount cannot be greater than amount due after payments');
-  }
-
-  const status = getPaymentStatus(totalAmount, sale.paid_amount);
   const partyName = params.party_name.trim();
   const invoiceChanged = invoiceNo !== sale.invoice_no;
+  const discount = roundMoney(Math.max(0, params.discount_amount));
+  const serviceCharges = roundMoney(Math.max(0, params.service_charges ?? sale.service_charges ?? 0));
 
   await db.withTransactionAsync(async () => {
-    const partyId = await upsertParty(partyName, 'customer', db);
+    const subtotal =
+      params.items !== undefined
+        ? await replaceSaleItems(db, saleId, invoiceNo, params.items)
+        : sale.subtotal;
+
+    if (discount > subtotal + 0.01) {
+      throw new Error('Discount cannot exceed subtotal');
+    }
+    const totalAmount = roundMoney(
+      Math.max(0, addMoney(subMoney(subtotal, discount), serviceCharges))
+    );
+    if (totalAmount + 0.01 < sale.paid_amount) {
+      throw new Error(
+        `New total (${formatCurrency(totalAmount)}) cannot be less than the amount already paid (${formatCurrency(sale.paid_amount)}). Remove payments first.`
+      );
+    }
+
+    const status = getPaymentStatus(totalAmount, sale.paid_amount);
+    const partyId = await upsertParty(partyName, 'customer', db, params.party_phone);
     await db.runAsync(
-      `UPDATE sales SET invoice_no = ?, party_id = ?, party_name = ?, date = ?, discount_amount = ?, service_charges = ?, total_amount = ?, status = ?, notes = ? WHERE id = ?`,
+      `UPDATE sales SET invoice_no = ?, party_id = ?, party_name = ?, date = ?, subtotal = ?, discount_amount = ?, service_charges = ?, total_amount = ?, status = ?, notes = ? WHERE id = ?`,
       [
         invoiceNo,
         partyId,
         partyName,
         params.date,
+        subtotal,
         discount,
         serviceCharges,
         totalAmount,
@@ -307,6 +415,15 @@ export async function updateSale(
       );
     }
   });
+
+  if (params.items !== undefined) {
+    try {
+      const { scheduleGeneralLedgerRefresh } = await import('./ledger');
+      scheduleGeneralLedgerRefresh();
+    } catch {
+      // Sale is updated; ledger refresh is best-effort housekeeping.
+    }
+  }
 
   if (invoiceChanged) {
     try {
@@ -390,8 +507,9 @@ export async function deleteSale(id: number): Promise<void> {
   });
 
   try {
-    await repairFinancialDataIntegrity(undefined, { force: true });
+    const { scheduleGeneralLedgerRefresh } = await import('./ledger');
+    scheduleGeneralLedgerRefresh();
   } catch {
-    // The sale was deleted; integrity repair is best-effort housekeeping.
+    // The sale was deleted; ledger refresh is best-effort housekeeping.
   }
 }

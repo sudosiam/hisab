@@ -25,12 +25,13 @@ import {
   getOtherIncomeById,
   updateOtherIncome,
 } from '../../../src/services/otherIncome';
-import { formatSqliteError } from '../../../src/db/database';
+import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatAmountInput, parsePositiveAmount } from '../../../src/utils/format';
 import { isValidISODate } from '../../../src/utils/date';
+import { formatSqliteError } from '../../../src/db/database';
 import { spacing } from '../../../src/constants/theme';
 import type { Account, OtherIncome } from '../../../src/types';
 
@@ -110,6 +111,19 @@ export default function OtherIncomeDetailScreen() {
       hasLoadedRef.current = true;
     });
   }, [load]));
+
+  const isEditDirty = useMemo(() => {
+    if (!editing || !item) return false;
+    const amt = parsePositiveAmount(amount);
+    return (
+      category.trim() !== item.category ||
+      description.trim() !== item.description ||
+      (amt ?? -1) !== item.amount ||
+      date !== item.date ||
+      accountId !== item.account_id
+    );
+  }, [editing, item, category, description, amount, date, accountId]);
+  useUnsavedChangesGuard(isEditDirty);
 
   const handleSave = async () => {
     if (!item || saving) return;
@@ -207,7 +221,7 @@ export default function OtherIncomeDetailScreen() {
             label="Amount (₹)"
             value={amount}
             onChangeText={setAmount}
-            keyboardType="decimal-pad"
+            money
           />
           <DatePickerField label="Date" value={date} onChange={setDate} />
           <AccountPicker accounts={accounts} value={accountId} onChange={setAccountId} />

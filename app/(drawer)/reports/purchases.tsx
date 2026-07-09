@@ -5,10 +5,14 @@ import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getPurchaseReport, sumReportAmounts } from '../../../src/services/reports';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
-import { formatCurrency } from '../../../src/utils/format';
 import { StatusBadge } from '../../../src/components/StatusBadge';
+import { ReportRow } from '../../../src/components/ReportRow';
+import { MoneyText } from '../../../src/components/MoneyText';
 import { ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { useTheme } from '../../../src/context/ThemeContext';
+import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
+import { sharePurchaseReportPdf } from '../../../src/services/reportPdf';
+import { isFinancialYearPeriodKey } from '../../../src/utils/date';
 import { formatSqliteError } from '../../../src/db/database';
 import { radius, spacing } from '../../../src/constants/theme';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
@@ -21,10 +25,8 @@ export default function PurchaseReportScreen() {
     () =>
       StyleSheet.create({
         header: { padding: spacing.sm },
-        total: { fontWeight: '700', textAlign: 'center', color: colors.text },
+        totalWrap: { alignItems: 'center', marginBottom: spacing.xs },
         row: {
-          flexDirection: 'row',
-          justifyContent: 'space-between',
           backgroundColor: colors.surface,
           padding: spacing.md,
           borderRadius: radius.sm,
@@ -34,7 +36,6 @@ export default function PurchaseReportScreen() {
         },
         invoice: { fontWeight: '600', color: colors.text },
         party: { fontSize: 13, color: colors.textSecondary },
-        amount: { fontWeight: '700', marginTop: 4, color: colors.text },
       }),
     [colors]
   );
@@ -62,6 +63,13 @@ export default function PurchaseReportScreen() {
   }, [load]);
 
   const total = sumReportAmounts(rows);
+  const emptyLabel = isFinancialYearPeriodKey(monthKey)
+    ? 'No purchases in this financial year'
+    : 'No purchases in this month';
+
+  const exportPdf = useCallback(async () => sharePurchaseReportPdf(monthKey, rows, total), [monthKey, rows, total]);
+
+  useReportPdfHeader({ disabled: !!error, onExport: exportPdf });
 
   if (error) {
     return <ErrorState message={error} onRetry={load} />;
@@ -71,7 +79,10 @@ export default function PurchaseReportScreen() {
     <View style={styles.container}>
       <View style={localStyles.header}>
         <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
-        <Text style={localStyles.total}>Total Purchases: {formatCurrency(total)}</Text>
+        <View style={localStyles.totalWrap}>
+          <Text style={{ fontWeight: '700', color: colors.text, marginBottom: 2 }}>Total Purchases</Text>
+          <MoneyText amount={total} size="lg" />
+        </View>
       </View>
       <FlatList
         data={rows}
@@ -80,19 +91,21 @@ export default function PurchaseReportScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
-        ListEmptyComponent={<Text style={styles.empty}>No purchases in this month</Text>}
+        ListEmptyComponent={<Text style={styles.empty}>{emptyLabel}</Text>}
         {...FLATLIST_PERF}
         renderItem={({ item }) => (
-          <View style={localStyles.row}>
-            <View>
-              <Text style={localStyles.invoice}>{item.invoice_no}</Text>
-              <Text style={localStyles.party}>{item.supplier_name}</Text>
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <StatusBadge status={item.status} />
-              <Text style={localStyles.amount}>{formatCurrency(item.total_amount)}</Text>
-            </View>
-          </View>
+          <ReportRow
+            style={localStyles.row}
+            amount={item.total_amount}
+            trailing={<StatusBadge status={item.status} />}
+          >
+            <Text style={localStyles.invoice} numberOfLines={1}>
+              {item.invoice_no}
+            </Text>
+            <Text style={localStyles.party} numberOfLines={1}>
+              {item.supplier_name}
+            </Text>
+          </ReportRow>
         )}
       />
     </View>

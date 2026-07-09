@@ -2,6 +2,11 @@ import { getDatabase } from '../db/database';
 import { roundMoney } from '../utils/money';
 import type { Loan } from '../types';
 
+async function syncGeneralLedgerAfterWrite(): Promise<void> {
+  const { refreshGeneralLedgerAfterWrite } = await import('./ledger');
+  await refreshGeneralLedgerAfterWrite();
+}
+
 function normalizeRate(value?: number): number | null {
   if (value === undefined || value === null || !Number.isFinite(value) || value < 0) return null;
   return roundMoney(value);
@@ -58,6 +63,7 @@ export async function addLoan(params: {
       normalizeNotes(params.notes),
     ]
   );
+  await syncGeneralLedgerAfterWrite();
   return result.lastInsertRowId;
 }
 
@@ -99,9 +105,11 @@ export async function updateLoan(
       id,
     ]
   );
+  await syncGeneralLedgerAfterWrite();
 }
 
 export async function deleteLoan(id: number): Promise<void> {
   const db = await getDatabase();
   await db.runAsync('DELETE FROM loans WHERE id = ?', [id]);
+  await syncGeneralLedgerAfterWrite();
 }

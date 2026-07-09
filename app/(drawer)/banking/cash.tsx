@@ -88,6 +88,13 @@ export default function CashMovementScreen() {
       Alert.alert('Error', 'Select an account');
       return;
     }
+    if (mode === 'withdraw' && selected && amt > selected.current_balance + 0.01) {
+      Alert.alert(
+        'Insufficient balance',
+        `This account has only ${formatCurrency(selected.current_balance)} available.`
+      );
+      return;
+    }
     setLoading(true);
     try {
       const payload = {
@@ -131,7 +138,7 @@ export default function CashMovementScreen() {
         value={accountId}
         onChange={setAccountId}
       />
-      <FormInput label="Amount (₹)" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
+      <FormInput label="Amount (₹)" value={amount} onChangeText={setAmount} money />
       <DatePickerField label="Date" value={date} onChange={setDate} />
       <FormInput
         label="Note (optional)"

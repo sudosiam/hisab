@@ -312,7 +312,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     },
     dayTextMuted: {
       color: colors.textMuted,
-      opacity: 0.45,
+      opacity: 0.75,
     },
     dayTextSelected: {
       color: colors.onPrimary,

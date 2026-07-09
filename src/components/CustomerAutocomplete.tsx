@@ -5,6 +5,9 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
+  Modal,
+  Pressable,
+  ScrollView,
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { spacing, radius } from '../constants/theme';
@@ -60,6 +63,12 @@ export function CustomerAutocomplete({
     value.trim().length > 0 &&
     !filtered.some((n) => n.toLowerCase() === value.trim().toLowerCase());
   const partyLabel = partyType === 'vendor' ? 'vendor' : 'customer';
+  const showDropdown = focused && (filtered.length > 0 || showCreate);
+
+  const handleSelect = (name: string) => {
+    onChange(name);
+    setFocused(false);
+  };
 
   return (
     <View style={styles.wrap}>
@@ -71,43 +80,47 @@ export function CustomerAutocomplete({
         placeholder={placeholder}
         placeholderTextColor={colors.textMuted}
         onFocus={() => setFocused(true)}
-        onBlur={() => setTimeout(() => setFocused(false), 150)}
         accessibilityLabel={label}
       />
-      {focused && (filtered.length > 0 || showCreate) ? (
-        <View style={styles.dropdown}>
-          {showCreate ? (
-            <TouchableOpacity
-              style={styles.suggestion}
-              onPress={() => onChange(value.trim())}
-              accessibilityRole="button"
-              accessibilityLabel={`Create new ${partyLabel} ${value.trim()}`}
-            >
-              <Text style={styles.createText}>
-                Create new {partyLabel}: &ldquo;{value.trim()}&rdquo;
-              </Text>
-            </TouchableOpacity>
-          ) : null}
-          {filtered.slice(0, 8).map((item) => (
-            <TouchableOpacity
-              key={item}
-              style={styles.suggestion}
-              onPress={() => onChange(item)}
-              accessibilityRole="button"
-              accessibilityLabel={`Select ${item}`}
-            >
-              <Text style={styles.suggestionText}>{item}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      ) : null}
+      <Modal visible={showDropdown} transparent animationType="fade" onRequestClose={() => setFocused(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setFocused(false)}>
+          <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>{label}</Text>
+            <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 280 }}>
+              {showCreate ? (
+                <TouchableOpacity
+                  style={styles.suggestion}
+                  onPress={() => handleSelect(value.trim())}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Create new ${partyLabel} ${value.trim()}`}
+                >
+                  <Text style={styles.createText}>
+                    Create new {partyLabel}: &ldquo;{value.trim()}&rdquo;
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              {filtered.slice(0, 12).map((item) => (
+                <TouchableOpacity
+                  key={item}
+                  style={styles.suggestion}
+                  onPress={() => handleSelect(item)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Select ${item}`}
+                >
+                  <Text style={styles.suggestionText}>{item}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
 function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
-    wrap: { marginBottom: spacing.md, zIndex: 10 },
+    wrap: { marginBottom: spacing.md },
     label: { fontSize: 13, fontWeight: '600', color: colors.textSecondary, marginBottom: 6 },
     input: {
       borderWidth: 1,
@@ -119,16 +132,21 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       fontSize: 15,
       color: colors.text,
     },
-    dropdown: {
-      marginTop: 4,
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.35)',
+      justifyContent: 'center',
+      padding: spacing.lg,
+    },
+    modalSheet: {
+      backgroundColor: colors.surface,
+      borderRadius: radius.md,
+      padding: spacing.md,
       borderWidth: 1,
       borderColor: colors.border,
-      borderRadius: radius.md,
-      backgroundColor: colors.surface,
-      maxHeight: 200,
-      overflow: 'hidden',
     },
-    suggestion: { paddingHorizontal: spacing.md, paddingVertical: 12 },
+    modalTitle: { fontSize: 14, fontWeight: '700', color: colors.text, marginBottom: spacing.sm },
+    suggestion: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderLight },
     suggestionText: { fontSize: 14, color: colors.text },
     createText: { fontSize: 14, color: colors.primary, fontWeight: '600' },
   });

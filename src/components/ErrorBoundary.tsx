@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { spacing } from '../constants/theme';
+import { spacing, radius } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
 
 interface Props {
   children: React.ReactNode;
@@ -9,6 +10,48 @@ interface Props {
 interface State {
   error: Error | null;
   resetKey: number;
+}
+
+function ErrorFallback({ error, onReset }: { error: Error; onReset: () => void }) {
+  const { colors } = useTheme();
+  const styles = React.useMemo(
+    () =>
+      StyleSheet.create({
+        center: {
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: spacing.lg,
+          backgroundColor: colors.background,
+        },
+        title: { fontSize: 18, fontWeight: '600', marginBottom: spacing.sm, color: colors.text },
+        message: {
+          fontSize: 14,
+          textAlign: 'center',
+          marginBottom: spacing.lg,
+          color: colors.textSecondary,
+          lineHeight: 20,
+        },
+        btn: {
+          paddingHorizontal: spacing.lg,
+          paddingVertical: spacing.sm,
+          borderRadius: radius.md,
+          backgroundColor: colors.primary,
+        },
+        btnText: { fontSize: 15, fontWeight: '600', color: colors.onPrimary },
+      }),
+    [colors]
+  );
+
+  return (
+    <View style={styles.center}>
+      <Text style={styles.title}>Something went wrong</Text>
+      <Text style={styles.message}>{error.message}</Text>
+      <TouchableOpacity style={styles.btn} onPress={onReset}>
+        <Text style={styles.btnText}>Try Again</Text>
+      </TouchableOpacity>
+    </View>
+  );
 }
 
 export class ErrorBoundary extends React.Component<Props, State> {
@@ -27,29 +70,8 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   render() {
     if (this.state.error) {
-      return (
-        <View style={styles.center}>
-          <Text style={styles.title}>Something went wrong</Text>
-          <Text style={styles.message}>{this.state.error.message}</Text>
-          <TouchableOpacity style={styles.btn} onPress={this.reset}>
-            <Text style={styles.btnText}>Try Again</Text>
-          </TouchableOpacity>
-        </View>
-      );
+      return <ErrorFallback error={this.state.error} onReset={this.reset} />;
     }
     return <React.Fragment key={this.state.resetKey}>{this.props.children}</React.Fragment>;
   }
 }
-
-const styles = StyleSheet.create({
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  title: { fontSize: 18, fontWeight: '700', marginBottom: spacing.sm },
-  message: { fontSize: 14, textAlign: 'center', marginBottom: spacing.lg, opacity: 0.7 },
-  btn: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
-  btnText: { fontSize: 16, fontWeight: '700', color: '#2563EB' },
-});

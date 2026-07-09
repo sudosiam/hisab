@@ -3,7 +3,7 @@ import { waitForDatabaseAccess } from '../services/dbMaintenance';
 import { roundMoney } from '../utils/money';
 
 export const DB_NAME = 'hisab.db';
-const SCHEMA_VERSION = 22;
+const SCHEMA_VERSION = 23;
 
 /** Removes the legacy attachment media folder left over from the removed attachments feature. */
 async function clearLegacyMediaFolder(): Promise<void> {
@@ -103,30 +103,95 @@ export async function resetDatabase(): Promise<void> {
   const db = await SQLite.openDatabaseAsync(DB_NAME);
   await db.execAsync('PRAGMA foreign_keys = ON;');
   await rebuildSchema(db);
+  try {
+    await db.closeAsync();
+  } catch {
+    // ignore
+  }
+  await clearSqliteSidecarFiles();
   financialIntegrityRepaired = true;
-  dbInstance = db;
-  initPromise = Promise.resolve(db);
+  dbInstance = null;
+  initPromise = null;
   const { pauseAutoBackupAfterReset } = await import('../services/backup');
   await pauseAutoBackupAfterReset();
+}
+
+/** Remove stale WAL/SHM after reset so old pages cannot replay into a fresh DB. */
+async function clearSqliteSidecarFiles(): Promise<void> {
+  try {
+    const FileSystem = await import('expo-file-system/legacy');
+    const dbPath = `${FileSystem.documentDirectory}SQLite/${DB_NAME}`;
+    for (const suffix of ['-wal', '-shm']) {
+      await FileSystem.deleteAsync(`${dbPath}${suffix}`, { idempotent: true });
+    }
+  } catch {
+    // Sidecar files may not exist; ignore.
+  }
+}
+
+/** Row counts that mean the user has real books beyond seeded empty defaults. */
+export function hasUserDataFromCounts(counts: {
+  sales: number;
+  purchases: number;
+  products: number;
+  parties: number;
+  expenses: number;
+  otherIncome: number;
+  fixedAssets: number;
+  loans: number;
+  transactions: number;
+}): boolean {
+  const total =
+    counts.sales +
+    counts.purchases +
+    counts.products +
+    counts.parties +
+    counts.expenses +
+    counts.otherIncome +
+    counts.fixedAssets +
+    counts.loans +
+    counts.transactions;
+  return total > 0;
 }
 
 /** True when the database has real user data (not just default empty accounts). */
 export async function databaseHasUserData(): Promise<boolean> {
   try {
     const db = await getDatabase();
-    const row = await db.getFirstAsync<{ total: number }>(
-      `SELECT (
-        (SELECT COUNT(*) FROM sales) +
-        (SELECT COUNT(*) FROM purchases) +
-        (SELECT COUNT(*) FROM products) +
-        (SELECT COUNT(*) FROM parties) +
-        (SELECT COUNT(*) FROM expenses) +
-        (SELECT COUNT(*) FROM other_income) +
-        (SELECT COUNT(*) FROM fixed_assets) +
-        (SELECT COUNT(*) FROM loans)
-      ) AS total`
+    const row = await db.getFirstAsync<{
+      sales: number;
+      purchases: number;
+      products: number;
+      parties: number;
+      expenses: number;
+      other_income: number;
+      fixed_assets: number;
+      loans: number;
+      transactions: number;
+    }>(
+      `SELECT
+        (SELECT COUNT(*) FROM sales) AS sales,
+        (SELECT COUNT(*) FROM purchases) AS purchases,
+        (SELECT COUNT(*) FROM products) AS products,
+        (SELECT COUNT(*) FROM parties) AS parties,
+        (SELECT COUNT(*) FROM expenses) AS expenses,
+        (SELECT COUNT(*) FROM other_income) AS other_income,
+        (SELECT COUNT(*) FROM fixed_assets) AS fixed_assets,
+        (SELECT COUNT(*) FROM loans) AS loans,
+        (SELECT COUNT(*) FROM transactions) AS transactions`
     );
-    return (row?.total ?? 0) > 0;
+    if (!row) return false;
+    return hasUserDataFromCounts({
+      sales: row.sales,
+      purchases: row.purchases,
+      products: row.products,
+      parties: row.parties,
+      expenses: row.expenses,
+      otherIncome: row.other_income,
+      fixedAssets: row.fixed_assets,
+      loans: row.loans,
+      transactions: row.transactions,
+    });
   } catch {
     return false;
   }
@@ -195,7 +260,15 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       );
     }
     await seedDefaultAccounts(db);
-    await repairFinancialDataIntegrity(db, { force: true });
+    await repairFinancialDataIntegrity(db, { force: true, rebuildLedger: false });
+    try {
+      const { hasGeneralLedger, rebuildGeneralLedger } = await import('../services/ledger');
+      if (!(await hasGeneralLedger(db))) {
+        await rebuildGeneralLedger(db);
+      }
+    } catch {
+      // Ledger not available yet on partial schemas.
+    }
     return;
   }
 
@@ -211,7 +284,15 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   }
 
   await seedDefaultAccounts(db);
-  await repairFinancialDataIntegrity(db, { force: true });
+  await repairFinancialDataIntegrity(db, { force: true, rebuildLedger: false });
+  try {
+    const { hasGeneralLedger, rebuildGeneralLedger } = await import('../services/ledger');
+    if (!(await hasGeneralLedger(db))) {
+      await rebuildGeneralLedger(db);
+    }
+  } catch {
+    // Ledger not available yet on partial schemas.
+  }
 }
 
 async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Promise<void> {
@@ -230,6 +311,8 @@ async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Pr
   await ensureUniqueInvoiceNumbers(db);
   await ensureInvoiceNumberIndexes(db);
   await ensureTransactionsPaymentIdColumn(db);
+  await ensureTransactionPaymentLinks(db);
+  await ensureTransferReferenceLinks(db);
   await dropAttachmentsTable(db);
   await ensureLoansTable(db);
   await ensureProductsIsHiddenColumn(db);
@@ -238,6 +321,7 @@ async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Pr
   await ensureOtherIncomeCategoriesTable(db);
   await cleanupOrphanChildRows(db);
   await ensurePerformanceIndexes(db);
+  await ensureLedgerTables(db);
 
   if (fromVersion < SCHEMA_VERSION) {
     await db.runAsync(
@@ -262,6 +346,89 @@ async function ensureTransactionsPaymentIdColumn(db: SQLite.SQLiteDatabase): Pro
   const names = new Set(columns.map((col) => col.name));
   if (!names.has('payment_id')) {
     await db.execAsync('ALTER TABLE transactions ADD COLUMN payment_id INTEGER');
+  }
+}
+
+/** Backfill payment_id on legacy sale/purchase payment transactions when unambiguous. */
+async function ensureTransactionPaymentLinks(db: SQLite.SQLiteDatabase): Promise<void> {
+  const table = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'`
+  );
+  if (!table) return;
+
+  await db.execAsync(`
+    UPDATE transactions
+    SET payment_id = (
+      SELECT sp.id FROM sale_payments sp
+      WHERE sp.sale_id = transactions.reference_id
+        AND sp.account_id = transactions.account_id
+        AND sp.amount = transactions.amount
+        AND sp.date = transactions.date
+      LIMIT 1
+    )
+    WHERE type = 'sale_payment'
+      AND reference_type = 'sale'
+      AND reference_id IS NOT NULL
+      AND payment_id IS NULL
+      AND (
+        SELECT COUNT(*) FROM sale_payments sp
+        WHERE sp.sale_id = transactions.reference_id
+          AND sp.account_id = transactions.account_id
+          AND sp.amount = transactions.amount
+          AND sp.date = transactions.date
+      ) = 1;
+
+    UPDATE transactions
+    SET payment_id = (
+      SELECT pp.id FROM purchase_payments pp
+      WHERE pp.purchase_id = transactions.reference_id
+        AND pp.account_id = transactions.account_id
+        AND pp.amount = ABS(transactions.amount)
+        AND pp.date = transactions.date
+      LIMIT 1
+    )
+    WHERE type = 'purchase_payment'
+      AND reference_type = 'purchase'
+      AND reference_id IS NOT NULL
+      AND payment_id IS NULL
+      AND (
+        SELECT COUNT(*) FROM purchase_payments pp
+        WHERE pp.purchase_id = transactions.reference_id
+          AND pp.account_id = transactions.account_id
+          AND pp.amount = ABS(transactions.amount)
+          AND pp.date = transactions.date
+      ) = 1;
+  `);
+}
+
+/** Link legacy transfer legs so deleting one side always removes the correct pair. */
+async function ensureTransferReferenceLinks(db: SQLite.SQLiteDatabase): Promise<void> {
+  const table = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'`
+  );
+  if (!table) return;
+
+  const outs = await db.getAllAsync<{ id: number; account_id: number; amount: number; date: string }>(
+    `SELECT id, account_id, amount, date FROM transactions
+     WHERE type = 'transfer' AND amount < 0
+       AND COALESCE(reference_type, '') != 'transfer'`
+  );
+
+  for (const out of outs) {
+    const candidates = await db.getAllAsync<{ id: number }>(
+      `SELECT id FROM transactions
+       WHERE type = 'transfer' AND amount = ? AND date = ?
+         AND account_id != ?
+         AND COALESCE(reference_type, '') != 'transfer'
+         AND id != ?`,
+      [roundMoney(-out.amount), out.date, out.account_id, out.id]
+    );
+    if (candidates.length !== 1) continue;
+
+    await db.runAsync(
+      `UPDATE transactions SET reference_type = 'transfer', reference_id = ? WHERE id IN (?, ?)`,
+      [out.id, out.id, candidates[0].id]
+    );
   }
 }
 
@@ -628,6 +795,48 @@ async function ensurePerformanceIndexes(db: SQLite.SQLiteDatabase): Promise<void
   }
 }
 
+async function ensureLedgerTables(db: SQLite.SQLiteDatabase): Promise<void> {
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS ledger_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      account_type TEXT NOT NULL,
+      system_key TEXT UNIQUE,
+      cash_account_id INTEGER,
+      expense_category TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (cash_account_id) REFERENCES accounts(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS journal_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entry_date TEXT NOT NULL,
+      description TEXT NOT NULL,
+      reference_type TEXT,
+      reference_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS journal_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      journal_entry_id INTEGER NOT NULL,
+      ledger_account_id INTEGER NOT NULL,
+      party_id INTEGER,
+      debit REAL NOT NULL DEFAULT 0,
+      credit REAL NOT NULL DEFAULT 0,
+      FOREIGN KEY (journal_entry_id) REFERENCES journal_entries(id) ON DELETE CASCADE,
+      FOREIGN KEY (ledger_account_id) REFERENCES ledger_accounts(id),
+      FOREIGN KEY (party_id) REFERENCES parties(id)
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_accounts_cash ON ledger_accounts(cash_account_id)
+      WHERE cash_account_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_journal_entries_date ON journal_entries(entry_date);
+    CREATE INDEX IF NOT EXISTS idx_journal_lines_party ON journal_lines(party_id);
+    CREATE INDEX IF NOT EXISTS idx_journal_lines_account ON journal_lines(ledger_account_id);
+  `);
+}
+
 async function ensureSalesServiceChargesColumn(db: SQLite.SQLiteDatabase): Promise<void> {
   const table = await db.getFirstAsync<{ name: string }>(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='sales'`
@@ -710,8 +919,29 @@ async function repairSaleItemUnitCosts(db: SQLite.SQLiteDatabase): Promise<void>
 }
 
 async function cleanupOrphanInvoiceHeaders(db: SQLite.SQLiteDatabase): Promise<void> {
+  const saleItemCount = await db.getFirstAsync<{ c: number }>(
+    'SELECT COUNT(*) AS c FROM sale_items'
+  );
+  const saleCount = await db.getFirstAsync<{ c: number }>('SELECT COUNT(*) AS c FROM sales');
+  if ((saleItemCount?.c ?? 0) === 0 && (saleCount?.c ?? 0) > 0) {
+    return;
+  }
+
+  const purchaseItemCount = await db.getFirstAsync<{ c: number }>(
+    'SELECT COUNT(*) AS c FROM purchase_items'
+  );
+  const purchaseCount = await db.getFirstAsync<{ c: number }>(
+    'SELECT COUNT(*) AS c FROM purchases'
+  );
+  if ((purchaseItemCount?.c ?? 0) === 0 && (purchaseCount?.c ?? 0) > 0) {
+    return;
+  }
+
   const orphanSales = await db.getAllAsync<{ id: number }>(
-    `SELECT id FROM sales WHERE id NOT IN (SELECT DISTINCT sale_id FROM sale_items)`
+    `SELECT id FROM sales
+     WHERE id NOT IN (SELECT DISTINCT sale_id FROM sale_items WHERE sale_id IS NOT NULL)
+       AND id NOT IN (SELECT DISTINCT sale_id FROM sale_payments)
+       AND COALESCE(total_amount, 0) = 0`
   );
   for (const { id } of orphanSales) {
     const productIds = await db.getAllAsync<{ product_id: number }>(
@@ -732,7 +962,10 @@ async function cleanupOrphanInvoiceHeaders(db: SQLite.SQLiteDatabase): Promise<v
   }
 
   const orphanPurchases = await db.getAllAsync<{ id: number }>(
-    `SELECT id FROM purchases WHERE id NOT IN (SELECT DISTINCT purchase_id FROM purchase_items)`
+    `SELECT id FROM purchases
+     WHERE id NOT IN (SELECT DISTINCT purchase_id FROM purchase_items WHERE purchase_id IS NOT NULL)
+       AND id NOT IN (SELECT DISTINCT purchase_id FROM purchase_payments)
+       AND COALESCE(total_amount, 0) = 0`
   );
   for (const { id } of orphanPurchases) {
     const productIds = await db.getAllAsync<{ product_id: number }>(
@@ -755,6 +988,17 @@ async function cleanupOrphanInvoiceHeaders(db: SQLite.SQLiteDatabase): Promise<v
 
 async function cleanupOrphanChildRows(db: SQLite.SQLiteDatabase): Promise<void> {
   try {
+    const orphanSaleProductIds = await db.getAllAsync<{ product_id: number }>(
+      `SELECT DISTINCT product_id FROM inventory_movements
+       WHERE reference_type = 'sale'
+         AND reference_id NOT IN (SELECT id FROM sales)`
+    );
+    const orphanPurchaseProductIds = await db.getAllAsync<{ product_id: number }>(
+      `SELECT DISTINCT product_id FROM inventory_movements
+       WHERE reference_type = 'purchase'
+         AND reference_id NOT IN (SELECT id FROM purchases)`
+    );
+
     const statements = [
     `DELETE FROM sale_items WHERE sale_id NOT IN (SELECT id FROM sales)`,
     `DELETE FROM sale_payments WHERE sale_id NOT IN (SELECT id FROM sales)`,
@@ -771,6 +1015,14 @@ async function cleanupOrphanChildRows(db: SQLite.SQLiteDatabase): Promise<void> 
     }
   }
 
+    const affectedProductIds = new Set<number>();
+    for (const { product_id } of [...orphanSaleProductIds, ...orphanPurchaseProductIds]) {
+      affectedProductIds.add(product_id);
+    }
+    for (const productId of affectedProductIds) {
+      await recomputeProductStock(db, productId);
+    }
+
     await repairSaleItemUnitCosts(db);
     await cleanupOrphanInvoiceHeaders(db);
   } catch {
@@ -781,14 +1033,114 @@ async function cleanupOrphanChildRows(db: SQLite.SQLiteDatabase): Promise<void> 
 /** Fix stale sale costs and remove invoice headers left behind by old deletes. */
 export async function repairFinancialDataIntegrity(
   db?: SQLite.SQLiteDatabase,
-  options?: { force?: boolean }
+  options?: { force?: boolean; rebuildLedger?: boolean }
 ): Promise<void> {
   if (financialIntegrityRepaired && !options?.force) return;
   const database = db ?? (await getDatabase());
   await cleanupOrphanTransactions(database);
   await repairSaleItemUnitCosts(database);
   await cleanupOrphanInvoiceHeaders(database);
+  await reconcileInvoicePayments(database);
+  await reconcileAccountBalances(database);
+  const shouldRebuildLedger = options?.rebuildLedger ?? false;
+  if (shouldRebuildLedger) {
+    try {
+      const { rebuildGeneralLedger } = await import('../services/ledger');
+      await rebuildGeneralLedger(database);
+    } catch {
+      // Ledger tables may not exist on very old schemas during partial init.
+    }
+  }
   financialIntegrityRepaired = true;
+}
+
+/** Expected cash/bank balance from ledger rows (opening may or may not be a transaction). */
+export function expectedAccountBalanceFromLedger(
+  openingBalance: number,
+  transactionTotal: number,
+  hasOpeningTransaction: boolean
+): number {
+  return roundMoney(hasOpeningTransaction ? transactionTotal : openingBalance + transactionTotal);
+}
+
+/** Recompute each account balance from its transaction ledger. */
+async function reconcileAccountBalances(db: SQLite.SQLiteDatabase): Promise<void> {
+  const accounts = await db.getAllAsync<{ id: number; opening_balance: number; current_balance: number }>(
+    'SELECT id, opening_balance, current_balance FROM accounts'
+  );
+  for (const account of accounts) {
+    const row = await db.getFirstAsync<{ total: number }>(
+      'SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE account_id = ?',
+      [account.id]
+    );
+    const openingTx = await db.getFirstAsync<{ id: number }>(
+      `SELECT id FROM transactions WHERE account_id = ? AND type = 'opening' LIMIT 1`,
+      [account.id]
+    );
+    const expected = expectedAccountBalanceFromLedger(
+      account.opening_balance,
+      row?.total ?? 0,
+      !!openingTx
+    );
+    if (Math.abs(expected - roundMoney(account.current_balance)) > 0.009) {
+      await db.runAsync('UPDATE accounts SET current_balance = ? WHERE id = ?', [expected, account.id]);
+    }
+  }
+}
+
+/** Sync invoice paid_amount and status from payment sub-ledgers. */
+async function reconcileInvoicePayments(db: SQLite.SQLiteDatabase): Promise<void> {
+  const sales = await db.getAllAsync<{
+    id: number;
+    total_amount: number;
+    paid_amount: number;
+    status: string;
+  }>('SELECT id, total_amount, paid_amount, status FROM sales');
+
+  for (const sale of sales) {
+    const sumRow = await db.getFirstAsync<{ total: number }>(
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM sale_payments WHERE sale_id = ?',
+      [sale.id]
+    );
+    const actualPaid = roundMoney(sumRow?.total ?? 0);
+    const status = getPaymentStatus(sale.total_amount, actualPaid);
+    if (
+      Math.abs(actualPaid - roundMoney(sale.paid_amount)) > 0.009 ||
+      status !== sale.status
+    ) {
+      await db.runAsync('UPDATE sales SET paid_amount = ?, status = ? WHERE id = ?', [
+        actualPaid,
+        status,
+        sale.id,
+      ]);
+    }
+  }
+
+  const purchases = await db.getAllAsync<{
+    id: number;
+    total_amount: number;
+    paid_amount: number;
+    status: string;
+  }>('SELECT id, total_amount, paid_amount, status FROM purchases');
+
+  for (const purchase of purchases) {
+    const sumRow = await db.getFirstAsync<{ total: number }>(
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_payments WHERE purchase_id = ?',
+      [purchase.id]
+    );
+    const actualPaid = roundMoney(sumRow?.total ?? 0);
+    const status = getPaymentStatus(purchase.total_amount, actualPaid);
+    if (
+      Math.abs(actualPaid - roundMoney(purchase.paid_amount)) > 0.009 ||
+      status !== purchase.status
+    ) {
+      await db.runAsync('UPDATE purchases SET paid_amount = ?, status = ? WHERE id = ?', [
+        actualPaid,
+        status,
+        purchase.id,
+      ]);
+    }
+  }
 }
 
 async function cleanupOrphanTransactions(db: SQLite.SQLiteDatabase): Promise<void> {
@@ -873,6 +1225,7 @@ async function verifySchema(db: SQLite.SQLiteDatabase): Promise<boolean> {
     await db.getFirstAsync('SELECT name FROM product_categories LIMIT 1');
     await db.getFirstAsync('SELECT name FROM expense_categories LIMIT 1');
     await db.getFirstAsync('SELECT name FROM other_income_categories LIMIT 1');
+    await db.getFirstAsync('SELECT id FROM journal_entries LIMIT 1');
     return true;
   } catch {
     return false;
@@ -883,6 +1236,9 @@ async function rebuildSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   // foreign_keys cannot change inside a transaction, so toggle it outside.
   await db.execAsync('PRAGMA foreign_keys = OFF;');
   await db.execAsync(`
+    DROP TABLE IF EXISTS journal_lines;
+    DROP TABLE IF EXISTS journal_entries;
+    DROP TABLE IF EXISTS ledger_accounts;
     DROP TABLE IF EXISTS attachments;
     DROP TABLE IF EXISTS sale_payments;
     DROP TABLE IF EXISTS sale_items;
@@ -1125,6 +1481,44 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       value TEXT NOT NULL
     );
 
+    CREATE TABLE ledger_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      account_type TEXT NOT NULL,
+      system_key TEXT UNIQUE,
+      cash_account_id INTEGER,
+      expense_category TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (cash_account_id) REFERENCES accounts(id)
+    );
+
+    CREATE TABLE journal_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entry_date TEXT NOT NULL,
+      description TEXT NOT NULL,
+      reference_type TEXT,
+      reference_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE journal_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      journal_entry_id INTEGER NOT NULL,
+      ledger_account_id INTEGER NOT NULL,
+      party_id INTEGER,
+      debit REAL NOT NULL DEFAULT 0,
+      credit REAL NOT NULL DEFAULT 0,
+      FOREIGN KEY (journal_entry_id) REFERENCES journal_entries(id) ON DELETE CASCADE,
+      FOREIGN KEY (ledger_account_id) REFERENCES ledger_accounts(id),
+      FOREIGN KEY (party_id) REFERENCES parties(id)
+    );
+
+    CREATE UNIQUE INDEX idx_ledger_accounts_cash ON ledger_accounts(cash_account_id)
+      WHERE cash_account_id IS NOT NULL;
+    CREATE INDEX idx_journal_entries_date ON journal_entries(entry_date);
+    CREATE INDEX idx_journal_lines_party ON journal_lines(party_id);
+    CREATE INDEX idx_journal_lines_account ON journal_lines(ledger_account_id);
+
     CREATE UNIQUE INDEX idx_products_name_visible_unique
       ON products(name COLLATE NOCASE) WHERE COALESCE(is_hidden, 0) = 0;
     CREATE INDEX idx_sales_invoice_no ON sales(invoice_no);
@@ -1216,6 +1610,9 @@ export async function recordTransaction(
   }
 
   const amount = roundMoney(params.amount);
+  if (!Number.isFinite(amount) || Math.abs(amount) < 0.009) {
+    throw new Error('Transaction amount must be non-zero');
+  }
   const result = await db.runAsync(
     `INSERT INTO transactions (account_id, type, amount, reference_type, reference_id, payment_id, description, date)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,

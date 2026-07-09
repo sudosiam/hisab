@@ -48,8 +48,8 @@ export default function LoansScreen() {
           marginBottom: spacing.lg,
           alignItems: 'center',
         },
-        heroLabel: { ...typography.section, color: colors.textMuted, textTransform: 'uppercase' },
-        heroValue: { ...typography.display, color: colors.primary, marginTop: spacing.sm },
+        heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
+        heroValue: { ...typography.display, color: colors.text, marginTop: spacing.sm },
         loanCard: {
           ...cardSurface(colors, isDark),
           padding: spacing.md,
@@ -258,23 +258,18 @@ export default function LoansScreen() {
             onChangeText={setLenderName}
             placeholder="Bank name, friend, NBFC..."
           />
-          <FormInput
-            label="Principal Amount (₹)"
-            value={principalAmount}
-            onChangeText={setPrincipalAmount}
-            keyboardType="decimal-pad"
-          />
+          <FormInput label="Principal Amount (₹)" value={principalAmount} onChangeText={setPrincipalAmount} money />
           <FormInput
             label="Outstanding Amount (₹)"
             value={outstandingAmount}
             onChangeText={setOutstandingAmount}
-            keyboardType="decimal-pad"
+            money
           />
           <FormInput
             label="Interest Rate (%)"
             value={interestRate}
             onChangeText={setInterestRate}
-            keyboardType="decimal-pad"
+            qty
             placeholder="Optional"
           />
           <DatePickerField

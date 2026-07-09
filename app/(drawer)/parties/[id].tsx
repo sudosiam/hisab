@@ -19,6 +19,7 @@ import {
 } from '../../../src/components/ui';
 import { StatusBadge } from '../../../src/components/StatusBadge';
 import { StatCard } from '../../../src/components/StatCard';
+import { LedgerTable } from '../../../src/components/LedgerTable';
 import {
   deleteParty,
   getPartyHistory,
@@ -26,8 +27,9 @@ import {
   getPartySummary,
   updateParty,
 } from '../../../src/services/parties';
-import { formatSqliteError } from '../../../src/db/database';
+import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { formatCurrency } from '../../../src/utils/format';
+import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { spacing, radius, typography } from '../../../src/constants/theme';
@@ -183,9 +185,7 @@ export default function PartyDetailScreen() {
           alignItems: 'center',
           paddingHorizontal: spacing.md,
           paddingVertical: spacing.sm,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.borderLight,
-          backgroundColor: colors.navActive,
+          marginBottom: spacing.xs,
         },
         sectionTitle: {
           fontSize: 12,
@@ -357,6 +357,18 @@ export default function PartyDetailScreen() {
   useLayoutEffect(() => {
     navigation.setOptions({ title: summary?.party.name ?? 'Party Details' });
   }, [navigation, summary?.party.name]);
+
+  const isEditDirty = useMemo(() => {
+    if (!showEdit || !summary) return false;
+    const party = summary.party;
+    return (
+      name.trim() !== party.name ||
+      type !== party.type ||
+      (phone.trim() || '') !== (party.phone ?? '') ||
+      (notes.trim() || '') !== (party.notes ?? '')
+    );
+  }, [showEdit, summary, name, type, phone, notes]);
+  useUnsavedChangesGuard(isEditDirty);
 
   const handleSave = async () => {
     if (saving) return;
@@ -603,48 +615,16 @@ export default function PartyDetailScreen() {
       </View>
 
       {tab === 'statement' ? (
-        <View style={localStyles.sectionCard}>
+        <>
           <View style={localStyles.sectionHeader}>
             <Text style={localStyles.sectionTitle}>Account Statement</Text>
             <Text style={localStyles.sectionCount}>{statement.length} entries</Text>
           </View>
-          {statement.length === 0 ? (
-            <View style={localStyles.emptyBox}>
-              <Ionicons name="document-text-outline" size={32} color={colors.textMuted} />
-              <Text style={localStyles.emptyText}>No transactions yet for this party.</Text>
-            </View>
-          ) : (
-            statement.map((line, index) => (
-              <View
-                key={line.id}
-                style={[localStyles.stmtRow, index === statement.length - 1 && localStyles.stmtRowLast]}
-              >
-                <View style={localStyles.stmtTop}>
-                  <Text style={localStyles.stmtDesc}>{line.description}</Text>
-                  <Text style={localStyles.stmtDate}>{line.date}</Text>
-                </View>
-                <View style={localStyles.stmtAmounts}>
-                  <View style={localStyles.stmtChip}>
-                    <Text style={localStyles.stmtChipLabel}>Debit</Text>
-                    <Text style={localStyles.stmtChipValue}>
-                      {line.debit > 0 ? formatCurrency(line.debit) : '—'}
-                    </Text>
-                  </View>
-                  <View style={localStyles.stmtChip}>
-                    <Text style={localStyles.stmtChipLabel}>Credit</Text>
-                    <Text style={localStyles.stmtChipValue}>
-                      {line.credit > 0 ? formatCurrency(line.credit) : '—'}
-                    </Text>
-                  </View>
-                  <View style={[localStyles.stmtChip, localStyles.stmtBalChip]}>
-                    <Text style={localStyles.stmtChipLabel}>Balance</Text>
-                    <Text style={localStyles.stmtBalValue}>{formatCurrency(line.balance)}</Text>
-                  </View>
-                </View>
-              </View>
-            ))
-          )}
-        </View>
+          <LedgerTable
+            rows={statement}
+            emptyText="No transactions yet for this party."
+          />
+        </>
       ) : (
         <View style={localStyles.sectionCard}>
           <View style={localStyles.sectionHeader}>

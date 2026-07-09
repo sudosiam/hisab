@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, LayoutChangeEvent } from 'react-native';
 import Svg, { Circle, Line, Polyline } from 'react-native-svg';
 import { useTheme } from '../context/ThemeContext';
-import { formatCurrency } from '../utils/format';
+import { formatCurrencyCompact } from '../utils/format';
 import { spacing, radius } from '../constants/theme';
 
 interface ChartPoint {
@@ -69,9 +69,15 @@ export function GrowthChart({ data, variant, height = 140 }: Props) {
     return (
       <View style={styles.wrap}>
         <View style={styles.yAxis}>
-          <Text style={styles.axisLabel}>{formatCurrency(lineMax)}</Text>
-          <Text style={styles.axisLabel}>{formatCurrency(lineMin + range / 2)}</Text>
-          <Text style={styles.axisLabel}>{formatCurrency(lineMin)}</Text>
+          <Text style={styles.axisLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+            {formatCurrencyCompact(lineMax)}
+          </Text>
+          <Text style={styles.axisLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+            {formatCurrencyCompact(lineMin + range / 2)}
+          </Text>
+          <Text style={styles.axisLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+            {formatCurrencyCompact(lineMin)}
+          </Text>
         </View>
         <View style={styles.plotArea}>
           <View style={[styles.linePlotWrap, { height: plotHeight }]} onLayout={onPlotLayout}>
@@ -124,10 +130,12 @@ export function GrowthChart({ data, variant, height = 140 }: Props) {
   return (
     <View style={styles.wrap}>
       <View style={styles.yAxis}>
-        <Text style={styles.axisLabel}>{formatCurrency(maxPositive)}</Text>
+        <Text style={styles.axisLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+          {formatCurrencyCompact(maxPositive)}
+        </Text>
         <Text style={styles.axisLabel}>₹0</Text>
-        <Text style={styles.axisLabel}>
-          {maxNegative > 0 ? `−${formatCurrency(maxNegative).replace('₹', '')}` : '₹0'}
+        <Text style={styles.axisLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+          {maxNegative > 0 ? formatCurrencyCompact(-maxNegative) : '₹0'}
         </Text>
       </View>
       <View style={styles.plotArea}>
@@ -185,13 +193,14 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], height: num
       gap: spacing.xs,
     },
     yAxis: {
-      width: 72,
+      width: 84,
+      flexShrink: 0,
       justifyContent: 'space-between',
       paddingVertical: spacing.xs,
     },
     axisLabel: {
       fontSize: 9,
-      color: colors.textMuted,
+      color: colors.textSecondary,
       textAlign: 'right',
     },
     plotArea: { flex: 1 },
@@ -233,7 +242,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], height: num
     xLabel: {
       flex: 1,
       fontSize: 8,
-      color: colors.textMuted,
+      color: colors.textSecondary,
       textAlign: 'center',
     },
     empty: {

@@ -3,7 +3,6 @@ import {
   getPaymentStatus,
   recomputeProductStock,
   recordTransaction,
-  repairFinancialDataIntegrity,
   reverseTransactionsByReference,
   updateWeightedAvgCost,
 } from '../db/database';
@@ -11,6 +10,7 @@ import { resolvePurchaseInvoiceNo, syncNextInvoiceSettingAfterUse } from './invo
 import { upsertParty } from './parties';
 import { formatCurrency } from '../utils/format';
 import { addMoney, mulMoney, roundMoney, subMoney } from '../utils/money';
+import { resolvePeriodRange } from '../utils/period';
 import type {
   PaymentInput,
   Purchase,
@@ -59,24 +59,34 @@ async function assertActivePaymentAccount(
 
 export async function getPurchases(
   filter?: 'all' | 'paid' | 'unpaid',
-  options?: { limit?: number; offset?: number }
+  options?: { limit?: number; offset?: number; periodKey?: string }
 ): Promise<Purchase[]> {
   const db = await getDatabase();
-  const page = options?.limit ? ' LIMIT ? OFFSET ?' : '';
-  const params = options?.limit ? [options.limit, options.offset ?? 0] : [];
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (options?.periodKey) {
+    const { start, end } = await resolvePeriodRange(options.periodKey);
+    conditions.push('date >= ? AND date <= ?');
+    params.push(start, end);
+  }
+
   if (filter === 'paid') {
-    return db.getAllAsync<Purchase>(
-      `SELECT * FROM purchases WHERE status = 'paid' ORDER BY date DESC, id DESC${page}`,
-      params
-    );
+    conditions.push("status = 'paid'");
+  } else if (filter === 'unpaid') {
+    conditions.push("status IN ('unpaid', 'partial')");
   }
-  if (filter === 'unpaid') {
-    return db.getAllAsync<Purchase>(
-      `SELECT * FROM purchases WHERE status IN ('unpaid', 'partial') ORDER BY date DESC, id DESC${page}`,
-      params
-    );
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const page = options?.limit ? ' LIMIT ? OFFSET ?' : '';
+  if (options?.limit) {
+    params.push(options.limit, options.offset ?? 0);
   }
-  return db.getAllAsync<Purchase>(`SELECT * FROM purchases ORDER BY date DESC, id DESC${page}`, params);
+
+  return db.getAllAsync<Purchase>(
+    `SELECT * FROM purchases ${where} ORDER BY date DESC, id DESC${page}`,
+    params
+  );
 }
 
 export async function getPurchaseById(id: number): Promise<Purchase | null> {
@@ -235,9 +245,10 @@ export async function createPurchase(params: {
   });
 
   try {
-    await repairFinancialDataIntegrity(undefined, { force: true });
+    const { scheduleGeneralLedgerRefresh } = await import('./ledger');
+    scheduleGeneralLedgerRefresh();
   } catch {
-    // Purchase is saved; repair is best-effort housekeeping.
+    // Purchase is saved; ledger refresh is best-effort housekeeping.
   }
 
   try {
@@ -252,6 +263,87 @@ export async function createPurchase(params: {
   return purchaseId;
 }
 
+async function replacePurchaseItems(
+  db: Awaited<ReturnType<typeof getDatabase>>,
+  purchaseId: number,
+  invoiceNo: string,
+  items: PurchaseItemInput[],
+  discount: number
+): Promise<{ subtotal: number; totalAmount: number }> {
+  validatePurchaseItems(items);
+
+  const oldItems = await db.getAllAsync<{ product_id: number }>(
+    'SELECT product_id FROM purchase_items WHERE purchase_id = ?',
+    [purchaseId]
+  );
+  const affectedProducts = new Set([
+    ...oldItems.map((row) => row.product_id),
+    ...items.map((item) => item.product_id),
+  ]);
+
+  await db.runAsync(
+    `DELETE FROM inventory_movements WHERE reference_type = 'purchase' AND reference_id = ?`,
+    [purchaseId]
+  );
+  await db.runAsync('DELETE FROM purchase_items WHERE purchase_id = ?', [purchaseId]);
+
+  for (const productId of affectedProducts) {
+    const { currentQty } = await recomputeProductStock(db, productId);
+    if (currentQty < -0.0001) {
+      const product = await db.getFirstAsync<{ name: string }>(
+        'SELECT name FROM products WHERE id = ?',
+        [productId]
+      );
+      throw new Error(
+        `Cannot update: stock for ${product?.name ?? 'an item'} would go negative (already sold)`
+      );
+    }
+  }
+
+  let subtotal = 0;
+  const itemDetails: { product_id: number; qty: number; unit_cost: number; total: number }[] = [];
+
+  for (const item of items) {
+    const total = mulMoney(item.qty, item.unit_cost);
+    subtotal = addMoney(subtotal, total);
+    itemDetails.push({
+      product_id: item.product_id,
+      qty: item.qty,
+      unit_cost: item.unit_cost,
+      total,
+    });
+  }
+
+  const totalAmount = roundMoney(Math.max(0, subMoney(subtotal, discount)));
+  let allocatedTotal = 0;
+  for (let i = 0; i < itemDetails.length; i++) {
+    const item = itemDetails[i];
+    const discountedTotal =
+      i === itemDetails.length - 1
+        ? subMoney(totalAmount, allocatedTotal)
+        : roundMoney((item.total / subtotal) * totalAmount);
+    allocatedTotal = addMoney(allocatedTotal, discountedTotal);
+    item.total = discountedTotal;
+    item.unit_cost = roundUnitCost(discountedTotal / item.qty);
+  }
+
+  for (const item of itemDetails) {
+    await db.runAsync(
+      `INSERT INTO purchase_items (purchase_id, product_id, qty, unit_cost, total)
+       VALUES (?, ?, ?, ?, ?)`,
+      [purchaseId, item.product_id, item.qty, item.unit_cost, item.total]
+    );
+    await updateWeightedAvgCost(db, item.product_id, item.qty, item.unit_cost);
+    await db.runAsync(
+      `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, reference_id, notes)
+       VALUES (?, 'purchase', ?, ?, 'purchase', ?, ?)`,
+      [item.product_id, item.qty, item.unit_cost, purchaseId, `Purchase ${invoiceNo}`]
+    );
+  }
+
+  return { subtotal, totalAmount };
+}
+
 export async function updatePurchase(
   purchaseId: number,
   params: {
@@ -261,6 +353,7 @@ export async function updatePurchase(
     vendor_invoice_no?: string;
     discount_amount: number;
     notes?: string;
+    items?: PurchaseItemInput[];
   }
 ): Promise<void> {
   const db = await getDatabase();
@@ -271,37 +364,48 @@ export async function updatePurchase(
   if (!invoiceNo) throw new Error('Purchase number is required');
 
   const discount = roundMoney(Math.max(0, params.discount_amount));
-  if (discount > purchase.subtotal + 0.01) {
-    throw new Error('Discount cannot exceed subtotal');
-  }
-  // The purchase discount is baked into each line's inventory cost (weighted avg,
-  // COGS, stock valuation) when the purchase is created. Changing it here would
-  // desync those values, so require a delete-and-recreate instead.
   if (Math.abs(discount - roundMoney(purchase.discount_amount ?? 0)) > 0.01) {
     throw new Error(
       'The discount is built into inventory costs and cannot be changed here. Delete this purchase and re-enter it to change the discount.'
     );
   }
-  const totalAmount = roundMoney(Math.max(0, subMoney(purchase.subtotal, discount)));
-  if (totalAmount + 0.01 < purchase.paid_amount) {
-    throw new Error('Discount cannot be greater than amount due after payments');
-  }
 
-  const status = getPaymentStatus(totalAmount, purchase.paid_amount);
   const supplierName = params.supplier_name.trim();
   const vendorInvoiceNo = params.vendor_invoice_no?.trim() || null;
   const invoiceChanged = invoiceNo !== purchase.invoice_no;
 
   await db.withTransactionAsync(async () => {
+    let subtotal = purchase.subtotal;
+    let totalAmount = roundMoney(Math.max(0, subMoney(purchase.subtotal, discount)));
+
+    if (params.items !== undefined) {
+      const replaced = await replacePurchaseItems(db, purchaseId, invoiceNo, params.items, discount);
+      subtotal = replaced.subtotal;
+      totalAmount = replaced.totalAmount;
+      if (discount > subtotal + 0.01) {
+        throw new Error('Discount cannot exceed subtotal');
+      }
+    } else if (discount > subtotal + 0.01) {
+      throw new Error('Discount cannot exceed subtotal');
+    }
+
+    if (totalAmount + 0.01 < purchase.paid_amount) {
+      throw new Error(
+        `New total (${formatCurrency(totalAmount)}) cannot be less than the amount already paid (${formatCurrency(purchase.paid_amount)}). Remove payments first.`
+      );
+    }
+
+    const status = getPaymentStatus(totalAmount, purchase.paid_amount);
     const partyId = await upsertParty(supplierName, 'vendor', db);
     await db.runAsync(
-      `UPDATE purchases SET invoice_no = ?, party_id = ?, supplier_name = ?, vendor_invoice_no = ?, date = ?, discount_amount = ?, total_amount = ?, status = ?, notes = ? WHERE id = ?`,
+      `UPDATE purchases SET invoice_no = ?, party_id = ?, supplier_name = ?, vendor_invoice_no = ?, date = ?, subtotal = ?, discount_amount = ?, total_amount = ?, status = ?, notes = ? WHERE id = ?`,
       [
         invoiceNo,
         partyId,
         supplierName,
         vendorInvoiceNo,
         params.date,
+        subtotal,
         discount,
         totalAmount,
         status,
@@ -320,6 +424,15 @@ export async function updatePurchase(
       );
     }
   });
+
+  if (params.items !== undefined) {
+    try {
+      const { scheduleGeneralLedgerRefresh } = await import('./ledger');
+      scheduleGeneralLedgerRefresh();
+    } catch {
+      // Purchase is updated; ledger refresh is best-effort housekeeping.
+    }
+  }
 
   if (invoiceChanged) {
     try {
@@ -413,8 +526,9 @@ export async function deletePurchase(id: number): Promise<void> {
   });
 
   try {
-    await repairFinancialDataIntegrity(undefined, { force: true });
+    const { scheduleGeneralLedgerRefresh } = await import('./ledger');
+    scheduleGeneralLedgerRefresh();
   } catch {
-    // The purchase was deleted; integrity repair is best-effort housekeeping.
+    // The purchase was deleted; ledger refresh is best-effort housekeeping.
   }
 }

@@ -1,11 +1,13 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
   StyleSheet,
+  Platform,
 } from 'react-native';
+import { NumericKeyboardAccessory, NUMERIC_KEYBOARD_ACCESSORY_ID } from './NumericKeyboardAccessory';
 import { useTheme } from '../context/ThemeContext';
 import { spacing, radius } from '../constants/theme';
 import { cardSurface } from '../constants/shadows';
@@ -70,6 +72,16 @@ export function PaymentSplitForm({
           empty: 'Add payment (leave empty for unpaid/credit)',
         };
 
+  const prevDefaultDateRef = useRef(defaultDate);
+  useEffect(() => {
+    if (!defaultDate) return;
+    const prev = prevDefaultDateRef.current;
+    if (prev && prev !== defaultDate && payments.some((p) => p.date === prev)) {
+      onChange(payments.map((p) => (p.date === prev ? { ...p, date: defaultDate } : p)));
+    }
+    prevDefaultDateRef.current = defaultDate;
+  }, [defaultDate, onChange, payments]);
+
   const addPayment = (prefill?: number) => {
     if (accounts.length === 0) return;
     onChange([
@@ -131,9 +143,12 @@ export function PaymentSplitForm({
             <View style={styles.inputRow}>
               <TextInput
                 style={[styles.input, { flex: 1 }]}
-                placeholder="Amount"
+                placeholder="0.00"
                 placeholderTextColor={colors.textMuted}
                 keyboardType="decimal-pad"
+                inputAccessoryViewID={
+                  Platform.OS === 'ios' ? NUMERIC_KEYBOARD_ACCESSORY_ID : undefined
+                }
                 value={payment.amount}
                 onChangeText={(v) => updatePayment(index, 'amount', v)}
                 accessibilityLabel="Payment amount"
@@ -170,6 +185,7 @@ export function PaymentSplitForm({
           </View>
         ))
       )}
+      <NumericKeyboardAccessory />
     </View>
   );
 }
@@ -197,6 +213,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       borderColor: colors.border,
       borderRadius: radius.md,
       padding: spacing.sm,
+      fontVariant: ['tabular-nums'],
       backgroundColor: colors.inputBg,
       color: colors.text,
       fontSize: 15,

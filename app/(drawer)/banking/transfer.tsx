@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { Alert, TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
   FormInput,
@@ -64,6 +64,8 @@ export default function TransferScreen() {
     };
   }, []);
 
+  const needsMoreAccounts = accounts.length < 2;
+
   const handleSave = async () => {
     if (loading) return;
     const amt = parsePositiveAmount(amount);
@@ -103,6 +105,23 @@ export default function TransferScreen() {
 
   return (
     <FormScreen>
+      {needsMoreAccounts ? (
+        <View
+          style={{
+            marginBottom: spacing.md,
+            padding: spacing.md,
+            borderRadius: radius.md,
+            backgroundColor: colors.surface,
+            borderWidth: 1,
+            borderColor: colors.border,
+          }}
+        >
+          <Text style={{ color: colors.textSecondary, fontSize: 14, lineHeight: 20 }}>
+            Add at least two bank or cash accounts in Banking before you can transfer between them.
+          </Text>
+        </View>
+      ) : null}
+
       <Text style={styles.label}>From Account</Text>
       {accounts.map((a) => (
         <TouchableOpacity
@@ -125,10 +144,15 @@ export default function TransferScreen() {
         </TouchableOpacity>
       ))}
 
-      <FormInput label="Amount" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
+      <FormInput label="Amount" value={amount} onChangeText={setAmount} money />
       <DatePickerField label="Date" value={date} onChange={setDate} />
       <FormInput label="Note (optional)" value={description} onChangeText={setDescription} />
-      <PrimaryButton title="Transfer" onPress={handleSave} loading={loading} />
+      <PrimaryButton
+        title="Transfer"
+        onPress={handleSave}
+        loading={loading}
+        disabled={needsMoreAccounts}
+      />
     </FormScreen>
   );
 }

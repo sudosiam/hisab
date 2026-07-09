@@ -170,7 +170,9 @@ export interface DashboardStats {
   expense: number;
   totalLiquid: number;
   receivable: number;
+  payable: number;
   inventoryValue: number;
+  netWorth: number;
 }
 
 export interface BalanceSheet {
@@ -243,6 +245,12 @@ export interface PartyStatementLine {
   balance: number;
   reference_type: 'sale' | 'purchase' | 'payment';
   reference_id: number;
+}
+
+export interface PartyStatementResult {
+  openingBalance: number;
+  closingBalance: number;
+  lines: PartyStatementLine[];
 }
 
 export interface PartyHistoryItem {

@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
-  FlatList,
+  ScrollView,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -18,6 +18,7 @@ import {
   useScreenStyles,
 } from '../../../src/components/ui';
 import { StatCard } from '../../../src/components/StatCard';
+import { LedgerTable } from '../../../src/components/LedgerTable';
 import {
   deleteAccount,
   deleteTransaction,
@@ -26,16 +27,17 @@ import {
   updateAccount,
   updateOpeningBalance,
 } from '../../../src/services/banking';
-import { formatAmountInput, formatCurrency, parseAmountInput } from '../../../src/utils/format';
+import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { matchesSearch } from '../../../src/utils/search';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
 import { parseRouteId } from '../../../src/utils/route';
+import { formatAmountInput, formatCurrency, parseAmountInput } from '../../../src/utils/format';
 import { roundMoney } from '../../../src/utils/money';
 import { spacing, radius } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import { FLATLIST_PERF } from '../../../src/constants/listPerf';
+import { transactionsToLedgerRows } from '../../../src/utils/ledgerRows';
 import type { Account, Transaction } from '../../../src/types';
 
 function roundTwo(value: number): number {
@@ -73,20 +75,6 @@ export default function AccountDetailScreen() {
           gap: spacing.sm,
           marginVertical: spacing.md,
         },
-        txRow: {
-          ...cardSurface(colors, isDark),
-          flexDirection: 'row',
-          alignItems: 'center',
-          padding: spacing.md,
-          marginHorizontal: spacing.md,
-          marginBottom: spacing.sm,
-        },
-        txDesc: { fontWeight: '600', fontSize: 14, color: colors.text },
-        txMeta: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
-        txAmount: { fontWeight: '700', color: colors.success, marginRight: spacing.sm },
-        neg: { color: colors.danger },
-        deleteBtn: { padding: spacing.sm },
-        deleteText: { color: colors.danger, fontWeight: '700', fontSize: 12 },
         actions: {
           flexDirection: 'row',
           paddingHorizontal: spacing.md,
@@ -113,7 +101,7 @@ export default function AccountDetailScreen() {
           borderWidth: 1,
           borderColor: colors.danger,
         },
-        actionText: { color: colors.onPrimary, fontWeight: '700', fontSize: 13 },
+        actionText: { color: colors.text, fontWeight: '700', fontSize: 13 },
         actionTextAlt: { color: colors.danger, fontWeight: '700', fontSize: 13 },
         chip: {
           padding: spacing.sm,
@@ -167,6 +155,17 @@ export default function AccountDetailScreen() {
     [transactions, search]
   );
 
+  const ledgerRows = useMemo(
+    () => transactionsToLedgerRows(filteredTransactions),
+    [filteredTransactions]
+  );
+
+  const transactionById = useMemo(() => {
+    const map = new Map<string, Transaction>();
+    for (const tx of transactions) map.set(String(tx.id), tx);
+    return map;
+  }, [transactions]);
+
   const fillForm = (a: Account) => {
     setName(a.name);
     setType(a.type);
@@ -206,6 +205,18 @@ export default function AccountDetailScreen() {
       hasLoadedRef.current = true;
     });
   }, [load]));
+
+  const isEditDirty = useMemo(() => {
+    if (!editing || !account) return false;
+    const opening = parseAmountInput(openingBalance);
+    return (
+      name.trim() !== account.name ||
+      type !== account.type ||
+      isExcluded !== !!account.is_excluded ||
+      roundTwo(opening) !== roundTwo(account.opening_balance ?? 0)
+    );
+  }, [editing, account, name, type, isExcluded, openingBalance]);
+  useUnsavedChangesGuard(isEditDirty);
 
   const handleSaveEdit = async () => {
     if (!account || saving) return;
@@ -316,6 +327,12 @@ export default function AccountDetailScreen() {
     );
   };
 
+  const handleDeleteRow = (rowId: string) => {
+    const tx = transactionById.get(rowId);
+    if (!tx) return;
+    handleDelete(tx);
+  };
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -379,7 +396,7 @@ export default function AccountDetailScreen() {
               label="Opening Balance (₹)"
               value={openingBalance}
               onChangeText={setOpeningBalance}
-              keyboardType="decimal-pad"
+              money
             />
             <PrimaryButton title="Save Changes" onPress={handleSaveEdit} loading={saving} />
           </>
@@ -452,7 +469,7 @@ export default function AccountDetailScreen() {
         <PrimaryButton title="Delete Account" onPress={handleDeleteAccount} variant="danger" />
       </View>
 
-      <SectionHeader title="Transaction History" />
+      <SectionHeader title="Account Ledger" />
 
       <SearchField
         value={search}
@@ -463,38 +480,23 @@ export default function AccountDetailScreen() {
   );
 
   return (
-    <View style={styles.container}>
-      <FlatList
-        data={filteredTransactions}
-        keyExtractor={(item) => String(item.id)}
-        ListHeaderComponent={listHeader}
-        contentContainerStyle={{ paddingBottom: spacing.xl }}
-        {...FLATLIST_PERF}
-        ListEmptyComponent={
-          <Text style={styles.empty}>
-            {search.trim() ? 'No transactions match your search.' : 'No transactions for this account'}
-          </Text>
-        }
-        renderItem={({ item }) => (
-          <View style={localStyles.txRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={localStyles.txDesc}>{item.description}</Text>
-              <Text style={localStyles.txMeta}>{item.date} · {item.type}</Text>
-            </View>
-            <Text style={[localStyles.txAmount, item.amount < 0 && localStyles.neg]}>
-              {item.amount >= 0 ? '+' : ''}{formatCurrency(item.amount)}
-            </Text>
-            <TouchableOpacity
-              style={localStyles.deleteBtn}
-              onPress={() => handleDelete(item)}
-              accessibilityRole="button"
-              accessibilityLabel={`Delete transaction ${item.description}`}
-            >
-              <Text style={localStyles.deleteText}>Delete</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      />
-    </View>
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: spacing.xl }}>
+      {listHeader}
+
+      <Text style={{ marginHorizontal: spacing.md, marginBottom: spacing.xs, fontSize: 12, color: colors.textSecondary }}>
+        Tap a row to delete a transaction.
+      </Text>
+
+      <View style={{ paddingHorizontal: spacing.md }}>
+        <LedgerTable
+          rows={ledgerRows}
+          emptyText={
+            search.trim() ? 'No transactions match your search.' : 'No transactions for this account'
+          }
+          onRowPress={(row) => handleDeleteRow(row.id)}
+          onRowLongPress={(row) => handleDeleteRow(row.id)}
+        />
+      </View>
+    </ScrollView>
   );
 }

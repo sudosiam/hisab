@@ -132,11 +132,15 @@ export default function NewExpenseScreen() {
 
   const handleSave = async () => {
     if (loading) return;
-    const amt = parsePositiveAmount(amount);
-    if (!category.trim() || !description.trim()) {
-      Alert.alert('Missing details', 'Category, description, amount, and account are required');
+    if (!category.trim()) {
+      Alert.alert('Missing category', 'Choose an expense category.');
       return;
     }
+    if (!description.trim()) {
+      Alert.alert('Missing description', 'Enter what this expense was for.');
+      return;
+    }
+    const amt = parsePositiveAmount(amount);
     if (amt === null) {
       Alert.alert('Error', 'Enter an amount greater than zero');
       return;
@@ -146,7 +150,9 @@ export default function NewExpenseScreen() {
       return;
     }
     if (!accountId) {
-      Alert.alert('Error', 'Select a bank/cash account');
+      Alert.alert('Error', accounts.length === 0
+        ? 'Add a bank or cash account in Banking first.'
+        : 'Select a bank/cash account');
       return;
     }
     setLoading(true);
@@ -176,8 +182,13 @@ export default function NewExpenseScreen() {
       <SectionHeader title="New Expense" />
       <CategoryPicker value={category} onChange={setCategory} source={expenseCategorySource} />
       <FormInput label="Description" value={description} onChangeText={setDescription} />
-      <FormInput label="Amount (₹)" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
+      <FormInput label="Amount (₹)" value={amount} onChangeText={setAmount} money />
       <DatePickerField label="Date" value={date} onChange={setDate} />
+      {accounts.length === 0 ? (
+        <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: spacing.sm }}>
+          Add a bank or cash account in Banking before recording expenses.
+        </Text>
+      ) : null}
       <AccountPicker accounts={accounts} value={accountId} onChange={setAccountId} />
 
       <View style={[styles.row, { marginVertical: spacing.sm }]}>
@@ -214,7 +225,12 @@ export default function NewExpenseScreen() {
         </View>
       ) : null}
 
-      <PrimaryButton title="Save Expense" onPress={handleSave} loading={loading} />
+      <PrimaryButton
+        title="Save Expense"
+        onPress={handleSave}
+        loading={loading}
+        disabled={accounts.length === 0}
+      />
     </FormScreen>
   );
 }

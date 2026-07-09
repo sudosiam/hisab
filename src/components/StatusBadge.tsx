@@ -21,8 +21,7 @@ export function StatusBadge({ status }: Props) {
           : colors.textSecondary;
 
   return (
-    <View style={[styles.badge, { backgroundColor: color + '18', borderColor: color + '33' }]}>
-      <View style={[styles.dot, { backgroundColor: color }]} />
+    <View style={[styles.badge, { borderColor: color + '44' }]}>
       <Text style={[styles.text, { color }]}>{getPaymentStatusLabel(status)}</Text>
     </View>
   );
@@ -30,23 +29,16 @@ export function StatusBadge({ status }: Props) {
 
 const styles = StyleSheet.create({
   badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: radius.full,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
     alignSelf: 'flex-start',
     borderWidth: 1,
-    gap: 5,
-  },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: radius.full,
   },
   text: {
     fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.2,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
 });

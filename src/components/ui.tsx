@@ -12,12 +12,16 @@ import {
   ViewStyle,
   TextInputProps,
 } from 'react-native';
+import { NumericKeyboardAccessory, NUMERIC_KEYBOARD_ACCESSORY_ID } from './NumericKeyboardAccessory';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import type { ThemeColors } from '../constants/theme';
 import { spacing, radius, typography } from '../constants/theme';
-import { cardSurface, fabShadow, primaryShadow } from '../constants/shadows';
+import { cardSurface, fabShadow } from '../constants/shadows';
+import { formatCurrency } from '../utils/format';
+import { MoneyText } from './MoneyText';
+import type { DashboardStats } from '../types';
 
 export { DatePickerField } from './DatePickerField';
 
@@ -36,7 +40,7 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
     section: { marginBottom: spacing.lg },
     sectionTitle: {
       ...typography.section,
-      color: colors.textMuted,
+      color: colors.textSecondary,
       textTransform: 'uppercase',
       marginBottom: spacing.sm,
     },
@@ -47,10 +51,21 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
     },
     cardTitle: { ...typography.bodyMedium, color: colors.text, fontWeight: '600' },
     cardSub: { fontSize: 13, color: colors.textSecondary, marginTop: 3, lineHeight: 18 },
-    row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    row: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      gap: spacing.sm,
+    },
     label: { ...typography.label, color: colors.textSecondary, marginBottom: spacing.xs },
     value: { ...typography.bodyMedium, color: colors.text },
-    amount: { fontSize: 17, fontWeight: '700', color: colors.primary, letterSpacing: -0.3 },
+    amount: {
+      fontSize: 17,
+      fontWeight: '600',
+      color: colors.text,
+      letterSpacing: -0.3,
+      fontVariant: ['tabular-nums'],
+    },
     empty: {
       textAlign: 'center',
       color: colors.textSecondary,
@@ -69,15 +84,15 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
       right: spacing.lg,
       backgroundColor: colors.primary,
       paddingHorizontal: spacing.lg,
-      paddingVertical: 15,
-      minHeight: 52,
-      minWidth: 120,
-      borderRadius: radius.xl,
+      paddingVertical: 14,
+      minHeight: 48,
+      minWidth: 112,
+      borderRadius: radius.md,
       alignItems: 'center',
       justifyContent: 'center',
       ...fabShadow(isDark),
     },
-    fabText: { color: colors.onPrimary, fontWeight: '700', fontSize: 15, letterSpacing: 0.2 },
+    fabText: { color: colors.onPrimary, fontWeight: '600', fontSize: 14 },
     dangerBtn: {
       marginTop: spacing.md,
       padding: spacing.md,
@@ -165,12 +180,11 @@ function createButtonStyles(colors: ThemeColors, isDark: boolean) {
   return StyleSheet.create({
     primary: {
       backgroundColor: colors.primary,
-      paddingVertical: 15,
+      paddingVertical: 14,
       paddingHorizontal: spacing.md,
       borderRadius: radius.md,
       alignItems: 'center',
       marginVertical: spacing.xs,
-      ...primaryShadow(isDark),
     },
     secondary: {
       backgroundColor: colors.surface,
@@ -194,10 +208,144 @@ function createButtonStyles(colors: ThemeColors, isDark: boolean) {
       borderColor: colors.danger + '44',
     },
     disabled: { opacity: 0.5 },
-    primaryText: { color: colors.onPrimary, fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
-    secondaryText: { color: colors.primary, fontSize: 15, fontWeight: '600' },
-    dangerText: { color: colors.danger, fontSize: 15, fontWeight: '700' },
+    primaryText: { color: colors.onPrimary, fontSize: 15, fontWeight: '600' },
+    secondaryText: { color: colors.primary, fontSize: 15, fontWeight: '500' },
+    dangerText: { color: colors.danger, fontSize: 15, fontWeight: '600' },
   });
+}
+
+export function FinanceHero({
+  stats,
+  onNetWorthPress,
+}: {
+  stats: DashboardStats;
+  onNetWorthPress?: () => void;
+}) {
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        hero: {
+          ...cardSurface(colors, isDark),
+          padding: spacing.md,
+          marginBottom: spacing.md,
+        },
+        heroTop: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: spacing.md,
+          paddingBottom: spacing.md,
+          borderBottomWidth: 1,
+          borderBottomColor: colors.borderLight,
+        },
+        heroBlock: { flex: 1, minWidth: 0 },
+        heroLabel: {
+          ...typography.section,
+          color: colors.textSecondary,
+          textTransform: 'uppercase',
+        },
+        heroValue: {
+          marginTop: spacing.xs,
+          textAlign: 'left',
+        },
+        heroSub: { fontSize: 11, color: colors.textSecondary, marginTop: 4 },
+        chipRow: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          marginTop: spacing.md,
+        },
+        chip: {
+          width: '50%',
+          minWidth: 0,
+          paddingVertical: spacing.sm,
+          paddingRight: spacing.sm,
+        },
+        chipLabel: {
+          fontSize: 11,
+          color: colors.textSecondary,
+          textTransform: 'uppercase',
+          marginBottom: 2,
+        },
+        chipValue: {
+          marginTop: 2,
+        },
+      }),
+    [colors, isDark]
+  );
+
+  const netProfitColor = stats.netProfit >= 0 ? colors.success : colors.danger;
+
+  return (
+    <View style={styles.hero}>
+      <View style={styles.heroTop}>
+        <View style={styles.heroBlock}>
+          <Text style={styles.heroLabel}>Net Profit</Text>
+          <MoneyText
+            amount={stats.netProfit}
+            size="hero"
+            color={netProfitColor}
+            style={styles.heroValue}
+          />
+          <Text style={styles.heroSub} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+            Gross {formatCurrency(stats.grossProfit)}
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={styles.heroBlock}
+          onPress={onNetWorthPress}
+          disabled={!onNetWorthPress}
+          activeOpacity={onNetWorthPress ? 0.75 : 1}
+          accessibilityRole={onNetWorthPress ? 'button' : undefined}
+          accessibilityLabel="View balance sheet"
+        >
+          <Text style={styles.heroLabel}>Net Worth</Text>
+          <MoneyText amount={stats.netWorth} size="hero" style={styles.heroValue} />
+          <Text style={styles.heroSub}>Balance sheet</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.chipRow}>
+        <View style={styles.chip}>
+          <Text style={styles.chipLabel}>Cash & Bank</Text>
+          <MoneyText amount={stats.totalLiquid} size="md" style={styles.chipValue} />
+        </View>
+        <View style={styles.chip}>
+          <Text style={styles.chipLabel}>Receivable</Text>
+          <MoneyText
+            amount={stats.receivable}
+            size="md"
+            color={colors.danger}
+            style={styles.chipValue}
+          />
+        </View>
+        <View style={styles.chip}>
+          <Text style={styles.chipLabel}>Payable</Text>
+          <MoneyText
+            amount={stats.payable}
+            size="md"
+            color={colors.warning}
+            style={styles.chipValue}
+          />
+        </View>
+        <View style={styles.chip}>
+          <Text style={styles.chipLabel}>Inventory</Text>
+          <MoneyText amount={stats.inventoryValue} size="md" style={styles.chipValue} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+export function AmountText({
+  amount,
+  style,
+  color,
+}: {
+  amount: number;
+  style?: import('react-native').TextStyle;
+  color?: string;
+}) {
+  return <MoneyText amount={amount} size="lg" color={color} style={style} />;
 }
 
 interface InputProps extends Omit<TextInputProps, 'style'> {
@@ -205,22 +353,49 @@ interface InputProps extends Omit<TextInputProps, 'style'> {
   value: string;
   onChangeText: (v: string) => void;
   helperText?: string;
+  /** Money field: decimal pad, 0.00 placeholder, tabular digits. */
+  money?: boolean;
+  /** Quantity field: decimal pad, tabular digits (placeholder defaults to 0). */
+  qty?: boolean;
 }
 
-export function FormInput({ label, value, onChangeText, multiline, helperText, editable, ...rest }: InputProps) {
+export function FormInput({
+  label,
+  value,
+  onChangeText,
+  multiline,
+  helperText,
+  editable,
+  money,
+  qty,
+  placeholder,
+  keyboardType,
+  ...rest
+}: InputProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createInputStyles(colors), [colors]);
   const isReadOnly = editable === false;
+  const isNumeric = money || qty;
 
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
-        style={[styles.input, multiline && styles.multiline, isReadOnly && styles.inputDisabled]}
+        style={[
+          styles.input,
+          multiline && styles.multiline,
+          isReadOnly && styles.inputDisabled,
+          isNumeric && styles.moneyInput,
+        ]}
         value={value}
         onChangeText={onChangeText}
         multiline={multiline}
         editable={editable}
+        placeholder={placeholder ?? (money ? '0.00' : qty ? '0' : undefined)}
+        keyboardType={keyboardType ?? (isNumeric ? 'decimal-pad' : undefined)}
+        inputAccessoryViewID={
+          Platform.OS === 'ios' && isNumeric ? NUMERIC_KEYBOARD_ACCESSORY_ID : undefined
+        }
         placeholderTextColor={colors.textMuted}
         accessibilityLabel={rest.accessibilityLabel ?? label}
         {...rest}
@@ -254,6 +429,7 @@ export function FormScreen({
         keyboardShouldPersistTaps="handled"
       >
         {children}
+        <NumericKeyboardAccessory />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -367,6 +543,7 @@ function createInputStyles(colors: ThemeColors) {
     },
     multiline: { minHeight: 96, textAlignVertical: 'top', paddingTop: 13 },
     inputDisabled: { backgroundColor: colors.chip, color: colors.textSecondary },
+    moneyInput: { fontVariant: ['tabular-nums'] },
     helperText: {
       ...typography.label,
       color: colors.textMuted,
@@ -490,9 +667,9 @@ function createChipStyles(colors: ThemeColors) {
   return StyleSheet.create({
     chip: {
       flex: 1,
-      paddingVertical: 10,
+      paddingVertical: 9,
       paddingHorizontal: spacing.sm,
-      borderRadius: radius.full,
+      borderRadius: radius.sm,
       backgroundColor: colors.chip,
       alignItems: 'center',
       borderWidth: 1,
@@ -502,8 +679,8 @@ function createChipStyles(colors: ThemeColors) {
       backgroundColor: colors.chipActive,
       borderColor: colors.chipActive,
     },
-    chipText: { fontSize: 13, color: colors.chipText, fontWeight: '600' },
-    chipTextActive: { color: colors.chipTextActive, fontWeight: '700' },
+    chipText: { fontSize: 13, color: colors.chipText, fontWeight: '500' },
+    chipTextActive: { color: colors.chipTextActive, fontWeight: '600' },
   });
 }
 
@@ -542,7 +719,7 @@ export function SectionHeader({ title }: { title: string }) {
     <Text
       style={{
         ...typography.section,
-        color: colors.textMuted,
+        color: colors.textSecondary,
         textTransform: 'uppercase',
         marginBottom: spacing.sm,
         marginTop: spacing.md,
@@ -625,14 +802,18 @@ export function ListRow({
         style,
       ]}
     >
-      <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 14, color: colors.text, fontWeight: '500' }}>{left}</Text>
+      <View style={{ flex: 1, minWidth: 0, marginRight: spacing.sm }}>
+        <Text style={{ fontSize: 14, color: colors.text, fontWeight: '500' }} numberOfLines={2}>
+          {left}
+        </Text>
         {subtitle ? (
-          <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>{subtitle}</Text>
+          <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }} numberOfLines={1}>
+            {subtitle}
+          </Text>
         ) : null}
       </View>
       {typeof right === 'string' ? (
-        <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text }}>{right}</Text>
+        <MoneyText amount={0} text={right} size="md" />
       ) : (
         right
       )}
@@ -675,23 +856,38 @@ interface ShortcutItem {
   icon: React.ComponentProps<typeof Ionicons>['name'];
 }
 
-const DASHBOARD_SHORTCUTS: ShortcutItem[] = [
+const FINANCE_SHORTCUTS: ShortcutItem[] = [
+  { label: 'P & L', route: '/(drawer)/reports/profit-loss', icon: 'trending-up-outline' },
+  { label: 'Balance Sheet', route: '/(drawer)/balance-sheet', icon: 'scale-outline' },
+  { label: 'Transfer', route: '/(drawer)/banking/transfer', icon: 'swap-horizontal-outline' },
+  { label: 'Banking', route: '/(drawer)/banking', icon: 'wallet-outline' },
+];
+
+const OPS_SHORTCUTS: ShortcutItem[] = [
   { label: 'New Sale', route: '/(drawer)/sales/new', icon: 'cart-outline' },
   { label: 'Purchase', route: '/(drawer)/purchases/new', icon: 'bag-handle-outline' },
   { label: 'Expense', route: '/(drawer)/expense/new', icon: 'receipt-outline' },
-  { label: 'Product', route: '/(drawer)/inventory/new', icon: 'cube-outline' },
+  { label: 'Reports', route: '/(drawer)/reports', icon: 'bar-chart-outline' },
 ];
 
-export function DashboardShortcuts() {
-  const router = useRouter();
-  const { colors, isDark } = useTheme();
-  const styles = useMemo(() => createShortcutStyles(colors, isDark), [colors, isDark]);
-
+function ShortcutRow({
+  title,
+  items,
+  styles,
+  colors,
+  router,
+}: {
+  title: string;
+  items: ShortcutItem[];
+  styles: ReturnType<typeof createShortcutStyles>;
+  colors: ThemeColors;
+  router: ReturnType<typeof useRouter>;
+}) {
   return (
-    <View>
-      <Text style={styles.heading}>Quick Actions</Text>
+    <View style={{ marginBottom: spacing.sm }}>
+      <Text style={styles.heading}>{title}</Text>
       <View style={styles.row}>
-        {DASHBOARD_SHORTCUTS.map((item) => (
+        {items.map((item) => (
           <TouchableOpacity
             key={item.route}
             style={styles.item}
@@ -700,9 +896,7 @@ export function DashboardShortcuts() {
             accessibilityLabel={item.label}
             accessibilityRole="button"
           >
-            <View style={styles.iconWrap}>
-              <Ionicons name={item.icon} size={22} color={colors.primary} />
-            </View>
+            <Ionicons name={item.icon} size={16} color={colors.textSecondary} style={{ marginRight: 8 }} />
             <Text style={styles.itemLabel} numberOfLines={1}>
               {item.label}
             </Text>
@@ -713,38 +907,60 @@ export function DashboardShortcuts() {
   );
 }
 
+export function DashboardShortcuts() {
+  const router = useRouter();
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(() => createShortcutStyles(colors, isDark), [colors, isDark]);
+
+  return (
+    <View>
+      <ShortcutRow
+        title="Finance"
+        items={FINANCE_SHORTCUTS}
+        styles={styles}
+        colors={colors}
+        router={router}
+      />
+      <ShortcutRow
+        title="Operations"
+        items={OPS_SHORTCUTS}
+        styles={styles}
+        colors={colors}
+        router={router}
+      />
+    </View>
+  );
+}
+
 function createShortcutStyles(colors: ThemeColors, isDark: boolean) {
   return StyleSheet.create({
     heading: {
       ...typography.section,
-      color: colors.textMuted,
+      color: colors.textSecondary,
       textTransform: 'uppercase',
-      marginTop: spacing.lg,
+      marginTop: spacing.md,
       marginBottom: spacing.sm,
     },
     row: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
       gap: spacing.sm,
     },
     item: {
-      flex: 1,
+      flexGrow: 1,
+      flexBasis: '47%',
+      flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: 72,
-    },
-    iconWrap: {
-      width: 46,
-      height: 46,
-      borderRadius: radius.md,
-      backgroundColor: colors.navActive,
-      alignItems: 'center',
-      justifyContent: 'center',
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.sm,
+      ...cardSurface(colors, isDark),
+      minHeight: 44,
     },
     itemLabel: {
-      marginTop: 6,
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSecondary,
+      fontSize: 13,
+      fontWeight: '500',
+      color: colors.text,
+      flex: 1,
     },
   });
 }

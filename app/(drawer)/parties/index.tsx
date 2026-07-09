@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
@@ -218,7 +220,8 @@ export default function PartiesScreen() {
       />
 
       {showForm ? (
-        <View style={localStyles.form}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={localStyles.form}>
           <Text style={styles.cardTitle}>New Party</Text>
           <View style={localStyles.typeRow}>
             {(['customer', 'vendor'] as PartyType[]).map((t) => (
@@ -241,6 +244,7 @@ export default function PartiesScreen() {
             <Text style={styles.link}>Cancel</Text>
           </TouchableOpacity>
         </View>
+        </KeyboardAvoidingView>
       ) : null}
 
       {booting && parties.length === 0 ? (

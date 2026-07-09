@@ -8,7 +8,9 @@ import {
 } from '../db/database';
 import { todayISO } from '../utils/date';
 import { resolvePeriodRange } from '../utils/period';
-import { addMoney, roundMoney, subMoney } from '../utils/money';
+import { pickLegacyPaymentMatch } from '../utils/paymentPair';
+import { pickLegacyTransferPair } from '../utils/transferPair';
+import { roundMoney, addMoney, subMoney } from '../utils/money';
 import { getPurchaseById } from './purchases';
 import { getSaleById } from './sales';
 import type { Account, BalanceSheet, Expense, FixedAsset, Transaction } from '../types';
@@ -29,6 +31,11 @@ async function assertActiveAccount(accountId: number, usage: string): Promise<vo
   if (account.is_excluded) {
     throw new Error(`Cannot use an excluded account for ${usage}`);
   }
+}
+
+async function syncGeneralLedgerAfterWrite(): Promise<void> {
+  const { refreshGeneralLedgerAfterWrite } = await import('./ledger');
+  await refreshGeneralLedgerAfterWrite();
 }
 
 export async function getAccounts(): Promise<Account[]> {
@@ -99,6 +106,7 @@ export async function createAccount(params: {
     }
   });
 
+  await syncGeneralLedgerAfterWrite();
   return accountId;
 }
 
@@ -142,6 +150,8 @@ export async function updateOpeningBalance(accountId: number, newOpening: number
       [opening, delta, accountId]
     );
   });
+
+  await syncGeneralLedgerAfterWrite();
 }
 
 export async function updateAccount(
@@ -163,6 +173,11 @@ export async function updateAccount(
     `UPDATE accounts SET name = ?, type = ?, is_excluded = ? WHERE id = ?`,
     [trimmed, params.type, params.is_excluded ? 1 : 0, id]
   );
+  await db.runAsync(
+    `UPDATE ledger_accounts SET name = ? WHERE cash_account_id = ?`,
+    [`${trimmed} (${params.type})`, id]
+  );
+  await syncGeneralLedgerAfterWrite();
 }
 
 export async function deleteAccount(id: number): Promise<void> {
@@ -201,7 +216,9 @@ export async function deleteAccount(id: number): Promise<void> {
   );
   if (purchasePay) throw new Error('Cannot delete: account is used in purchase payments');
 
+  await db.runAsync('DELETE FROM ledger_accounts WHERE cash_account_id = ?', [id]);
   await db.runAsync('DELETE FROM accounts WHERE id = ?', [id]);
+  await syncGeneralLedgerAfterWrite();
 }
 
 export async function getTransactions(accountId?: number): Promise<Transaction[]> {
@@ -308,6 +325,7 @@ export async function createExpense(params: {
     });
   });
 
+  await syncGeneralLedgerAfterWrite();
   return expenseId;
 }
 
@@ -398,6 +416,7 @@ export async function updateExpense(
     });
   });
 
+  await syncGeneralLedgerAfterWrite();
 }
 
 export async function deleteExpense(id: number): Promise<void> {
@@ -415,6 +434,7 @@ export async function deleteExpense(id: number): Promise<void> {
     await db.runAsync('DELETE FROM expenses WHERE id = ?', [id]);
   });
 
+  await syncGeneralLedgerAfterWrite();
 }
 
 export async function getBalanceSheet(): Promise<BalanceSheet> {
@@ -495,6 +515,7 @@ export async function addFixedAsset(params: {
     `INSERT INTO fixed_assets (name, value, notes) VALUES (?, ?, ?)`,
     [params.name.trim(), roundMoney(params.value), params.notes ?? null]
   );
+  await syncGeneralLedgerAfterWrite();
   return result.lastInsertRowId;
 }
 
@@ -513,11 +534,13 @@ export async function updateFixedAsset(
     params.notes ?? null,
     id,
   ]);
+  await syncGeneralLedgerAfterWrite();
 }
 
 export async function deleteFixedAsset(id: number): Promise<void> {
   const db = await getDatabase();
   await db.runAsync('DELETE FROM fixed_assets WHERE id = ?', [id]);
+  await syncGeneralLedgerAfterWrite();
 }
 
 export async function deleteTransaction(id: number): Promise<void> {
@@ -540,9 +563,12 @@ export async function deleteTransaction(id: number): Promise<void> {
             'SELECT id FROM sale_payments WHERE id = ?',
             [tx.payment_id]
           )
-        : await db.getFirstAsync<{ id: number }>(
-            `SELECT id FROM sale_payments WHERE sale_id = ? AND account_id = ? AND amount = ? AND date = ? ORDER BY id DESC LIMIT 1`,
-            [tx.reference_id, tx.account_id, tx.amount, tx.date]
+        : pickLegacyPaymentMatch(
+            await db.getAllAsync<{ id: number }>(
+              `SELECT id FROM sale_payments
+               WHERE sale_id = ? AND account_id = ? AND amount = ? AND date = ?`,
+              [tx.reference_id, tx.account_id, tx.amount, tx.date]
+            )
           );
       if (payment) {
         await db.runAsync('DELETE FROM sale_payments WHERE id = ?', [payment.id]);
@@ -568,9 +594,12 @@ export async function deleteTransaction(id: number): Promise<void> {
             'SELECT id FROM purchase_payments WHERE id = ?',
             [tx.payment_id]
           )
-        : await db.getFirstAsync<{ id: number }>(
-            `SELECT id FROM purchase_payments WHERE purchase_id = ? AND account_id = ? AND amount = ? AND date = ? ORDER BY id DESC LIMIT 1`,
-            [tx.reference_id, tx.account_id, paidAmount, tx.date]
+        : pickLegacyPaymentMatch(
+            await db.getAllAsync<{ id: number }>(
+              `SELECT id FROM purchase_payments
+               WHERE purchase_id = ? AND account_id = ? AND amount = ? AND date = ?`,
+              [tx.reference_id, tx.account_id, paidAmount, tx.date]
+            )
           );
       if (payment) {
         await db.runAsync('DELETE FROM purchase_payments WHERE id = ?', [payment.id]);
@@ -614,9 +643,12 @@ export async function deleteTransaction(id: number): Promise<void> {
               `SELECT * FROM transactions WHERE reference_type = 'transfer' AND reference_id = ? AND id != ?`,
               [tx.reference_id, id]
             )
-          : await db.getFirstAsync<Transaction>(
-              `SELECT * FROM transactions WHERE type = 'transfer' AND date = ? AND amount = ? AND id != ? ORDER BY ABS(id - ?) ASC LIMIT 1`,
-              [tx.date, -tx.amount, id, id]
+          : pickLegacyTransferPair(
+              tx,
+              await db.getAllAsync<Transaction>(
+                `SELECT * FROM transactions WHERE type = 'transfer' AND date = ? AND id != ?`,
+                [tx.date, id]
+              )
             );
       if (pair) {
         await updateAccountBalance(db, pair.account_id, -pair.amount);
@@ -627,6 +659,7 @@ export async function deleteTransaction(id: number): Promise<void> {
     await db.runAsync('DELETE FROM transactions WHERE id = ?', [id]);
   });
 
+  await syncGeneralLedgerAfterWrite();
 }
 
 export async function transferBetweenAccounts(params: {
@@ -687,6 +720,7 @@ export async function transferBetweenAccounts(params: {
     });
   });
 
+  await syncGeneralLedgerAfterWrite();
 }
 
 export async function recordDeposit(params: {
@@ -715,6 +749,7 @@ export async function recordDeposit(params: {
     });
   });
 
+  await syncGeneralLedgerAfterWrite();
 }
 
 export async function recordWithdrawal(params: {
@@ -752,6 +787,7 @@ export async function recordWithdrawal(params: {
     });
   });
 
+  await syncGeneralLedgerAfterWrite();
 }
 
 function advanceByRecurrence(dateStr: string, recurrence: string): string {
@@ -768,6 +804,8 @@ function advanceByRecurrence(dateStr: string, recurrence: string): string {
 }
 
 const LAST_RECURRING_PROCESS_KEY = 'last_recurring_process_date';
+
+const MAX_RECURRING_PER_RUN = 24;
 
 /** Generate due recurring expense entries that have not yet been created. */
 export async function processRecurringExpenses(): Promise<number> {
@@ -791,8 +829,9 @@ export async function processRecurringExpenses(): Promise<number> {
   for (const template of templates) {
     let nextDate = advanceByRecurrence(template.date, template.recurrence ?? 'Monthly');
     const recurrence = template.recurrence ?? 'Monthly';
+    let periods = 0;
 
-    while (nextDate <= today) {
+    while (nextDate <= today && periods < MAX_RECURRING_PER_RUN) {
       const existing = await db.getFirstAsync<{ id: number }>(
         `SELECT id FROM expenses
          WHERE category = ? AND description = ? AND amount = ? AND account_id = ?
@@ -833,9 +872,13 @@ export async function processRecurringExpenses(): Promise<number> {
       }
 
       nextDate = advanceByRecurrence(nextDate, recurrence);
+      periods += 1;
     }
   }
 
   await AsyncStorage.setItem(LAST_RECURRING_PROCESS_KEY, today);
+  if (created > 0) {
+    await syncGeneralLedgerAfterWrite();
+  }
   return created;
 }

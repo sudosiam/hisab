@@ -71,13 +71,13 @@ export default function NewProductScreen() {
       <CategoryPicker value={category} onChange={setCategory} />
       <FormInput label="SKU (optional)" value={sku} onChangeText={setSku} />
       <FormInput label="Unit" value={unit} onChangeText={setUnit} placeholder="pcs, kg, box..." />
-      <FormInput label="Opening Stock Qty" value={openingQty} onChangeText={setOpeningQty} keyboardType="decimal-pad" />
-      <FormInput label="Opening Cost (per unit)" value={openingCost} onChangeText={setOpeningCost} keyboardType="decimal-pad" />
+      <FormInput label="Opening Stock Qty" value={openingQty} onChangeText={setOpeningQty} qty />
+      <FormInput label="Opening Cost (per unit)" value={openingCost} onChangeText={setOpeningCost} money />
       <FormInput
         label="Sell Price (per unit)"
         value={sellPrice}
         onChangeText={setSellPrice}
-        keyboardType="decimal-pad"
+        money
         placeholder="Leave blank for cost + 20%"
       />
       <PrimaryButton title="Save Product" onPress={handleSave} loading={loading} />

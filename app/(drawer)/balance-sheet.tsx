@@ -13,8 +13,11 @@ import { useFocusEffect } from 'expo-router';
 import { ErrorState, SectionHeader, useScreenStyles } from '../../src/components/ui';
 import { getBalanceSheet } from '../../src/services/banking';
 import { formatCurrency } from '../../src/utils/format';
+import { MoneyText, moneyRowStyles } from '../../src/components/MoneyText';
 import { useDatabase } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useReportPdfHeader } from '../../src/hooks/useReportPdfHeader';
+import { shareBalanceSheetPdf } from '../../src/services/reportPdf';
 import { spacing, typography } from '../../src/constants/theme';
 import { cardSurface } from '../../src/constants/shadows';
 import type { BalanceSheet } from '../../src/types';
@@ -37,8 +40,8 @@ export default function BalanceSheetScreen() {
           marginBottom: spacing.lg,
           alignItems: 'center',
         },
-        heroLabel: { ...typography.section, color: colors.textMuted, textTransform: 'uppercase' },
-        heroValue: { ...typography.display, color: colors.primary, marginTop: spacing.sm },
+        heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
+        heroValue: { ...typography.display, color: colors.text, marginTop: spacing.sm },
         section: {
           ...cardSurface(colors, isDark),
           padding: spacing.md,
@@ -60,11 +63,11 @@ export default function BalanceSheetScreen() {
           borderColor: colors.border,
         },
         infoText: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
-        row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: spacing.sm },
-        rowLabel: { fontSize: 14, color: colors.text },
-        rowValue: { fontSize: 14, color: colors.text, fontWeight: '500' },
+        row: { ...moneyRowStyles.row, paddingVertical: spacing.sm },
+        rowLabel: { fontSize: 14, color: colors.text, flex: 1, minWidth: 0, paddingRight: spacing.sm },
+        rowValue: { maxWidth: '52%' },
         bold: { fontWeight: '700' },
-        highlight: { color: colors.primary, fontSize: 17, fontWeight: '700' },
+        highlight: { color: colors.text, fontSize: 17, fontWeight: '600' },
       }),
     [colors, isDark]
   );
@@ -83,6 +86,13 @@ export default function BalanceSheetScreen() {
   }, [refreshKey]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const exportPdf = useCallback(async () => {
+    if (!data) return { success: false, message: 'Report not loaded yet.' };
+    return shareBalanceSheetPdf(data);
+  }, [data]);
+
+  useReportPdfHeader({ disabled: !data || !!error, onExport: exportPdf });
 
   if (error && !data) {
     return <ErrorState message={error} onRetry={load} />;
@@ -122,8 +132,13 @@ export default function BalanceSheetScreen() {
     >
       <View style={localStyles.hero}>
         <Text style={localStyles.heroLabel}>Owner{"'"}s Equity</Text>
-        <Text style={localStyles.heroValue}>{formatCurrency(data.equity)}</Text>
-        <Text style={{ color: colors.textSecondary, marginTop: spacing.sm, fontSize: 13 }}>
+        <MoneyText amount={data.equity} size="hero" style={localStyles.heroValue} />
+        <Text
+          style={{ color: colors.textSecondary, marginTop: spacing.sm, fontSize: 12, textAlign: 'center' }}
+          numberOfLines={2}
+          adjustsFontSizeToFit
+          minimumFontScale={0.8}
+        >
           Assets {formatCurrency(data.assets.total)} − Liabilities {formatCurrency(data.liabilities.total)}
         </Text>
       </View>
@@ -183,10 +198,14 @@ function Row({
 }) {
   return (
     <View style={localStyles.row}>
-      <Text style={[localStyles.rowLabel, bold && localStyles.bold]}>{label}</Text>
-      <Text style={[localStyles.rowValue, bold && localStyles.bold, highlight && localStyles.highlight]}>
-        {formatCurrency(value)}
+      <Text style={[localStyles.rowLabel, bold && localStyles.bold]} numberOfLines={2}>
+        {label}
       </Text>
+      <MoneyText
+        amount={value}
+        size={highlight || bold ? 'lg' : 'md'}
+        style={[localStyles.rowValue, bold && localStyles.bold, highlight && localStyles.highlight]}
+      />
     </View>
   );
 }

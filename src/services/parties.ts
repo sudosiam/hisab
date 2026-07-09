@@ -1,10 +1,16 @@
 import { getDatabase } from '../db/database';
 import { roundMoney } from '../utils/money';
+import {
+  getPartyStatementFromLedger,
+  getPartyStatementInRangeFromLedger,
+  hasGeneralLedger,
+} from './ledger';
 import type * as SQLite from 'expo-sqlite';
 import type {
   Party,
   PartyHistoryItem,
   PartyStatementLine,
+  PartyStatementResult,
   PartySummary,
   PartyType,
   PartyWithSummary,
@@ -113,6 +119,10 @@ export async function getPartySummary(partyId: number): Promise<PartySummary | n
 }
 
 export async function getPartyStatement(partyId: number): Promise<PartyStatementLine[]> {
+  if (await hasGeneralLedger()) {
+    return getPartyStatementFromLedger(partyId);
+  }
+
   const party = await getPartyById(partyId);
   if (!party) return [];
 
@@ -264,6 +274,39 @@ export async function getPartyStatement(partyId: number): Promise<PartyStatement
   });
 }
 
+export async function getPartyStatementInRange(
+  partyId: number,
+  startDate: string,
+  endDate: string
+): Promise<PartyStatementResult> {
+  if (await hasGeneralLedger()) {
+    return getPartyStatementInRangeFromLedger(partyId, startDate, endDate);
+  }
+
+  const party = await getPartyById(partyId);
+  if (!party) {
+    return { openingBalance: 0, closingBalance: 0, lines: [] };
+  }
+
+  const all = await getPartyStatement(partyId);
+  const beforeRange = all.filter((line) => line.date < startDate);
+  const openingBalance = beforeRange.length ? beforeRange[beforeRange.length - 1].balance : 0;
+  const inRange = all.filter((line) => line.date >= startDate && line.date <= endDate);
+
+  let balance = openingBalance;
+  const lines = inRange.map((entry) => {
+    if (party.type === 'customer') {
+      balance = roundMoney(balance + entry.debit - entry.credit);
+    } else {
+      balance = roundMoney(balance + entry.credit - entry.debit);
+    }
+    return { ...entry, balance };
+  });
+
+  const closingBalance = lines.length ? lines[lines.length - 1].balance : openingBalance;
+  return { openingBalance, closingBalance, lines };
+}
+
 export async function getPartyHistory(partyId: number): Promise<PartyHistoryItem[]> {
   const party = await getPartyById(partyId);
   if (!party) return [];
@@ -308,19 +351,7 @@ export async function searchPartyNames(query: string, type: PartyType): Promise<
   const txTable = type === 'customer' ? 'sales' : 'purchases';
 
   if (!q) {
-    return db
-      .getAllAsync<{ name: string }>(
-        `SELECT MIN(name) as name FROM (
-           SELECT name FROM parties WHERE type = ?
-           UNION
-           SELECT ${txColumn} AS name FROM ${txTable}
-           WHERE ${txColumn} IS NOT NULL AND ${txColumn} != ''
-         )
-         GROUP BY name COLLATE NOCASE
-         ORDER BY name ASC LIMIT 20`,
-        [type]
-      )
-      .then((rows) => rows.map((r) => r.name));
+    return listPartyNames(type);
   }
 
   return db
@@ -329,14 +360,35 @@ export async function searchPartyNames(query: string, type: PartyType): Promise<
          SELECT name FROM parties WHERE type = ?
          UNION
          SELECT ${txColumn} AS name FROM ${txTable}
-         WHERE ${txColumn} IS NOT NULL AND ${txColumn} != ''
+         WHERE ${txColumn} IS NOT NULL AND TRIM(${txColumn}) != ''
        )
        WHERE name LIKE ? COLLATE NOCASE
        GROUP BY name COLLATE NOCASE
-       ORDER BY name ASC LIMIT 20`,
+       ORDER BY name ASC LIMIT 50`,
       [type, `%${q}%`]
     )
     .then((rows) => rows.map((r) => r.name));
+}
+
+/** All distinct party names from the ledger and parties table (for pickers). */
+export async function listPartyNames(type: PartyType): Promise<string[]> {
+  await syncPartiesFromTransactions();
+  const db = await getDatabase();
+  const txColumn = type === 'customer' ? 'party_name' : 'supplier_name';
+  const txTable = type === 'customer' ? 'sales' : 'purchases';
+
+  const rows = await db.getAllAsync<{ name: string }>(
+    `SELECT MIN(name) as name FROM (
+       SELECT name FROM parties WHERE type = ?
+       UNION
+       SELECT ${txColumn} AS name FROM ${txTable}
+       WHERE ${txColumn} IS NOT NULL AND TRIM(${txColumn}) != ''
+     )
+     GROUP BY name COLLATE NOCASE
+     ORDER BY name ASC`,
+    [type]
+  );
+  return rows.map((r) => r.name);
 }
 
 export async function upsertParty(
@@ -501,7 +553,9 @@ export async function deleteParty(id: number): Promise<void> {
   const db = await getDatabase();
   if (party.type === 'customer') {
     const used = await db.getFirstAsync<{ count: number }>(
-      'SELECT COUNT(*) as count FROM sales WHERE party_id = ? OR party_name = ? COLLATE NOCASE',
+      `SELECT COUNT(*) as count FROM sales s
+       WHERE (s.party_id = ? OR (s.party_id IS NULL AND s.party_name = ? COLLATE NOCASE))
+         AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id)`,
       [id, party.name]
     );
     if (used && used.count > 0) {
@@ -509,7 +563,9 @@ export async function deleteParty(id: number): Promise<void> {
     }
   } else {
     const used = await db.getFirstAsync<{ count: number }>(
-      'SELECT COUNT(*) as count FROM purchases WHERE party_id = ? OR supplier_name = ? COLLATE NOCASE',
+      `SELECT COUNT(*) as count FROM purchases p
+       WHERE (p.party_id = ? OR (p.party_id IS NULL AND p.supplier_name = ? COLLATE NOCASE))
+         AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = p.id)`,
       [id, party.name]
     );
     if (used && used.count > 0) {

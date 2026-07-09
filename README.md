@@ -2,7 +2,7 @@
 
 Android business management app built with **Expo SDK 54** and **SQLite**. All data stays on your device.
 
-**Current version:** `7.0.0` (Android `versionCode` 17)
+**Current version:** `7.1.0` (Android `versionCode` 18)
 
 ## What's in Hisab
 

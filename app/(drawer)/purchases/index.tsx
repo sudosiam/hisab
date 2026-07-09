@@ -8,6 +8,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
+import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getPurchases } from '../../../src/services/purchases';
 import { StatusBadge } from '../../../src/components/StatusBadge';
 import {
@@ -18,11 +19,15 @@ import {
   useScreenStyles,
 } from '../../../src/components/ui';
 import { formatCurrency } from '../../../src/utils/format';
+import { getPeriodTotalLabel } from '../../../src/utils/date';
 import { matchesSearch } from '../../../src/utils/search';
-import { useDatabase } from '../../../src/context/DatabaseContext';
+import { formatDisplayDate } from '../../../src/utils/date';
 import { useTheme } from '../../../src/context/ThemeContext';
+import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
+import { spacing } from '../../../src/constants/theme';
 import type { Purchase } from '../../../src/types';
 
 type Filter = 'all' | 'paid' | 'unpaid';
@@ -32,6 +37,7 @@ export default function PurchasesListScreen() {
   const { refreshKey } = useDatabase();
   const { colors } = useTheme();
   const styles = useScreenStyles();
+  const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
@@ -52,13 +58,25 @@ export default function PurchasesListScreen() {
     [purchases, search]
   );
 
-  // `load` changes when `filter` changes, so the focus-refresh hook re-runs
-  // for filter switches too — no separate effect (which double-fetched).
-  const load = useCallback(async () => {
-    setPurchases(await getPurchases(filter));
-  }, [filter]);
+  const periodTotal = useMemo(
+    () => filteredPurchases.reduce((sum, item) => sum + item.total_amount, 0),
+    [filteredPurchases]
+  );
 
-  const { booting, error, retry } = useFocusRefresh(load, [refreshKey, filter]);
+  const periodDue = useMemo(
+    () =>
+      filteredPurchases.reduce(
+        (sum, item) => sum + Math.max(0, item.total_amount - item.paid_amount),
+        0
+      ),
+    [filteredPurchases]
+  );
+
+  const load = useCallback(async () => {
+    setPurchases(await getPurchases(filter, { periodKey: monthKey }));
+  }, [filter, monthKey]);
+
+  const { booting, error, retry } = useFocusRefresh(load, [refreshKey, filter, monthKey]);
 
   const renderItem = useCallback(
     ({ item }: { item: Purchase }) => (
@@ -72,7 +90,7 @@ export default function PurchasesListScreen() {
         </View>
         <Text style={styles.cardSub}>{item.supplier_name}</Text>
         <View style={styles.row}>
-          <Text style={styles.cardSub}>{item.date}</Text>
+          <Text style={styles.cardSub}>{formatDisplayDate(item.date)}</Text>
           <Text style={styles.amount}>{formatCurrency(item.total_amount)}</Text>
         </View>
         {item.paid_amount < item.total_amount && (
@@ -91,6 +109,24 @@ export default function PurchasesListScreen() {
 
   return (
     <View style={styles.container}>
+      <View style={{ paddingHorizontal: spacing.sm, paddingTop: spacing.sm }}>
+        <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
+        <View style={[styles.row, { marginBottom: spacing.sm }]}>
+          <Text style={styles.cardTitle}>
+            {search.trim() ? 'Filtered Total' : getPeriodTotalLabel(monthKey)}
+          </Text>
+          <Text style={styles.amount}>{formatCurrency(periodTotal)}</Text>
+        </View>
+        {periodDue > 0.01 && (
+          <View style={[styles.row, { marginBottom: spacing.sm }]}>
+            <Text style={styles.cardSub}>Outstanding in period</Text>
+            <Text style={[styles.amount, { color: colors.danger, fontSize: 15 }]}>
+              {formatCurrency(periodDue)}
+            </Text>
+          </View>
+        )}
+      </View>
+
       <FilterRow>
         {(['all', 'paid', 'unpaid'] as Filter[]).map((f) => (
           <FilterChip
@@ -132,7 +168,9 @@ export default function PurchasesListScreen() {
           {...FLATLIST_PERF}
           ListEmptyComponent={
             <Text style={styles.empty}>
-              {search.trim() ? 'No purchases match your search.' : 'No purchases yet.'}
+              {search.trim()
+                ? 'No purchases match your search.'
+                : 'No purchases in this period.'}
             </Text>
           }
         />

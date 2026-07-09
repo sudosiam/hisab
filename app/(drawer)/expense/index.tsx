@@ -14,8 +14,9 @@ import { ErrorState, SearchField, SectionHeader, useScreenStyles } from '../../.
 import { getExpenses } from '../../../src/services/banking';
 import { formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
-import { useDatabase } from '../../../src/context/DatabaseContext';
+import { formatDisplayDate } from '../../../src/utils/date';
 import { useTheme } from '../../../src/context/ThemeContext';
+import { useDatabase } from '../../../src/context/DatabaseContext';
 import { getPeriodTotalLabel } from '../../../src/utils/date';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
@@ -123,7 +124,7 @@ export default function ExpenseListScreen() {
           {item.description}
         </Text>
         <Text style={styles.cardSub}>
-          {item.date} · {item.account_name}
+          {formatDisplayDate(item.date)} · {item.account_name}
         </Text>
         {item.is_recurring ? (
           <Text style={localStyles.recurring}>Recurring · {item.recurrence ?? 'Monthly'}</Text>

@@ -25,10 +25,11 @@ import {
 } from '../../../src/components/ui';
 import { StatCard } from '../../../src/components/StatCard';
 import { CategoryPicker } from '../../../src/components/CategoryPicker';
-import { formatSqliteError } from '../../../src/db/database';
+import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { parseRouteId } from '../../../src/utils/route';
 import { formatAmountInput, formatCurrency, formatQty, parseAmountInput } from '../../../src/utils/format';
 import { roundMoney } from '../../../src/utils/money';
+import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { radius, spacing } from '../../../src/constants/theme';
@@ -121,6 +122,21 @@ export default function ProductDetailScreen() {
       hasLoadedRef.current = true;
     });
   }, [load]));
+
+  const isEditDirty = useMemo(() => {
+    if (!product) return false;
+    const price = sellPrice.trim() ? parseAmountInput(sellPrice) : 0;
+    const editingDirty =
+      editing &&
+      (name.trim() !== product.name ||
+        (category.trim() || '') !== (product.category ?? '') ||
+        (sku.trim() || '') !== (product.sku ?? '') ||
+        (unit.trim() || 'pcs') !== (product.unit || 'pcs') ||
+        price !== (product.sell_price > 0 ? product.sell_price : 0));
+    const adjustingDirty = adjustQty.trim().length > 0 || adjustNotes.trim().length > 0;
+    return editingDirty || adjustingDirty;
+  }, [product, editing, name, category, sku, unit, sellPrice, adjustQty, adjustNotes]);
+  useUnsavedChangesGuard(isEditDirty);
 
   const handleSaveEdit = async () => {
     if (!product || saving) return;
@@ -244,12 +260,7 @@ export default function ProductDetailScreen() {
           <CategoryPicker value={category} onChange={setCategory} />
           <FormInput label="SKU" value={sku} onChangeText={setSku} />
           <FormInput label="Unit" value={unit} onChangeText={setUnit} />
-          <FormInput
-            label="Sell Price (₹)"
-            value={sellPrice}
-            onChangeText={setSellPrice}
-            keyboardType="decimal-pad"
-          />
+          <FormInput label="Sell Price (₹)" value={sellPrice} onChangeText={setSellPrice} money />
           <PrimaryButton title="Save Changes" onPress={handleSaveEdit} loading={saving} />
         </>
       )}
@@ -281,7 +292,8 @@ export default function ProductDetailScreen() {
         label="Qty change (+10 or -5)"
         value={adjustQty}
         onChangeText={setAdjustQty}
-        keyboardType="decimal-pad"
+        qty
+        placeholder="+10 or -5"
       />
       <FormInput
         label="Reason (optional)"

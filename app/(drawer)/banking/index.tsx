@@ -35,8 +35,8 @@ export default function BankingScreen() {
           padding: spacing.lg,
           alignItems: 'center',
         },
-        totalLabel: { ...typography.section, color: colors.textMuted, textTransform: 'uppercase' },
-        totalHint: { fontSize: 11, color: colors.textMuted, marginTop: spacing.xs },
+        totalLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
+        totalHint: { fontSize: 11, color: colors.textSecondary, marginTop: spacing.xs },
         totalValue: { ...typography.display, color: colors.primary, marginTop: spacing.sm },
         actions: {
           flexDirection: 'row',

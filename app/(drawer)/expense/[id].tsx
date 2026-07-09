@@ -28,11 +28,12 @@ import {
   getExpenseById,
   updateExpense,
 } from '../../../src/services/banking';
-import { formatSqliteError } from '../../../src/db/database';
+import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
+import { formatSqliteError } from '../../../src/db/database';
 import { isValidISODate } from '../../../src/utils/date';
 import { spacing, radius } from '../../../src/constants/theme';
 import type { Account, Expense } from '../../../src/types';
@@ -131,13 +132,32 @@ export default function ExpenseDetailScreen() {
     });
   }, [load]));
 
+  const isEditDirty = useMemo(() => {
+    if (!editing || !expense) return false;
+    const amt = parsePositiveAmount(amount);
+    return (
+      category.trim() !== expense.category ||
+      description.trim() !== expense.description ||
+      (amt ?? -1) !== expense.amount ||
+      date !== expense.date ||
+      accountId !== expense.account_id ||
+      !!isRecurring !== !!expense.is_recurring ||
+      (isRecurring ? recurrence : 'Monthly') !== (expense.recurrence ?? 'Monthly')
+    );
+  }, [editing, expense, category, description, amount, date, accountId, isRecurring, recurrence]);
+  useUnsavedChangesGuard(isEditDirty);
+
   const handleSave = async () => {
     if (!expense || saving) return;
-    const amt = parsePositiveAmount(amount);
-    if (!category.trim() || !description.trim()) {
-      Alert.alert('Missing details', 'Category, description, amount, and account are required');
+    if (!category.trim()) {
+      Alert.alert('Missing category', 'Choose an expense category.');
       return;
     }
+    if (!description.trim()) {
+      Alert.alert('Missing description', 'Enter what this expense was for.');
+      return;
+    }
+    const amt = parsePositiveAmount(amount);
     if (amt === null) {
       Alert.alert('Error', 'Enter an amount greater than zero');
       return;
@@ -220,7 +240,7 @@ export default function ExpenseDetailScreen() {
         <SectionHeader title="Edit Expense" />
         <CategoryPicker value={category} onChange={setCategory} source={expenseCategorySource} />
         <FormInput label="Description" value={description} onChangeText={setDescription} />
-        <FormInput label="Amount (₹)" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
+        <FormInput label="Amount (₹)" value={amount} onChangeText={setAmount} money />
         <DatePickerField label="Date" value={date} onChange={setDate} />
         <AccountPicker accounts={accounts} value={accountId} onChange={setAccountId} />
 

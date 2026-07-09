@@ -3,9 +3,13 @@ import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { getInventoryReport } from '../../../src/services/reports';
 import { formatCurrency } from '../../../src/utils/format';
+import { ReportRow } from '../../../src/components/ReportRow';
+import { MoneyText } from '../../../src/components/MoneyText';
 import { ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
+import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
+import { shareInventoryReportPdf } from '../../../src/services/reportPdf';
 import { roundMoney } from '../../../src/utils/money';
 import { formatSqliteError } from '../../../src/db/database';
 import { radius, spacing } from '../../../src/constants/theme';
@@ -18,10 +22,8 @@ export default function InventoryReportScreen() {
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        total: { fontWeight: '700', textAlign: 'center', padding: spacing.md, color: colors.text },
+        totalWrap: { alignItems: 'center', padding: spacing.md },
         row: {
-          flexDirection: 'row',
-          justifyContent: 'space-between',
           backgroundColor: colors.surface,
           padding: spacing.md,
           borderRadius: radius.sm,
@@ -30,8 +32,7 @@ export default function InventoryReportScreen() {
           borderColor: colors.border,
         },
         name: { fontWeight: '600', color: colors.text },
-        meta: { fontSize: 12, color: colors.textSecondary },
-        value: { fontWeight: '700', color: colors.text },
+        meta: { fontSize: 11, color: colors.textSecondary, marginTop: 2, lineHeight: 15 },
       }),
     [colors]
   );
@@ -59,13 +60,20 @@ export default function InventoryReportScreen() {
 
   const totalValue = roundMoney(rows.reduce((s, r) => s + r.value, 0));
 
+  const exportPdf = useCallback(async () => shareInventoryReportPdf(rows, totalValue), [rows, totalValue]);
+
+  useReportPdfHeader({ disabled: !!error, onExport: exportPdf });
+
   if (error) {
     return <ErrorState message={error} onRetry={load} />;
   }
 
   return (
     <View style={styles.container}>
-      <Text style={localStyles.total}>Total Inventory Value: {formatCurrency(totalValue)}</Text>
+      <View style={localStyles.totalWrap}>
+        <Text style={{ fontWeight: '700', color: colors.text, marginBottom: 2 }}>Total Inventory Value</Text>
+        <MoneyText amount={totalValue} size="lg" />
+      </View>
       <FlatList
         data={rows}
         keyExtractor={(item, index) => `${item.name}-${index}`}
@@ -75,18 +83,22 @@ export default function InventoryReportScreen() {
         }
         ListEmptyComponent={<Text style={styles.empty}>No products in inventory</Text>}
         {...FLATLIST_PERF}
-        renderItem={({ item }) => (
-          <View style={localStyles.row}>
-            <View>
-              <Text style={localStyles.name}>{item.name}</Text>
-              <Text style={localStyles.meta}>
-                Qty: {item.current_qty} · Cost: {formatCurrency(item.avg_cost)} · Sell:{' '}
-                {formatCurrency(item.sell_price > 0 ? item.sell_price : item.avg_cost * 1.2)}
+        renderItem={({ item }) => {
+          const sell = item.sell_price > 0 ? item.sell_price : item.avg_cost * 1.2;
+          return (
+            <ReportRow style={localStyles.row} amount={item.value}>
+              <Text style={localStyles.name} numberOfLines={2}>
+                {item.name}
               </Text>
-            </View>
-            <Text style={localStyles.value}>{formatCurrency(item.value)}</Text>
-          </View>
-        )}
+              <Text style={localStyles.meta} numberOfLines={2}>
+                Qty {item.current_qty}
+              </Text>
+              <Text style={localStyles.meta} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
+                Cost {formatCurrency(item.avg_cost)} · Sell {formatCurrency(sell)}
+              </Text>
+            </ReportRow>
+          );
+        }}
       />
     </View>
   );

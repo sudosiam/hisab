@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { View, ScrollView, RefreshControl, ActivityIndicator, Alert } from 'react-native';
+import { useRouter } from 'expo-router';
 import { formatSqliteError } from '../../src/db/database';
 import { StatCard } from '../../src/components/StatCard';
 import { MonthPicker } from '../../src/components/MonthPicker';
@@ -8,6 +9,7 @@ import {
   useScreenStyles,
   DashboardShortcuts,
   ErrorState,
+  FinanceHero,
   SectionHeader,
 } from '../../src/components/ui';
 import { getRecentActivities } from '../../src/services/activity';
@@ -22,6 +24,7 @@ import type { ActivityItem } from '../../src/services/activity';
 import type { DashboardStats } from '../../src/types';
 
 export default function DashboardScreen() {
+  const router = useRouter();
   const { refreshKey } = useDatabase();
   const { colors } = useTheme();
   const styles = useScreenStyles();
@@ -73,22 +76,25 @@ export default function DashboardScreen() {
     >
       <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
 
+      {stats ? (
+        <FinanceHero
+          stats={stats}
+          onNetWorthPress={() => router.push('/(drawer)/balance-sheet')}
+        />
+      ) : null}
+
       <SectionHeader title={getPeriodSectionTitle(monthKey)} />
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        <StatCard label="Sold" value={stats?.sold ?? 0} color={colors.text} />
+        <StatCard label="Revenue" value={stats?.sold ?? 0} color={colors.text} />
         <StatCard label="Purchased" value={stats?.purchased ?? 0} color={colors.warning} />
-        <StatCard label="Gross Profit" value={stats?.grossProfit ?? 0} color={colors.success} />
-        <StatCard label="Net Profit" value={stats?.netProfit ?? 0} color={colors.success} />
-        <StatCard label="Expense" value={stats?.expense ?? 0} color={colors.danger} />
-        <StatCard label="Total Liquid" value={stats?.totalLiquid ?? 0} color={colors.text} />
-        <StatCard label="Inventory Value" value={stats?.inventoryValue ?? 0} color={colors.text} />
-        <StatCard label="Receivable" value={stats?.receivable ?? 0} color={colors.danger} />
+        <StatCard label="Other Income" value={stats?.otherIncome ?? 0} color={colors.success} />
+        <StatCard label="Expenses" value={stats?.expense ?? 0} color={colors.danger} />
       </View>
 
       <DashboardShortcuts />
 
-      <SectionHeader title="Recent Activity" />
+      <SectionHeader title="Recent" />
       <RecentActivityList items={activities} />
     </ScrollView>
   );

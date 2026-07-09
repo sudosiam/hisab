@@ -322,7 +322,9 @@ export default function SettingsScreen() {
     setExporting(true);
     try {
       const result = await exportDatabase();
-      if (!result.success) {
+      if (result.success) {
+        Alert.alert('Export Complete', result.message);
+      } else {
         Alert.alert('Export Failed', result.message);
       }
     } catch (e) {

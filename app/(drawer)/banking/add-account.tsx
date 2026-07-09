@@ -83,12 +83,7 @@ export default function AddAccountScreen() {
           </Text>
         </TouchableOpacity>
       ))}
-      <FormInput
-        label="Opening Balance"
-        value={opening}
-        onChangeText={setOpening}
-        keyboardType="decimal-pad"
-      />
+      <FormInput label="Opening Balance" value={opening} onChangeText={setOpening} money />
       <PrimaryButton title="Save Account" onPress={handleSave} loading={loading} />
     </FormScreen>
   );

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hisab",
     "slug": "hisab",
-    "version": "7.0.0",
+    "version": "7.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "hisab",
@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hisab.app",
-      "buildNumber": "17"
+      "buildNumber": "18"
     },
     "android": {
       "adaptiveIcon": {
@@ -25,7 +25,7 @@
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "package": "com.hisab.app",
-      "versionCode": 17,
+      "versionCode": 18,
       "predictiveBackGestureEnabled": false
     },
     "web": {

@@ -1,23 +1,22 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
-import { spacing, radius } from '../constants/theme';
+import { spacing } from '../constants/theme';
 import { cardSurface } from '../constants/shadows';
-import { formatCurrency } from '../utils/format';
+import { MoneyText } from './MoneyText';
 import type { ActivityItem } from '../services/activity';
-
-const ICONS: Record<ActivityItem['type'], React.ComponentProps<typeof Ionicons>['name']> = {
-  sale: 'cart-outline',
-  purchase: 'bag-handle-outline',
-  expense: 'receipt-outline',
-};
 
 const ROUTES: Record<ActivityItem['type'], (id: number) => string> = {
   sale: (id) => `/(drawer)/sales/${id}`,
   purchase: (id) => `/(drawer)/purchases/${id}`,
   expense: (id) => `/(drawer)/expense/${id}`,
+};
+
+const TYPE_LABEL: Record<ActivityItem['type'], string> = {
+  sale: 'Sale',
+  purchase: 'Purchase',
+  expense: 'Expense',
 };
 
 export function RecentActivityList({ items }: { items: ActivityItem[] }) {
@@ -31,23 +30,22 @@ export function RecentActivityList({ items }: { items: ActivityItem[] }) {
 
   return (
     <View style={styles.list}>
-      {items.map((item) => (
+      {items.map((item, index) => (
         <TouchableOpacity
           key={item.id}
-          style={styles.row}
+          style={[styles.row, index === items.length - 1 && styles.rowLast]}
           onPress={() => router.push(ROUTES[item.type](item.refId) as never)}
           activeOpacity={0.75}
         >
-          <View style={styles.iconWrap}>
-            <Ionicons name={ICONS[item.type]} size={18} color={colors.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.title}>{item.title}</Text>
+          <View style={styles.rowLeft}>
+            <Text style={styles.title} numberOfLines={1}>
+              {item.title}
+            </Text>
             <Text style={styles.subtitle} numberOfLines={1}>
-              {item.subtitle} · {item.date}
+              {TYPE_LABEL[item.type]} · {item.subtitle} · {item.date}
             </Text>
           </View>
-          <Text style={styles.amount}>{formatCurrency(item.amount)}</Text>
+          <MoneyText amount={item.amount} size="md" style={styles.amount} />
         </TouchableOpacity>
       ))}
     </View>
@@ -58,28 +56,31 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
   return StyleSheet.create({
     list: {
       ...cardSurface(colors, isDark),
-      padding: spacing.sm,
+      paddingHorizontal: spacing.md,
     },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.sm + 2,
       borderBottomWidth: 1,
       borderBottomColor: colors.borderLight,
+      gap: spacing.sm,
     },
-    iconWrap: {
-      width: 36,
-      height: 36,
-      borderRadius: radius.md,
-      backgroundColor: colors.navActive,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginRight: spacing.sm,
+    rowLeft: { flex: 1, minWidth: 0 },
+    rowLast: {
+      borderBottomWidth: 0,
     },
-    title: { fontSize: 14, fontWeight: '600', color: colors.text },
+    title: { fontSize: 14, fontWeight: '500', color: colors.text },
     subtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-    amount: { fontSize: 14, fontWeight: '700', color: colors.text, marginLeft: spacing.sm },
-    empty: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.lg },
+    amount: {
+      flexShrink: 0,
+      maxWidth: '46%',
+    },
+    empty: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      paddingVertical: spacing.lg,
+    },
   });
 }

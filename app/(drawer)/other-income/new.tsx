@@ -96,7 +96,7 @@ export default function NewOtherIncomeScreen() {
         label="Amount (₹)"
         value={amount}
         onChangeText={setAmount}
-        keyboardType="decimal-pad"
+        money
       />
       <DatePickerField label="Date" value={date} onChange={setDate} />
       <AccountPicker accounts={accounts} value={accountId} onChange={setAccountId} />

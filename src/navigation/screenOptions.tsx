@@ -47,10 +47,10 @@ export function useHeaderScreenOptions() {
     },
     headerTintColor: colors.headerText,
     headerTitleStyle: {
-      fontWeight: '700' as const,
-      fontSize: 17,
+      fontWeight: '600' as const,
+      fontSize: 16,
       color: colors.headerText,
-      letterSpacing: -0.2,
+      letterSpacing: -0.1,
     },
     headerTitleAlign: 'left' as const,
     headerLeftContainerStyle: { paddingLeft: 4 },

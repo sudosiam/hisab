@@ -97,8 +97,18 @@ export default function NewSaleScreen() {
         },
         totalRow: { flexDirection: 'row', justifyContent: 'space-between' },
         totalLabel: { fontSize: 14, color: colors.textSecondary },
-        totalValue: { fontSize: 14, fontWeight: '600', color: colors.text },
-        grandTotal: { fontSize: 18, fontWeight: '700', color: colors.primary },
+        totalValue: {
+          fontSize: 14,
+          fontWeight: '600',
+          color: colors.text,
+          fontVariant: ['tabular-nums'],
+        },
+        grandTotal: {
+          fontSize: 18,
+          fontWeight: '700',
+          color: colors.primary,
+          fontVariant: ['tabular-nums'],
+        },
         hint: { color: colors.warning },
       }),
     [colors, isDark]
@@ -205,6 +215,11 @@ export default function NewSaleScreen() {
           setItems(validItems.length ? validItems : p.length > 0 ? [createEmptyLineItem()] : []);
           setPayments(draft.payments || []);
           noteDraftLoaded();
+          const paramParty =
+            typeof partyNameParam === 'string' && partyNameParam
+              ? decodeURIComponent(partyNameParam)
+              : '';
+          if (paramParty) setPartyName(paramParty);
         } else if (typeof partyNameParam === 'string' && partyNameParam) {
           setPartyName(decodeURIComponent(partyNameParam));
           setInvoiceNo(nextInvoice);
@@ -249,6 +264,12 @@ export default function NewSaleScreen() {
   const discountAmount = Math.max(0, parseAmountInput(discount) || 0);
   const serviceChargesAmount = Math.max(0, parseAmountInput(serviceCharges) || 0);
   const total = Math.max(0, subtotal - discountAmount + serviceChargesAmount);
+
+  const paidTotal = useMemo(
+    () => payments.reduce((sum, p) => sum + (parseAmountInput(p.amount) || 0), 0),
+    [payments]
+  );
+  const isOverpaid = paidTotal > total + 0.01;
 
   const addItem = () => {
     if (products.length === 0) return;
@@ -430,7 +451,7 @@ export default function NewSaleScreen() {
                     label="Qty"
                     value={item.qty}
                     onChangeText={(v) => updateItem(index, 'qty', v)}
-                    keyboardType="decimal-pad"
+                    qty
                   />
                 </View>
                 <View style={localStyles.priceField}>
@@ -438,7 +459,7 @@ export default function NewSaleScreen() {
                     label="Unit Price (₹)"
                     value={item.unit_price}
                     onChangeText={(v) => updateItem(index, 'unit_price', v)}
-                    keyboardType="decimal-pad"
+                    money
                   />
                 </View>
                 <TouchableOpacity
@@ -460,18 +481,12 @@ export default function NewSaleScreen() {
             <Text style={localStyles.totalLabel}>Subtotal</Text>
             <Text style={localStyles.totalValue}>{formatCurrency(subtotal)}</Text>
           </View>
-          <FormInput
-            label="Total Discount (₹)"
-            value={discount}
-            onChangeText={setDiscount}
-            keyboardType="decimal-pad"
-          />
+          <FormInput label="Total Discount (₹)" value={discount} onChangeText={setDiscount} money />
           <FormInput
             label="Service Charges (₹, optional)"
             value={serviceCharges}
             onChangeText={setServiceCharges}
-            keyboardType="decimal-pad"
-            placeholder="0"
+            money
           />
           <View style={[localStyles.totalRow, { marginTop: spacing.sm }]}>
             <Text style={localStyles.totalLabel}>Grand Total</Text>
@@ -489,7 +504,12 @@ export default function NewSaleScreen() {
         defaultDate={isValidISODate(date) ? date : undefined}
       />
 
-      <PrimaryButton title="Save Sale" onPress={handleSave} loading={loading} />
+      <PrimaryButton
+        title="Save Sale"
+        onPress={handleSave}
+        loading={loading}
+        disabled={isOverpaid}
+      />
     </FormScreen>
   );
 }

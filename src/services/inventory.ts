@@ -1,8 +1,13 @@
-import { getDatabase } from '../db/database';
+import { getDatabase, recomputeProductStock } from '../db/database';
 import { mulMoney, roundMoney } from '../utils/money';
 import type { InventoryMovement, Product } from '../types';
 
 const ACTIVE_PRODUCT_SQL = 'COALESCE(is_hidden, 0) = 0';
+
+async function syncGeneralLedgerAfterWrite(): Promise<void> {
+  const { refreshGeneralLedgerAfterWrite } = await import('./ledger');
+  await refreshGeneralLedgerAfterWrite();
+}
 
 /** Default sale unit price: stored sell price, or cost + 20% markup. */
 export function getProductSellPrice(product: Pick<Product, 'sell_price' | 'avg_cost'>): number {
@@ -160,8 +165,10 @@ export async function createProduct(params: {
         [productId, openingQty, openingCost, 'Opening stock']
       );
     }
+    await recomputeProductStock(db, productId);
   });
 
+  await syncGeneralLedgerAfterWrite();
   return productId;
 }
 
@@ -219,21 +226,22 @@ export async function adjustStock(
     ]);
     if (!product) throw new Error('Product not found');
 
-    const newQty = roundMoney(product.current_qty + qty);
-    if (newQty < 0) {
+    const projectedQty = roundMoney(product.current_qty + qty);
+    if (projectedQty < 0) {
       throw new Error(
         `Cannot reduce stock below zero (current: ${product.current_qty}, adjustment: ${qty})`
       );
     }
 
-    await db.runAsync('UPDATE products SET current_qty = ? WHERE id = ?', [newQty, productId]);
     await db.runAsync(
       `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, notes)
        VALUES (?, 'adjustment', ?, ?, 'adjustment', ?)`,
       [productId, qty, product.avg_cost, notes ?? 'Stock adjustment']
     );
+    await recomputeProductStock(db, productId);
   });
 
+  await syncGeneralLedgerAfterWrite();
 }
 
 async function hardDeleteProduct(

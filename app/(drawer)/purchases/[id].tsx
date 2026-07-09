@@ -286,7 +286,7 @@ export default function PurchaseDetailScreen() {
             value={selectedAccount}
             onChange={setSelectedAccount}
           />
-          <FormInput label="Amount" value={payAmount} onChangeText={setPayAmount} keyboardType="decimal-pad" placeholder="Amount" />
+          <FormInput label="Amount" value={payAmount} onChangeText={setPayAmount} money />
           <DatePickerField label="Payment date" value={payDate} onChange={setPayDate} />
           <TouchableOpacity
             onPress={() => setPayAmount(formatAmountInput(due))}

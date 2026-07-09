@@ -56,8 +56,8 @@ export default function OthersScreen() {
           marginBottom: spacing.lg,
           alignItems: 'center',
         },
-        heroLabel: { ...typography.section, color: colors.textMuted, textTransform: 'uppercase' },
-        heroValue: { ...typography.display, color: colors.primary, marginTop: spacing.sm },
+        heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
+        heroValue: { ...typography.display, color: colors.text, marginTop: spacing.sm },
         assetCard: {
           ...cardSurface(colors, isDark),
           padding: spacing.md,
@@ -211,7 +211,7 @@ export default function OthersScreen() {
         <View style={localStyles.form}>
           <Text style={styles.cardTitle}>{editingId ? 'Edit Asset' : 'New Asset'}</Text>
           <FormInput label="Asset Name" value={name} onChangeText={setName} placeholder="Vehicle, Equipment..." />
-          <FormInput label="Value (₹)" value={value} onChangeText={setValue} keyboardType="decimal-pad" />
+          <FormInput label="Value (₹)" value={value} onChangeText={setValue} money />
           <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline placeholder="Details, purchase date..." />
           <PrimaryButton title={editingId ? 'Save Changes' : 'Add Asset'} onPress={handleSave} loading={saving} />
         </View>

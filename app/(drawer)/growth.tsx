@@ -16,7 +16,10 @@ import { ErrorState, SectionHeader, useScreenStyles } from '../../src/components
 import { GrowthChart } from '../../src/components/GrowthChart';
 import { getGrowthReport } from '../../src/services/growth';
 import { formatCurrency, formatPercent, formatSignedCurrency } from '../../src/utils/format';
+import { MoneyText, moneyRowStyles } from '../../src/components/MoneyText';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useReportPdfHeader } from '../../src/hooks/useReportPdfHeader';
+import { shareGrowthReportPdf } from '../../src/services/reportPdf';
 import { spacing, typography } from '../../src/constants/theme';
 import { cardSurface } from '../../src/constants/shadows';
 import type { GrowthReport } from '../../src/services/growth';
@@ -37,17 +40,17 @@ export default function GrowthScreen() {
           marginBottom: spacing.md,
           alignItems: 'center',
         },
-        heroLabel: { ...typography.section, color: colors.textMuted, textTransform: 'uppercase' },
-        heroValue: { ...typography.display, color: colors.primary, marginTop: spacing.sm },
-        heroSub: { fontSize: 13, color: colors.textSecondary, marginTop: spacing.xs },
+        heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
+        heroValue: { marginTop: spacing.sm, textAlign: 'center' },
+        heroSub: { fontSize: 11, color: colors.textSecondary, marginTop: spacing.xs, textAlign: 'center' },
         card: {
           ...cardSurface(colors, isDark),
           padding: spacing.md,
           marginBottom: spacing.md,
         },
-        row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: spacing.sm },
-        rowLabel: { fontSize: 14, color: colors.text },
-        rowValue: { fontSize: 14, color: colors.text, fontWeight: '500' },
+        row: { ...moneyRowStyles.row, paddingVertical: spacing.sm },
+        rowLabel: { fontSize: 14, color: colors.text, flex: 1, minWidth: 0, paddingRight: spacing.sm },
+        rowValue: { maxWidth: '52%' },
         pos: { color: colors.success, fontWeight: '700' },
         neg: { color: colors.danger, fontWeight: '700' },
         bold: { fontWeight: '700' },
@@ -62,22 +65,20 @@ export default function GrowthScreen() {
           marginBottom: spacing.sm,
         },
         monthHeader: {
-          flexDirection: 'row',
-          justifyContent: 'space-between',
+          ...moneyRowStyles.row,
           alignItems: 'center',
           marginBottom: spacing.sm,
         },
-        monthTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
-        monthProfit: { fontSize: 16, fontWeight: '700', color: colors.primary },
+        monthTitle: { fontSize: 15, fontWeight: '700', color: colors.text, flex: 1, minWidth: 0, paddingRight: spacing.sm },
+        monthProfit: { maxWidth: '48%' },
         monthProfitNeg: { color: colors.danger },
         monthProfitMuted: { color: colors.textMuted },
         detailRow: {
-          flexDirection: 'row',
-          justifyContent: 'space-between',
+          ...moneyRowStyles.row,
           paddingVertical: 4,
         },
-        detailLabel: { fontSize: 13, color: colors.textSecondary },
-        detailValue: { fontSize: 13, color: colors.text, fontWeight: '500' },
+        detailLabel: { fontSize: 13, color: colors.textSecondary, flex: 1, minWidth: 0 },
+        detailValue: { maxWidth: '52%' },
         cumulative: {
           borderTopWidth: 1,
           borderTopColor: colors.borderLight,
@@ -117,6 +118,13 @@ export default function GrowthScreen() {
     [data]
   );
 
+  const exportPdf = useCallback(async () => {
+    if (!data) return { success: false, message: 'Report not loaded yet.' };
+    return shareGrowthReportPdf(data);
+  }, [data]);
+
+  useReportPdfHeader({ disabled: !data || !!error, onExport: exportPdf });
+
   if (error) {
     return <ErrorState message={error} onRetry={retry} />;
   }
@@ -151,8 +159,8 @@ export default function GrowthScreen() {
     >
       <View style={localStyles.hero}>
         <Text style={localStyles.heroLabel}>Net worth</Text>
-        <Text style={localStyles.heroValue}>{formatCurrency(snapshot.netWorth)}</Text>
-        <Text style={localStyles.heroSub}>
+        <MoneyText amount={snapshot.netWorth} size="hero" style={localStyles.heroValue} />
+        <Text style={localStyles.heroSub} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
           Assets {formatCurrency(snapshot.totalAssets)} − Liabilities{' '}
           {formatCurrency(snapshot.liabilities)}
         </Text>
@@ -208,20 +216,27 @@ export default function GrowthScreen() {
 
       <SectionHeader title="Month by month" />
       {months.map((month) => {
-        const profitStyle = month.hasActivity
-          ? month.netProfit >= 0
-            ? localStyles.monthProfit
-            : [localStyles.monthProfit, localStyles.monthProfitNeg]
-          : [localStyles.monthProfit, localStyles.monthProfitMuted];
-
         const showValue = (value: number) =>
           month.hasActivity && value > 0 ? formatCurrency(value) : '—';
 
         return (
           <View key={month.monthKey} style={localStyles.monthCard}>
             <View style={localStyles.monthHeader}>
-              <Text style={localStyles.monthTitle}>{month.label}</Text>
-              <Text style={profitStyle}>{formatCurrency(month.netProfit)}</Text>
+              <Text style={localStyles.monthTitle} numberOfLines={1}>
+                {month.label}
+              </Text>
+              <MoneyText
+                amount={month.netProfit}
+                size="md"
+                color={
+                  month.hasActivity
+                    ? month.netProfit >= 0
+                      ? colors.text
+                      : colors.danger
+                    : colors.textMuted
+                }
+                style={localStyles.monthProfit}
+              />
             </View>
             <View style={localStyles.detailRow}>
               <Text style={localStyles.detailLabel}>Revenue</Text>
@@ -278,23 +293,33 @@ function MetricRow({
     neg: TextStyle;
   };
 }) {
+  const { colors } = useTheme();
   let display = text ?? '';
   if (text === undefined && value !== undefined) {
     display = signed ? formatSignedCurrency(value) : formatCurrency(value);
   }
 
-  const style =
-    valueStyle ??
-    (signed && value !== undefined
+  const color =
+    signed && value !== undefined
       ? value >= 0
-        ? localStyles.pos
-        : localStyles.neg
-      : undefined);
+        ? colors.success
+        : colors.danger
+      : valueStyle && 'color' in valueStyle
+        ? (valueStyle.color as string)
+        : undefined;
 
   return (
     <View style={localStyles.row}>
-      <Text style={[localStyles.rowLabel, bold && localStyles.bold]}>{label}</Text>
-      <Text style={[localStyles.rowValue, bold && localStyles.bold, style]}>{display}</Text>
+      <Text style={[localStyles.rowLabel, bold && localStyles.bold]} numberOfLines={2}>
+        {label}
+      </Text>
+      <MoneyText
+        amount={value ?? 0}
+        text={display || undefined}
+        size={bold ? 'md' : 'sm'}
+        color={color}
+        style={[localStyles.rowValue, bold && localStyles.bold]}
+      />
     </View>
   );
 }

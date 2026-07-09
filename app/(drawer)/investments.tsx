@@ -11,7 +11,7 @@ import {
 } from '../../src/components/ui';
 import { getInvestmentInfo, setOwnerInvestment } from '../../src/services/investments';
 import { formatSqliteError } from '../../src/db/database';
-import { formatAmountInput, formatCurrency, normalizeAmountInput } from '../../src/utils/format';
+import { formatAmountInput, formatCurrency, parseAmountInput } from '../../src/utils/format';
 import { useDatabase } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { spacing, typography } from '../../src/constants/theme';
@@ -31,8 +31,8 @@ export default function InvestmentsScreen() {
           marginBottom: spacing.md,
           alignItems: 'center',
         },
-        heroLabel: { ...typography.section, color: colors.textMuted, textTransform: 'uppercase' },
-        heroValue: { ...typography.display, color: colors.primary, marginTop: spacing.sm },
+        heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
+        heroValue: { ...typography.display, color: colors.text, marginTop: spacing.sm },
         heroHint: {
           fontSize: 13,
           color: colors.textSecondary,
@@ -84,7 +84,7 @@ export default function InvestmentsScreen() {
 
   const handleSave = async () => {
     if (saving) return;
-    const parsed = parseFloat(normalizeAmountInput(amount));
+    const parsed = parseAmountInput(amount);
     if (!Number.isFinite(parsed) || parsed < 0) {
       Alert.alert('Error', 'Enter a valid investment amount');
       return;
@@ -137,8 +137,7 @@ export default function InvestmentsScreen() {
         label="Total invested (₹)"
         value={amount}
         onChangeText={handleAmountChange}
-        keyboardType="decimal-pad"
-        placeholder="0"
+        money
       />
 
       <PrimaryButton title="Save Investment" onPress={handleSave} loading={saving} />

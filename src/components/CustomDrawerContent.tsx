@@ -33,18 +33,10 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Business',
-    items: [
-      { label: 'Sales', route: '/sales', icon: 'cart-outline', activeIcon: 'cart', match: ['/sales'] },
-      { label: 'Purchases', route: '/purchases', icon: 'bag-handle-outline', activeIcon: 'bag-handle', match: ['/purchases'] },
-      { label: 'Inventory', route: '/inventory', icon: 'cube-outline', activeIcon: 'cube', match: ['/inventory'] },
-      { label: 'Parties', route: '/parties', icon: 'people-outline', activeIcon: 'people', match: ['/parties'] },
-    ],
-  },
-  {
     title: 'Finance',
     items: [
       { label: 'Banking', route: '/banking', icon: 'wallet-outline', activeIcon: 'wallet', match: ['/banking'] },
+      { label: 'Parties', route: '/parties', icon: 'people-outline', activeIcon: 'people', match: ['/parties'] },
       { label: 'Expenses', route: '/expense', icon: 'receipt-outline', activeIcon: 'receipt', match: ['/expense'] },
       {
         label: 'Other Income',
@@ -61,6 +53,14 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'All Reports', route: '/reports', icon: 'bar-chart-outline', activeIcon: 'bar-chart', match: ['/reports'] },
       { label: 'Growth', route: '/growth', icon: 'analytics-outline', activeIcon: 'analytics', match: ['/growth'] },
+    ],
+  },
+  {
+    title: 'Business',
+    items: [
+      { label: 'Sales', route: '/sales', icon: 'cart-outline', activeIcon: 'cart', match: ['/sales'] },
+      { label: 'Purchases', route: '/purchases', icon: 'bag-handle-outline', activeIcon: 'bag-handle', match: ['/purchases'] },
+      { label: 'Inventory', route: '/inventory', icon: 'cube-outline', activeIcon: 'cube', match: ['/inventory'] },
     ],
   },
   {
@@ -100,7 +100,7 @@ export function CustomDrawerContent(props: DrawerContentComponentProps) {
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const navigate = (route: string) => {
-    router.replace(route as never);
+    router.navigate(route as never);
     props.navigation.closeDrawer();
   };
 
@@ -110,7 +110,7 @@ export function CustomDrawerContent(props: DrawerContentComponentProps) {
         <Image source={require('../../assets/logo.png')} style={styles.logoImage} />
         <View style={{ flex: 1 }}>
           <Text style={styles.appName}>Hisab</Text>
-          <Text style={styles.appTagline}>Business Books</Text>
+          <Text style={styles.appTagline}>Business accounts</Text>
         </View>
       </View>
 
@@ -134,13 +134,12 @@ export function CustomDrawerContent(props: DrawerContentComponentProps) {
                   accessibilityState={{ selected: active }}
                   accessibilityLabel={item.label}
                 >
-                  <View style={[styles.iconWrap, active && styles.iconWrapActive]}>
-                    <Ionicons
-                      name={active ? item.activeIcon : item.icon}
-                      size={18}
-                      color={active ? colors.navActiveText : colors.textSecondary}
-                    />
-                  </View>
+                  <Ionicons
+                    name={active ? item.activeIcon : item.icon}
+                    size={18}
+                    color={active ? colors.navActiveText : colors.textSecondary}
+                    style={styles.navIcon}
+                  />
                   <Text style={[styles.navLabel, active && styles.navLabelActive]} numberOfLines={1}>
                     {item.label}
                   </Text>
@@ -152,7 +151,7 @@ export function CustomDrawerContent(props: DrawerContentComponentProps) {
       </DrawerContentScrollView>
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
-        <Text style={styles.footerText}>Hisab · Business Management</Text>
+        <Text style={styles.footerText}>Hisab</Text>
       </View>
     </View>
   );
@@ -170,22 +169,22 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.md,
       borderBottomWidth: 1,
-      borderBottomColor: colors.borderLight,
+      borderBottomColor: colors.border,
       gap: spacing.sm,
     },
     logoImage: {
-      width: 38,
-      height: 38,
+      width: 36,
+      height: 36,
       borderRadius: radius.sm,
     },
     appName: {
-      fontSize: 18,
-      fontWeight: '700',
+      fontSize: 17,
+      fontWeight: '600',
       color: colors.text,
-      letterSpacing: -0.2,
+      letterSpacing: -0.1,
     },
     appTagline: {
-      fontSize: 11,
+      fontSize: 12,
       color: colors.textSecondary,
       marginTop: 1,
     },
@@ -198,9 +197,9 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     sectionTitle: {
       fontSize: 11,
-      fontWeight: '700',
-      letterSpacing: 0.6,
-      color: colors.textMuted,
+      fontWeight: '600',
+      letterSpacing: 0.4,
+      color: colors.textSecondary,
       textTransform: 'uppercase',
       paddingHorizontal: spacing.md,
       paddingTop: spacing.sm,
@@ -211,44 +210,40 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       alignItems: 'center',
       marginHorizontal: spacing.sm,
       marginVertical: 1,
-      paddingVertical: spacing.sm,
+      paddingVertical: 11,
       paddingHorizontal: spacing.sm,
       minHeight: 44,
       borderRadius: radius.sm,
+      borderLeftWidth: 3,
+      borderLeftColor: 'transparent',
     },
     navItemActive: {
       backgroundColor: colors.navActive,
+      borderLeftColor: colors.primary,
     },
-    iconWrap: {
-      width: 32,
-      height: 32,
-      borderRadius: radius.sm,
-      alignItems: 'center',
-      justifyContent: 'center',
+    navIcon: {
+      width: 22,
       marginRight: spacing.sm,
-    },
-    iconWrapActive: {
-      backgroundColor: colors.surface,
     },
     navLabel: {
       fontSize: 15,
       color: colors.text,
-      fontWeight: '500',
+      fontWeight: '400',
+      flex: 1,
     },
     navLabelActive: {
       color: colors.navActiveText,
-      fontWeight: '700',
+      fontWeight: '600',
     },
     footer: {
       borderTopWidth: 1,
-      borderTopColor: colors.borderLight,
+      borderTopColor: colors.border,
       paddingTop: spacing.sm,
       paddingHorizontal: spacing.md,
     },
     footerText: {
-      fontSize: 10,
-      color: colors.textMuted,
-      letterSpacing: 0.2,
+      fontSize: 11,
+      color: colors.textSecondary,
     },
   });
 }

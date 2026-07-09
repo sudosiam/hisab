@@ -303,8 +303,7 @@ export default function SaleDetailScreen() {
             label="Amount"
             value={payAmount}
             onChangeText={setPayAmount}
-            keyboardType="decimal-pad"
-            placeholder="Amount"
+            money
           />
           <DatePickerField label="Payment date" value={payDate} onChange={setPayDate} />
           <TouchableOpacity

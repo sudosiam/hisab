@@ -16,6 +16,17 @@ async function ensureOtherIncomeCategory(
   return trimmed;
 }
 
+async function assertActiveAccount(accountId: number): Promise<void> {
+  const account = await getAccountById(accountId);
+  if (!account) throw new Error('Account not found');
+  if (account.is_excluded) throw new Error('Cannot use an excluded account');
+}
+
+async function syncGeneralLedgerAfterWrite(): Promise<void> {
+  const { refreshGeneralLedgerAfterWrite } = await import('./ledger');
+  await refreshGeneralLedgerAfterWrite();
+}
+
 export async function getOtherIncomeCategories(): Promise<string[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<{ name: string }>(
@@ -38,14 +49,6 @@ export async function deleteOtherIncomeCategory(name: string): Promise<void> {
 
   const db = await getDatabase();
   await db.runAsync('DELETE FROM other_income_categories WHERE name = ? COLLATE NOCASE', [trimmed]);
-}
-
-async function assertActiveAccount(accountId: number): Promise<void> {
-  const account = await getAccountById(accountId);
-  if (!account) throw new Error('Account not found');
-  if (account.is_excluded) {
-    throw new Error('Cannot use an excluded account for other income');
-  }
 }
 
 export async function getOtherIncome(periodKey?: string): Promise<OtherIncome[]> {
@@ -127,6 +130,7 @@ export async function createOtherIncome(params: {
     });
   });
 
+  await syncGeneralLedgerAfterWrite();
   return incomeId;
 }
 
@@ -186,6 +190,7 @@ export async function updateOtherIncome(
     });
   });
 
+  await syncGeneralLedgerAfterWrite();
 }
 
 export async function deleteOtherIncome(id: number): Promise<void> {
@@ -203,6 +208,7 @@ export async function deleteOtherIncome(id: number): Promise<void> {
     await db.runAsync('DELETE FROM other_income WHERE id = ?', [id]);
   });
 
+  await syncGeneralLedgerAfterWrite();
 }
 
 export { getAccountsForPicker };

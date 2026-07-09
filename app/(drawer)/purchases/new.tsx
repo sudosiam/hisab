@@ -95,8 +95,18 @@ export default function NewPurchaseScreen() {
         },
         totalRow: { flexDirection: 'row', justifyContent: 'space-between' },
         totalLabel: { fontSize: 14, color: colors.textSecondary },
-        totalValue: { fontSize: 14, fontWeight: '600', color: colors.text },
-        grandTotal: { fontSize: 18, fontWeight: '700', color: colors.primary },
+        totalValue: {
+          fontSize: 14,
+          fontWeight: '600',
+          color: colors.text,
+          fontVariant: ['tabular-nums'],
+        },
+        grandTotal: {
+          fontSize: 18,
+          fontWeight: '700',
+          color: colors.primary,
+          fontVariant: ['tabular-nums'],
+        },
         hint: { color: colors.warning },
       }),
     [colors, isDark]
@@ -199,6 +209,11 @@ export default function NewPurchaseScreen() {
           setItems(validItems.length ? validItems : p.length > 0 ? [createEmptyLineItem()] : []);
           setPayments(draft.payments || []);
           noteDraftLoaded();
+          const paramSupplier =
+            typeof supplierNameParam === 'string' && supplierNameParam
+              ? decodeURIComponent(supplierNameParam)
+              : '';
+          if (paramSupplier) setSupplierName(paramSupplier);
         } else if (typeof supplierNameParam === 'string' && supplierNameParam) {
           setSupplierName(decodeURIComponent(supplierNameParam));
           setInvoiceNo(nextInvoice);
@@ -224,6 +239,12 @@ export default function NewPurchaseScreen() {
   );
   const discountAmount = Math.max(0, parseAmountInput(discount) || 0);
   const total = Math.max(0, subtotal - discountAmount);
+
+  const paidTotal = useMemo(
+    () => payments.reduce((sum, p) => sum + (parseAmountInput(p.amount) || 0), 0),
+    [payments]
+  );
+  const isOverpaid = paidTotal > total + 0.01;
 
   const addItem = () => {
     if (products.length === 0) return;
@@ -397,7 +418,7 @@ export default function NewPurchaseScreen() {
                     label="Qty"
                     value={item.qty}
                     onChangeText={(v) => updateItem(index, 'qty', v)}
-                    keyboardType="decimal-pad"
+                    qty
                   />
                 </View>
                 <View style={localStyles.costField}>
@@ -405,7 +426,7 @@ export default function NewPurchaseScreen() {
                     label="Unit Cost (₹)"
                     value={item.unit_cost}
                     onChangeText={(v) => updateItem(index, 'unit_cost', v)}
-                    keyboardType="decimal-pad"
+                    money
                   />
                 </View>
                 <TouchableOpacity
@@ -427,12 +448,7 @@ export default function NewPurchaseScreen() {
             <Text style={localStyles.totalLabel}>Subtotal</Text>
             <Text style={localStyles.totalValue}>{formatCurrency(subtotal)}</Text>
           </View>
-          <FormInput
-            label="Total Discount (₹)"
-            value={discount}
-            onChangeText={setDiscount}
-            keyboardType="decimal-pad"
-          />
+          <FormInput label="Total Discount (₹)" value={discount} onChangeText={setDiscount} money />
           <View style={[localStyles.totalRow, { marginTop: spacing.sm }]}>
             <Text style={localStyles.totalLabel}>Grand Total</Text>
             <Text style={localStyles.grandTotal}>{formatCurrency(total)}</Text>
@@ -450,7 +466,12 @@ export default function NewPurchaseScreen() {
         mode="pay"
       />
 
-      <PrimaryButton title="Save Purchase" onPress={handleSave} loading={loading} />
+      <PrimaryButton
+        title="Save Purchase"
+        onPress={handleSave}
+        loading={loading}
+        disabled={isOverpaid}
+      />
     </FormScreen>
   );
 }
