@@ -571,7 +571,14 @@ export function FilterChip({ label, active, onPress }: FilterChipProps) {
       accessibilityState={{ selected: active }}
       accessibilityLabel={label}
     >
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+      <Text
+        style={[styles.chipText, active && styles.chipTextActive]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.85}
+      >
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
@@ -582,9 +589,9 @@ export function FilterRow({ children }: { children: React.ReactNode }) {
     <View
       style={{
         flexDirection: 'row',
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.sm,
-        gap: spacing.sm,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.xs + 2,
+        gap: spacing.xs,
         backgroundColor: colors.surface,
         borderBottomWidth: 1,
         borderBottomColor: colors.borderLight,
@@ -667,11 +674,13 @@ function createChipStyles(colors: ThemeColors) {
   return StyleSheet.create({
     chip: {
       flex: 1,
-      paddingVertical: 9,
-      paddingHorizontal: spacing.sm,
+      minWidth: 0,
+      paddingVertical: 6,
+      paddingHorizontal: spacing.xs,
       borderRadius: radius.sm,
       backgroundColor: colors.chip,
       alignItems: 'center',
+      justifyContent: 'center',
       borderWidth: 1,
       borderColor: colors.border,
     },
@@ -679,7 +688,12 @@ function createChipStyles(colors: ThemeColors) {
       backgroundColor: colors.chipActive,
       borderColor: colors.chipActive,
     },
-    chipText: { fontSize: 13, color: colors.chipText, fontWeight: '500' },
+    chipText: {
+      fontSize: 11,
+      color: colors.chipText,
+      fontWeight: '500',
+      textAlign: 'center',
+    },
     chipTextActive: { color: colors.chipTextActive, fontWeight: '600' },
   });
 }

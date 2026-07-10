@@ -243,6 +243,8 @@ export default function PartyDetailScreen() {
         historyBody: { flex: 1 },
         historyTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
         historyInvoice: { fontSize: 15, fontWeight: '700', color: colors.text },
+        historyType: { fontSize: 11, fontWeight: '700', color: colors.primary, marginTop: 2 },
+        historyTypeBos: { color: colors.warning },
         historyMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
         historyAmounts: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.xs },
         historyAmt: { fontSize: 12, color: colors.textSecondary },
@@ -628,17 +630,22 @@ export default function PartyDetailScreen() {
       ) : (
         <View style={localStyles.sectionCard}>
           <View style={localStyles.sectionHeader}>
-            <Text style={localStyles.sectionTitle}>Invoice History</Text>
+            <Text style={localStyles.sectionTitle}>
+              {isCustomer ? 'Sales History' : 'Purchase History'}
+            </Text>
             <Text style={localStyles.sectionCount}>{history.length} records</Text>
           </View>
           {history.length === 0 ? (
             <View style={localStyles.emptyBox}>
               <Ionicons name="receipt-outline" size={32} color={colors.textMuted} />
-              <Text style={localStyles.emptyText}>No invoices yet for this party.</Text>
+              <Text style={localStyles.emptyText}>
+                {isCustomer ? 'No sales yet for this party.' : 'No purchases yet for this party.'}
+              </Text>
             </View>
           ) : (
             history.map((item, index) => {
               const due = item.total_amount - item.paid_amount;
+              const isBos = item.record_type === 'sale' && item.invoice_type === 'bos';
               return (
                 <TouchableOpacity
                   key={`${item.record_type}-${item.id}`}
@@ -658,6 +665,11 @@ export default function PartyDetailScreen() {
                       <Text style={localStyles.historyInvoice}>{item.invoice_no}</Text>
                       <StatusBadge status={item.status} />
                     </View>
+                    {item.record_type === 'sale' ? (
+                      <Text style={[localStyles.historyType, isBos && localStyles.historyTypeBos]}>
+                        {isBos ? 'BOS' : 'Invoice'}
+                      </Text>
+                    ) : null}
                     <Text style={localStyles.historyMeta}>{item.date}</Text>
                     <View style={localStyles.historyAmounts}>
                       <Text style={localStyles.historyAmt}>Total {formatCurrency(item.total_amount)}</Text>

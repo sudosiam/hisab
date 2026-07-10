@@ -21,6 +21,7 @@ export interface SaleFormDraft {
   partyName: string;
   partyPhone: string;
   invoiceNo: string;
+  invoiceType: 'invoice' | 'bos';
   date: string;
   notes: string;
   discount: string;

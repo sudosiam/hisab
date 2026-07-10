@@ -167,7 +167,7 @@ export async function hasGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<bool
   return (row?.count ?? 0) > 0;
 }
 
-const LEDGER_CODE_VERSION = '3';
+const LEDGER_CODE_VERSION = '4';
 let rebuildInFlight: Promise<void> | null = null;
 let ledgerRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -256,12 +256,13 @@ export async function rebuildGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<
   const sales = await database.getAllAsync<{
     id: number;
     invoice_no: string;
+    invoice_type: string | null;
     party_name: string;
     party_id: number | null;
     date: string;
     total_amount: number;
   }>(
-    `SELECT s.id, s.invoice_no, s.party_name, s.party_id, s.date, s.total_amount
+    `SELECT s.id, s.invoice_no, s.invoice_type, s.party_name, s.party_id, s.date, s.total_amount
      FROM sales s
      WHERE EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id)
        AND s.total_amount > 0`
@@ -270,9 +271,10 @@ export async function rebuildGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<
   for (const sale of sales) {
     const partyId = await resolvePartyId(database, sale.party_name, 'customer', sale.party_id);
     const amount = roundMoney(sale.total_amount);
+    const docLabel = sale.invoice_type === 'bos' ? 'Bill of Supply' : 'Invoice';
     await postJournalEntry(database, {
       date: sale.date,
-      description: `Invoice ${sale.invoice_no}`,
+      description: `${docLabel} ${sale.invoice_no}`,
       referenceType: 'sale',
       referenceId: sale.id,
       lines: [

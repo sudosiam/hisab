@@ -1,4 +1,5 @@
 export type PaymentStatus = 'paid' | 'partial' | 'unpaid';
+export type SaleInvoiceType = 'invoice' | 'bos';
 export type AccountType = 'cash' | 'bank';
 export type MovementType = 'opening' | 'purchase' | 'sale' | 'adjustment';
 export type TransactionType =
@@ -53,6 +54,7 @@ export interface InventoryMovement {
 export interface Sale {
   id: number;
   invoice_no: string;
+  invoice_type: SaleInvoiceType;
   party_id: number | null;
   party_name: string;
   date: string;
@@ -256,6 +258,7 @@ export interface PartyStatementResult {
 export interface PartyHistoryItem {
   id: number;
   invoice_no: string;
+  invoice_type?: string | null;
   date: string;
   total_amount: number;
   paid_amount: number;

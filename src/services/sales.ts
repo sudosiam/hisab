@@ -13,7 +13,11 @@ import { formatCurrency } from '../utils/format';
 import { addMoney, mulMoney, roundMoney, subMoney } from '../utils/money';
 import { resolvePeriodRange } from '../utils/period';
 import { pickLegacyPaymentMatch } from '../utils/paymentPair';
-import type { PaymentInput, Sale, SaleItem, SaleItemInput, SalePayment } from '../types';
+import type { PaymentInput, Sale, SaleInvoiceType, SaleItem, SaleItemInput, SalePayment } from '../types';
+
+function normalizeInvoiceType(value?: string | null): SaleInvoiceType {
+  return value === 'bos' ? 'bos' : 'invoice';
+}
 
 function validateSaleItems(items: SaleItemInput[]): void {
   if (items.length === 0) throw new Error('Add at least one item');
@@ -51,7 +55,12 @@ async function assertActivePaymentAccount(
 
 export async function getSales(
   filter?: 'all' | 'paid' | 'unpaid',
-  options?: { limit?: number; offset?: number; periodKey?: string }
+  options?: {
+    limit?: number;
+    offset?: number;
+    periodKey?: string;
+    invoiceType?: 'all' | SaleInvoiceType;
+  }
 ): Promise<Sale[]> {
   const db = await getDatabase();
   const conditions: string[] = [];
@@ -69,6 +78,11 @@ export async function getSales(
     conditions.push("status IN ('unpaid', 'partial')");
   }
 
+  if (options?.invoiceType === 'invoice' || options?.invoiceType === 'bos') {
+    conditions.push('invoice_type = ?');
+    params.push(options.invoiceType);
+  }
+
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   let query = `SELECT * FROM sales ${where} ORDER BY date DESC, id DESC`;
 
@@ -77,12 +91,15 @@ export async function getSales(
     params.push(options.limit, options.offset ?? 0);
   }
 
-  return db.getAllAsync<Sale>(query, params);
+  const rows = await db.getAllAsync<Sale>(query, params);
+  return rows.map((row) => ({ ...row, invoice_type: normalizeInvoiceType(row.invoice_type) }));
 }
 
 export async function getSaleById(id: number): Promise<Sale | null> {
   const db = await getDatabase();
-  return db.getFirstAsync<Sale>('SELECT * FROM sales WHERE id = ?', [id]);
+  const sale = await db.getFirstAsync<Sale>('SELECT * FROM sales WHERE id = ?', [id]);
+  if (!sale) return null;
+  return { ...sale, invoice_type: normalizeInvoiceType(sale.invoice_type) };
 }
 
 export async function getSaleItems(saleId: number): Promise<SaleItem[]> {
@@ -115,10 +132,12 @@ export async function createSale(params: {
   service_charges?: number;
   notes?: string;
   invoice_no?: string;
+  invoice_type?: SaleInvoiceType;
 }): Promise<number> {
   validateSaleItems(params.items);
 
   const db = await getDatabase();
+  const invoiceType = normalizeInvoiceType(params.invoice_type);
 
   let subtotal = 0;
   const itemDetails: {
@@ -163,14 +182,15 @@ export async function createSale(params: {
   let saleId = 0;
 
   await db.withTransactionAsync(async () => {
-    const invoiceNo = await resolveSaleInvoiceNo(params.invoice_no);
+    const invoiceNo = await resolveSaleInvoiceNo(params.invoice_no, invoiceType);
     const partyId = await upsertParty(params.party_name, 'customer', db, params.party_phone);
 
     const result = await db.runAsync(
-      `INSERT INTO sales (invoice_no, party_id, party_name, date, subtotal, discount_amount, service_charges, total_amount, paid_amount, status, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO sales (invoice_no, invoice_type, party_id, party_name, date, subtotal, discount_amount, service_charges, total_amount, paid_amount, status, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         invoiceNo,
+        invoiceType,
         partyId,
         params.party_name,
         params.date,
@@ -202,7 +222,13 @@ export async function createSale(params: {
       await db.runAsync(
         `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, reference_id, notes)
          VALUES (?, 'sale', ?, ?, 'sale', ?, ?)`,
-        [item.product_id, -item.qty, item.unit_cost, saleId, `Sale ${invoiceNo}`]
+        [
+          item.product_id,
+          -item.qty,
+          item.unit_cost,
+          saleId,
+          `${invoiceType === 'bos' ? 'BOS' : 'Sale'} ${invoiceNo}`,
+        ]
       );
     }
 
@@ -248,7 +274,10 @@ export async function createSale(params: {
   try {
     const sale = await getSaleById(saleId);
     if (sale) {
-      await syncNextInvoiceSettingAfterUse('sale', sale.invoice_no);
+      await syncNextInvoiceSettingAfterUse(
+        sale.invoice_type === 'bos' ? 'bos' : 'sale',
+        sale.invoice_no
+      );
     }
   } catch {
     // Counter sync failure must not fail an already-created sale.
@@ -261,7 +290,8 @@ async function replaceSaleItems(
   db: Awaited<ReturnType<typeof getDatabase>>,
   saleId: number,
   invoiceNo: string,
-  items: SaleItemInput[]
+  items: SaleItemInput[],
+  invoiceType: SaleInvoiceType = 'invoice'
 ): Promise<number> {
   validateSaleItems(items);
 
@@ -338,7 +368,13 @@ async function replaceSaleItems(
     await db.runAsync(
       `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, reference_id, notes)
        VALUES (?, 'sale', ?, ?, 'sale', ?, ?)`,
-      [item.product_id, -item.qty, item.unit_cost, saleId, `Sale ${invoiceNo}`]
+      [
+        item.product_id,
+        -item.qty,
+        item.unit_cost,
+        saleId,
+        `${invoiceType === 'bos' ? 'BOS' : 'Sale'} ${invoiceNo}`,
+      ]
     );
   }
 
@@ -352,6 +388,7 @@ export async function updateSale(
     party_phone?: string;
     date: string;
     invoice_no?: string;
+    invoice_type?: SaleInvoiceType;
     discount_amount: number;
     service_charges?: number;
     notes?: string;
@@ -367,13 +404,15 @@ export async function updateSale(
 
   const partyName = params.party_name.trim();
   const invoiceChanged = invoiceNo !== sale.invoice_no;
+  const invoiceType = normalizeInvoiceType(params.invoice_type ?? sale.invoice_type);
+  const invoiceTypeChanged = invoiceType !== sale.invoice_type;
   const discount = roundMoney(Math.max(0, params.discount_amount));
   const serviceCharges = roundMoney(Math.max(0, params.service_charges ?? sale.service_charges ?? 0));
 
   await db.withTransactionAsync(async () => {
     const subtotal =
       params.items !== undefined
-        ? await replaceSaleItems(db, saleId, invoiceNo, params.items)
+        ? await replaceSaleItems(db, saleId, invoiceNo, params.items, invoiceType)
         : sale.subtotal;
 
     if (discount > subtotal + 0.01) {
@@ -391,9 +430,10 @@ export async function updateSale(
     const status = getPaymentStatus(totalAmount, sale.paid_amount);
     const partyId = await upsertParty(partyName, 'customer', db, params.party_phone);
     await db.runAsync(
-      `UPDATE sales SET invoice_no = ?, party_id = ?, party_name = ?, date = ?, subtotal = ?, discount_amount = ?, service_charges = ?, total_amount = ?, status = ?, notes = ? WHERE id = ?`,
+      `UPDATE sales SET invoice_no = ?, invoice_type = ?, party_id = ?, party_name = ?, date = ?, subtotal = ?, discount_amount = ?, service_charges = ?, total_amount = ?, status = ?, notes = ? WHERE id = ?`,
       [
         invoiceNo,
+        invoiceType,
         partyId,
         partyName,
         params.date,
@@ -410,10 +450,10 @@ export async function updateSale(
       `UPDATE transactions SET description = ? WHERE reference_type = 'sale' AND reference_id = ? AND type = 'sale_payment'`,
       [`Payment for ${invoiceNo} - ${partyName}`, saleId]
     );
-    if (invoiceChanged) {
+    if (invoiceChanged || invoiceTypeChanged) {
       await db.runAsync(
         `UPDATE inventory_movements SET notes = ? WHERE reference_type = 'sale' AND reference_id = ?`,
-        [`Sale ${invoiceNo}`, saleId]
+        [`${invoiceType === 'bos' ? 'BOS' : 'Sale'} ${invoiceNo}`, saleId]
       );
     }
   });
@@ -425,9 +465,12 @@ export async function updateSale(
     // Sale is updated; ledger refresh is best-effort housekeeping.
   }
 
-  if (invoiceChanged) {
+  if (invoiceChanged || invoiceTypeChanged) {
     try {
-      await syncNextInvoiceSettingAfterUse('sale', invoiceNo);
+      await syncNextInvoiceSettingAfterUse(
+        invoiceType === 'bos' ? 'bos' : 'sale',
+        invoiceNo
+      );
     } catch {
       // Counter sync failure must not fail an already-updated sale.
     }

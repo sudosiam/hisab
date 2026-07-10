@@ -20,11 +20,12 @@ export async function getRecentActivities(limit = 10): Promise<ActivityItem[]> {
     amount: number;
     date: string;
     created_at: string;
+    invoice_type?: string | null;
   };
   const [sales, purchases, expenses] = await Promise.all([
     db.getAllAsync<ActivityRow>(
       `SELECT 'sale' as act_type, id, invoice_no as ref, party_name as party,
-              total_amount as amount, date, created_at
+              total_amount as amount, date, created_at, invoice_type
        FROM sales
        WHERE EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = sales.id)
        ORDER BY date DESC, created_at DESC
@@ -33,7 +34,7 @@ export async function getRecentActivities(limit = 10): Promise<ActivityItem[]> {
     ),
     db.getAllAsync<ActivityRow>(
       `SELECT 'purchase' as act_type, id, invoice_no as ref, supplier_name as party,
-              total_amount as amount, date, created_at
+              total_amount as amount, date, created_at, NULL as invoice_type
        FROM purchases
        WHERE EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = purchases.id)
        ORDER BY date DESC, created_at DESC
@@ -42,7 +43,7 @@ export async function getRecentActivities(limit = 10): Promise<ActivityItem[]> {
     ),
     db.getAllAsync<ActivityRow>(
       `SELECT 'expense' as act_type, id, category as ref, description as party,
-              amount, date, created_at
+              amount, date, created_at, NULL as invoice_type
        FROM expenses
        ORDER BY date DESC, created_at DESC
        LIMIT ?`,
@@ -58,13 +59,23 @@ export async function getRecentActivities(limit = 10): Promise<ActivityItem[]> {
     })
     .slice(0, limit);
 
-  return rows.map((r) => ({
-    id: `${r.act_type}-${r.id}`,
-    type: r.act_type as ActivityItem['type'],
-    title: r.ref,
-    subtitle: r.party,
-    amount: r.amount,
-    date: r.date,
-    refId: r.id,
-  }));
+  return rows.map((r) => {
+    const typeLabel =
+      r.act_type === 'sale'
+        ? r.invoice_type === 'bos'
+          ? 'BOS'
+          : 'Sale'
+        : r.act_type === 'purchase'
+          ? 'Purchase'
+          : 'Expense';
+    return {
+      id: `${r.act_type}-${r.id}`,
+      type: r.act_type as ActivityItem['type'],
+      title: r.ref,
+      subtitle: `${typeLabel} · ${r.party}`,
+      amount: r.amount,
+      date: r.date,
+      refId: r.id,
+    };
+  });
 }

@@ -22,10 +22,17 @@ import { APP_VERSION } from '../../src/constants/appVersion';
 import {
   getSaleInvoicePrefix,
   setSaleInvoicePrefix,
+  getBosInvoicePrefix,
+  setBosInvoicePrefix,
   getPurchaseInvoicePrefix,
   setPurchaseInvoicePrefix,
 } from '../../src/services/appSettings';
-import { previewNextInvoiceFromSetting, getNextSaleInvoiceNo, getNextPurchaseInvoiceNo } from '../../src/services/invoiceNumbers';
+import {
+  previewNextInvoiceFromSetting,
+  getNextSaleInvoiceNo,
+  getNextBosInvoiceNo,
+  getNextPurchaseInvoiceNo,
+} from '../../src/services/invoiceNumbers';
 import { getFinancialYearRangeLabel, MONTH_SHORT_NAMES } from '../../src/utils/date';
 import { clearAllDrafts } from '../../src/services/formDrafts';
 import {
@@ -255,8 +262,10 @@ export default function SettingsScreen() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importConfirmInput, setImportConfirmInput] = useState('');
   const [salePrefix, setSalePrefix] = useState('S');
+  const [bosPrefix, setBosPrefix] = useState('BOS');
   const [purchasePrefix, setPurchasePrefix] = useState('P');
   const [nextSaleInvoice, setNextSaleInvoice] = useState('');
+  const [nextBosInvoice, setNextBosInvoice] = useState('');
   const [nextPurchaseInvoice, setNextPurchaseInvoice] = useState('');
 
   const load = useCallback(async () => {
@@ -276,8 +285,10 @@ export default function SettingsScreen() {
       setBackupError(await getBackupLastError());
       await reloadFinancialYear();
       setSalePrefix(await getSaleInvoicePrefix());
+      setBosPrefix(await getBosInvoicePrefix());
       setPurchasePrefix(await getPurchaseInvoicePrefix());
       setNextSaleInvoice(await getNextSaleInvoiceNo());
+      setNextBosInvoice(await getNextBosInvoiceNo());
       setNextPurchaseInvoice(await getNextPurchaseInvoiceNo());
     } catch (e) {
       Alert.alert('Error', formatSqliteError(e));
@@ -452,6 +463,17 @@ export default function SettingsScreen() {
     }
   };
 
+  const saveBosPrefix = async () => {
+    try {
+      await setBosInvoicePrefix(bosPrefix);
+      setBosPrefix(await getBosInvoicePrefix());
+      setNextBosInvoice(await getNextBosInvoiceNo());
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not save BOS numbering');
+      setBosPrefix(await getBosInvoicePrefix());
+    }
+  };
+
   const savePurchasePrefix = async () => {
     try {
       await setPurchaseInvoicePrefix(purchasePrefix);
@@ -560,6 +582,21 @@ export default function SettingsScreen() {
           {nextSaleInvoice &&
           nextSaleInvoice !== previewNextInvoiceFromSetting(salePrefix, 'S')
             ? ` (with existing sales: ${nextSaleInvoice})`
+            : ''}
+        </Text>
+        <SettingsDivider color={colors.borderLight} />
+        <FormInput
+          label="Next BOS number"
+          value={bosPrefix}
+          onChangeText={setBosPrefix}
+          placeholder="BOS2627-0001"
+          onEndEditing={saveBosPrefix}
+        />
+        <Text style={localStyles.rowMeta}>
+          After save, next BOS: {previewNextInvoiceFromSetting(bosPrefix, 'BOS')}
+          {nextBosInvoice &&
+          nextBosInvoice !== previewNextInvoiceFromSetting(bosPrefix, 'BOS')
+            ? ` (with existing BOS: ${nextBosInvoice})`
             : ''}
         </Text>
         <SettingsDivider color={colors.borderLight} />

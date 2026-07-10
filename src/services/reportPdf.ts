@@ -193,13 +193,21 @@ export async function shareGeneralLedgerPdf(
 
 export async function shareSalesReportPdf(
   periodKey: string,
-  rows: { invoice_no: string; party_name: string; date: string; status: string; total_amount: number }[],
+  rows: {
+    invoice_no: string;
+    invoice_type?: string;
+    party_name: string;
+    date: string;
+    status: string;
+    total_amount: number;
+  }[],
   total: number
 ) {
   const period = monthKeyToLabel(periodKey);
   const body = buildTableHtml(
     [
-      { key: 'invoice', label: 'Invoice' },
+      { key: 'invoice', label: 'Document No' },
+      { key: 'type', label: 'Type', width: '56px' },
       { key: 'party', label: 'Customer' },
       { key: 'date', label: 'Date', width: '72px' },
       { key: 'status', label: 'Status', width: '64px' },
@@ -207,12 +215,13 @@ export async function shareSalesReportPdf(
     ],
     rows.map((row) => ({
       invoice: row.invoice_no,
+      type: row.invoice_type === 'bos' ? 'BOS' : 'Invoice',
       party: row.party_name,
       date: row.date,
       status: row.status,
       amount: pdfMoney(row.total_amount),
     })),
-    { invoice: 'Total', party: '', date: '', status: '', amount: pdfMoney(total) }
+    { invoice: 'Total', type: '', party: '', date: '', status: '', amount: pdfMoney(total) }
   );
   const html = wrapReportHtml({ title: 'Sales Report', period }, body);
   return exportPdf(html, `Sales-${safeFilePart(period)}.pdf`, 'Download Sales Report PDF');
@@ -274,23 +283,31 @@ export async function shareInventoryReportPdf(
 }
 
 export async function shareReceivablesPdf(
-  rows: { invoice_no: string; party_name: string; date: string; due: number }[],
+  rows: {
+    invoice_no: string;
+    invoice_type?: string;
+    party_name: string;
+    date: string;
+    due: number;
+  }[],
   total: number
 ) {
   const body = buildTableHtml(
     [
-      { key: 'invoice', label: 'Invoice' },
+      { key: 'invoice', label: 'Document No' },
+      { key: 'type', label: 'Type', width: '56px' },
       { key: 'party', label: 'Customer' },
       { key: 'date', label: 'Date', width: '72px' },
       { key: 'due', label: 'Due', align: 'right', width: '88px' },
     ],
     rows.map((row) => ({
       invoice: row.invoice_no,
+      type: row.invoice_type === 'bos' ? 'BOS' : 'Invoice',
       party: row.party_name,
       date: row.date,
       due: pdfMoney(row.due),
     })),
-    { invoice: 'Total Receivable', party: '', date: '', due: pdfMoney(total) }
+    { invoice: 'Total Receivable', type: '', party: '', date: '', due: pdfMoney(total) }
   );
   const html = wrapReportHtml(
     { title: 'Receivables', subtitle: 'Outstanding customer dues as of today' },

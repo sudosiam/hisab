@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  StyleSheet,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
@@ -27,16 +28,37 @@ import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
-import { spacing } from '../../../src/constants/theme';
+import { radius, spacing } from '../../../src/constants/theme';
 import type { Sale } from '../../../src/types';
 
-type Filter = 'all' | 'paid' | 'unpaid';
+type Filter = 'all' | 'paid' | 'unpaid' | 'bos';
 
 export default function SalesListScreen() {
   const router = useRouter();
   const { refreshKey } = useDatabase();
   const { colors } = useTheme();
   const styles = useScreenStyles();
+  const localStyles = useMemo(
+    () =>
+      StyleSheet.create({
+        typeBadge: {
+          alignSelf: 'flex-start',
+          marginTop: spacing.xs,
+          paddingHorizontal: spacing.sm,
+          paddingVertical: 2,
+          borderRadius: radius.sm,
+          backgroundColor: colors.primary + '18',
+        },
+        typeBadgeBos: { backgroundColor: colors.warning + '22' },
+        typeBadgeText: {
+          fontSize: 11,
+          fontWeight: '700',
+          color: colors.primary,
+        },
+        typeBadgeTextBos: { color: colors.warning },
+      }),
+    [colors]
+  );
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [sales, setSales] = useState<Sale[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
@@ -46,7 +68,14 @@ export default function SalesListScreen() {
   const filteredSales = useMemo(
     () =>
       sales.filter((item) =>
-        matchesSearch(search, [item.invoice_no, item.party_name, item.date, item.notes, item.status])
+        matchesSearch(search, [
+          item.invoice_no,
+          item.party_name,
+          item.date,
+          item.notes,
+          item.status,
+          item.invoice_type === 'bos' ? 'bos bill of supply' : 'invoice',
+        ])
       ),
     [sales, search]
   );
@@ -66,34 +95,44 @@ export default function SalesListScreen() {
   );
 
   const load = useCallback(async () => {
-    setSales(await getSales(filter, { periodKey: monthKey }));
+    const paymentFilter = filter === 'bos' ? 'all' : filter;
+    const invoiceType = filter === 'bos' ? 'bos' : 'all';
+    setSales(await getSales(paymentFilter, { periodKey: monthKey, invoiceType }));
   }, [filter, monthKey]);
 
   const { booting, error, retry } = useFocusRefresh(load, [refreshKey, filter, monthKey]);
 
   const renderItem = useCallback(
-    ({ item }: { item: Sale }) => (
-      <TouchableOpacity
-        style={styles.card}
-        onPress={() => router.push(`/(drawer)/sales/${item.id}`)}
-      >
-        <View style={styles.row}>
-          <Text style={styles.cardTitle}>{item.invoice_no}</Text>
-          <StatusBadge status={item.status} />
-        </View>
-        <Text style={styles.cardSub}>{item.party_name}</Text>
-        <View style={[styles.row, { marginTop: 4 }]}>
-          <Text style={styles.cardSub}>{formatDisplayDate(item.date)}</Text>
-          <Text style={styles.amount}>{formatCurrency(item.total_amount)}</Text>
-        </View>
-        {item.paid_amount < item.total_amount && (
-          <Text style={{ fontSize: 12, color: colors.danger, marginTop: 4 }}>
-            Due: {formatCurrency(item.total_amount - item.paid_amount)}
-          </Text>
-        )}
-      </TouchableOpacity>
-    ),
-    [colors.danger, router, styles]
+    ({ item }: { item: Sale }) => {
+      const isBos = item.invoice_type === 'bos';
+      return (
+        <TouchableOpacity
+          style={styles.card}
+          onPress={() => router.push(`/(drawer)/sales/${item.id}`)}
+        >
+          <View style={styles.row}>
+            <Text style={styles.cardTitle}>{item.invoice_no}</Text>
+            <StatusBadge status={item.status} />
+          </View>
+          <View style={[localStyles.typeBadge, isBos && localStyles.typeBadgeBos]}>
+            <Text style={[localStyles.typeBadgeText, isBos && localStyles.typeBadgeTextBos]}>
+              {isBos ? 'BOS' : 'Invoice'}
+            </Text>
+          </View>
+          <Text style={styles.cardSub}>{item.party_name}</Text>
+          <View style={[styles.row, { marginTop: 4 }]}>
+            <Text style={styles.cardSub}>{formatDisplayDate(item.date)}</Text>
+            <Text style={styles.amount}>{formatCurrency(item.total_amount)}</Text>
+          </View>
+          {item.paid_amount < item.total_amount && (
+            <Text style={{ fontSize: 12, color: colors.danger, marginTop: 4 }}>
+              Due: {formatCurrency(item.total_amount - item.paid_amount)}
+            </Text>
+          )}
+        </TouchableOpacity>
+      );
+    },
+    [colors.danger, localStyles, router, styles]
   );
 
   if (error) {
@@ -121,12 +160,17 @@ export default function SalesListScreen() {
       </View>
 
       <FilterRow>
-        {(['all', 'paid', 'unpaid'] as Filter[]).map((f) => (
+        {([
+          { key: 'all', label: 'All' },
+          { key: 'paid', label: 'Paid' },
+          { key: 'unpaid', label: 'Outstanding' },
+          { key: 'bos', label: 'BOS' },
+        ] as { key: Filter; label: string }[]).map((f) => (
           <FilterChip
-            key={f}
-            label={f === 'all' ? 'All' : f === 'paid' ? 'Paid' : 'Outstanding'}
-            active={filter === f}
-            onPress={() => setFilter(f)}
+            key={f.key}
+            label={f.label}
+            active={filter === f.key}
+            onPress={() => setFilter(f.key)}
           />
         ))}
       </FilterRow>
@@ -161,8 +205,8 @@ export default function SalesListScreen() {
           {...FLATLIST_PERF}
           ListEmptyComponent={
             <Text style={styles.empty}>
-              {search.trim()
-                ? 'No sales match your search.'
+              {search.trim() || filter !== 'all'
+                ? 'No sales match your filters.'
                 : 'No sales in this period. Create your first sale.'}
             </Text>
           }

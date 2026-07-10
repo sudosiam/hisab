@@ -43,6 +43,21 @@ export default function SaleDetailScreen() {
       StyleSheet.create({
         header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
         invoice: { fontSize: 20, fontWeight: '700', color: colors.text },
+        typeBadge: {
+          alignSelf: 'flex-start',
+          marginTop: spacing.xs,
+          paddingHorizontal: spacing.sm,
+          paddingVertical: 2,
+          borderRadius: radius.sm,
+          backgroundColor: colors.primary + '18',
+        },
+        typeBadgeBos: { backgroundColor: colors.warning + '22' },
+        typeBadgeText: {
+          fontSize: 11,
+          fontWeight: '700',
+          color: colors.primary,
+        },
+        typeBadgeTextBos: { color: colors.warning },
         party: { fontSize: 16, color: colors.textSecondary, marginTop: 4 },
         date: { fontSize: 13, color: colors.textSecondary },
         kpiRow: {
@@ -254,6 +269,7 @@ export default function SaleDetailScreen() {
     sale.total_amount > 0 ? roundMoney((grossProfit / sale.total_amount) * 100) : 0;
   const hasDiscount = (sale.discount_amount ?? 0) > 0;
   const hasServiceCharges = (sale.service_charges ?? 0) > 0;
+  const isBos = sale.invoice_type === 'bos';
 
   return (
     <FormScreen>
@@ -265,6 +281,11 @@ export default function SaleDetailScreen() {
           </TouchableOpacity>
           <StatusBadge status={sale.status} />
         </View>
+      </View>
+      <View style={[localStyles.typeBadge, isBos && localStyles.typeBadgeBos]}>
+        <Text style={[localStyles.typeBadgeText, isBos && localStyles.typeBadgeTextBos]}>
+          {isBos ? 'Bill of Supply' : 'Invoice'}
+        </Text>
       </View>
       <Text style={localStyles.party}>{sale.party_name}</Text>
       <Text style={localStyles.date}>{sale.date}</Text>

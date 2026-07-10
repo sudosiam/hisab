@@ -13,6 +13,12 @@ const SIZE_STYLES: Record<MoneyTextSize, TextStyle> = {
   hero: { ...typography.display, fontSize: 20 },
 };
 
+const styles = StyleSheet.create({
+  base: {
+    fontVariant: ['tabular-nums'],
+  },
+});
+
 interface MoneyTextProps {
   amount: number;
   /** Pre-formatted string (skips formatCurrency). */
@@ -53,12 +59,6 @@ export function MoneyText({
     </Text>
   );
 }
-
-const styles = StyleSheet.create({
-  base: {
-    fontVariant: ['tabular-nums'],
-  },
-});
 
 /** Left label column — prevents long text from pushing amounts off-screen. */
 export const moneyRowStyles = StyleSheet.create({

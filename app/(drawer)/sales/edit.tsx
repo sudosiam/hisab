@@ -21,6 +21,7 @@ import { ProductPicker } from '../../../src/components/ProductPicker';
 import { getProducts, getProductSellPrice } from '../../../src/services/inventory';
 import { getSaleById, getSaleItems, updateSale } from '../../../src/services/sales';
 import { getPartyByName } from '../../../src/services/parties';
+import { getNextSaleDocumentNo } from '../../../src/services/invoiceNumbers';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
@@ -28,9 +29,9 @@ import { formatAmountInput, formatCurrency, formatQtyInput, parseAmountInput } f
 import { isValidISODate } from '../../../src/utils/date';
 import { saveWithDuplicateInvoiceWarning } from '../../../src/utils/duplicateInvoice';
 import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
-import { spacing } from '../../../src/constants/theme';
+import { spacing, radius } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import type { Product, Sale } from '../../../src/types';
+import type { Product, Sale, SaleInvoiceType } from '../../../src/types';
 
 interface LineItem {
   key: string;
@@ -59,6 +60,19 @@ export default function EditSaleScreen() {
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
+        typeRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+        typeChip: {
+          flex: 1,
+          paddingVertical: 10,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: colors.border,
+          alignItems: 'center',
+          backgroundColor: colors.surface,
+        },
+        typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+        typeChipText: { fontWeight: '600', color: colors.text },
+        typeChipTextActive: { color: colors.onPrimary },
         itemCard: {
           ...cardSurface(colors, isDark),
           padding: spacing.md,
@@ -99,6 +113,7 @@ export default function EditSaleScreen() {
   const [partyName, setPartyName] = useState('');
   const [partyPhone, setPartyPhone] = useState('');
   const [invoiceNo, setInvoiceNo] = useState('');
+  const [invoiceType, setInvoiceType] = useState<SaleInvoiceType>('invoice');
   const [date, setDate] = useState('');
   const [discount, setDiscount] = useState('0');
   const [serviceCharges, setServiceCharges] = useState('');
@@ -138,6 +153,7 @@ export default function EditSaleScreen() {
           })
           .catch(() => {});
         setInvoiceNo(s.invoice_no);
+        setInvoiceType(s.invoice_type === 'bos' ? 'bos' : 'invoice');
         setDate(s.date);
         setDiscount(formatAmountInput(s.discount_amount ?? 0));
         setServiceCharges(s.service_charges > 0 ? formatAmountInput(s.service_charges) : '');
@@ -164,6 +180,7 @@ export default function EditSaleScreen() {
           partyName: s.party_name,
           partyPhone,
           invoiceNo: s.invoice_no,
+          invoiceType: s.invoice_type === 'bos' ? 'bos' : 'invoice',
           date: s.date,
           discount: formatAmountInput(s.discount_amount ?? 0),
           serviceCharges: s.service_charges > 0 ? formatAmountInput(s.service_charges) : '',
@@ -220,6 +237,7 @@ export default function EditSaleScreen() {
         partyName,
         partyPhone,
         invoiceNo,
+        invoiceType,
         date,
         discount,
         serviceCharges,
@@ -230,7 +248,7 @@ export default function EditSaleScreen() {
           unit_price: item.unit_price,
         })),
       }),
-    [partyName, partyPhone, invoiceNo, date, discount, serviceCharges, notes, items]
+    [partyName, partyPhone, invoiceNo, invoiceType, date, discount, serviceCharges, notes, items]
   );
   const isDirty =
     savedSnapshotRef.current !== null && formSnapshot !== savedSnapshotRef.current;
@@ -342,6 +360,7 @@ export default function EditSaleScreen() {
             party_name: partyName,
             party_phone: partyPhone.trim() || undefined,
             invoice_no: invoiceNo.trim(),
+            invoice_type: invoiceType,
             date,
             discount_amount: discountAmount,
             service_charges: serviceChargesAmount,
@@ -398,8 +417,38 @@ export default function EditSaleScreen() {
         onChangeText={setPartyPhone}
         keyboardType="phone-pad"
       />
+      <View style={localStyles.typeRow}>
+        {([
+          { value: 'invoice', label: 'Invoice' },
+          { value: 'bos', label: 'Bill of Supply' },
+        ] as { value: SaleInvoiceType; label: string }[]).map((option) => (
+          <TouchableOpacity
+            key={option.value}
+            style={[
+              localStyles.typeChip,
+              invoiceType === option.value && localStyles.typeChipActive,
+            ]}
+            onPress={() => {
+              if (option.value === invoiceType) return;
+              setInvoiceType(option.value);
+              getNextSaleDocumentNo(option.value)
+                .then(setInvoiceNo)
+                .catch(() => {});
+            }}
+          >
+            <Text
+              style={[
+                localStyles.typeChipText,
+                invoiceType === option.value && localStyles.typeChipTextActive,
+              ]}
+            >
+              {option.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       <FormInput
-        label="Invoice Number"
+        label={invoiceType === 'bos' ? 'BOS Number' : 'Invoice Number'}
         value={invoiceNo}
         onChangeText={setInvoiceNo}
         autoCapitalize="characters"

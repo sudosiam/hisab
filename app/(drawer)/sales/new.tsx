@@ -23,7 +23,7 @@ import { getProducts, getProductSellPrice } from '../../../src/services/inventor
 import { getSelectableAccounts } from '../../../src/services/banking';
 import { createSale } from '../../../src/services/sales';
 import { getPartyByName } from '../../../src/services/parties';
-import { getNextSaleInvoiceNo } from '../../../src/services/invoiceNumbers';
+import { getNextSaleDocumentNo } from '../../../src/services/invoiceNumbers';
 import { DRAFT_KEYS, loadDraft, type SaleFormDraft } from '../../../src/services/formDrafts';
 import { useFormDraft } from '../../../src/hooks/useFormDraft';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -32,9 +32,9 @@ import { formatSqliteError } from '../../../src/db/database';
 import { formatAmountInput, formatCurrency, parseAmountInput } from '../../../src/utils/format';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
 import { saveWithDuplicateInvoiceWarning } from '../../../src/utils/duplicateInvoice';
-import { spacing } from '../../../src/constants/theme';
+import { radius, spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import type { Account, Product } from '../../../src/types';
+import type { Account, Product, SaleInvoiceType } from '../../../src/types';
 
 interface LineItem {
   key: string;
@@ -79,6 +79,19 @@ export default function NewSaleScreen() {
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
+        typeRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+        typeChip: {
+          flex: 1,
+          paddingVertical: 10,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: colors.border,
+          alignItems: 'center',
+          backgroundColor: colors.surface,
+        },
+        typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+        typeChipText: { fontWeight: '600', color: colors.text },
+        typeChipTextActive: { color: colors.onPrimary },
         itemCard: {
           ...cardSurface(colors, isDark),
           padding: spacing.md,
@@ -119,6 +132,7 @@ export default function NewSaleScreen() {
   );
   const [partyPhone, setPartyPhone] = useState('');
   const [invoiceNo, setInvoiceNo] = useState('');
+  const [invoiceType, setInvoiceType] = useState<SaleInvoiceType>('invoice');
   const [date, setDate] = useState(todayISO());
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState('0');
@@ -134,6 +148,7 @@ export default function NewSaleScreen() {
       partyName,
       partyPhone,
       invoiceNo,
+      invoiceType,
       date,
       notes,
       discount,
@@ -141,7 +156,18 @@ export default function NewSaleScreen() {
       items,
       payments,
     }),
-    [partyName, partyPhone, invoiceNo, date, notes, discount, serviceCharges, items, payments]
+    [
+      partyName,
+      partyPhone,
+      invoiceNo,
+      invoiceType,
+      date,
+      notes,
+      discount,
+      serviceCharges,
+      items,
+      payments,
+    ]
   );
 
   const { markReady, discardDraft, clearDraftOnSave, hasDraft, noteDraftLoaded } = useFormDraft(
@@ -153,7 +179,8 @@ export default function NewSaleScreen() {
   const resetForm = async (productList: Product[]) => {
     setPartyName('');
     setPartyPhone('');
-    setInvoiceNo(await getNextSaleInvoiceNo());
+    setInvoiceType('invoice');
+    setInvoiceNo(await getNextSaleDocumentNo('invoice'));
     setDate(todayISO());
     setNotes('');
     setDiscount('0');
@@ -199,12 +226,14 @@ export default function NewSaleScreen() {
         setProducts(p);
         setAccounts(a);
         const draft = await loadDraft<SaleFormDraft>(DRAFT_KEYS.saleNew);
-        const nextInvoice = await getNextSaleInvoiceNo();
+        const draftType: SaleInvoiceType = draft?.invoiceType === 'bos' ? 'bos' : 'invoice';
+        const nextInvoice = await getNextSaleDocumentNo(draftType);
         if (cancelled) return;
         if (draft && !isSaleDraftEmpty(draft)) {
           setPartyName(draft.partyName || '');
           setPartyPhone(draft.partyPhone || '');
           setInvoiceNo(draft.invoiceNo || nextInvoice);
+          setInvoiceType(draftType);
           setDate(isValidISODate(draft.date) ? draft.date : todayISO());
           setNotes(draft.notes || '');
           setDiscount(Number.isFinite(parseFloat(draft.discount)) ? draft.discount : '0');
@@ -370,6 +399,7 @@ export default function NewSaleScreen() {
           party_name: partyName.trim(),
           party_phone: partyPhone.trim() || undefined,
           invoice_no: invoiceNo.trim(),
+          invoice_type: invoiceType,
           date,
           notes: notes.trim() || undefined,
           discount_amount: discountAmount,
@@ -409,8 +439,38 @@ export default function NewSaleScreen() {
   return (
     <FormScreen>
       <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
+      <View style={localStyles.typeRow}>
+        {([
+          { value: 'invoice', label: 'Invoice' },
+          { value: 'bos', label: 'Bill of Supply' },
+        ] as { value: SaleInvoiceType; label: string }[]).map((option) => (
+          <TouchableOpacity
+            key={option.value}
+            style={[
+              localStyles.typeChip,
+              invoiceType === option.value && localStyles.typeChipActive,
+            ]}
+            onPress={() => {
+              if (option.value === invoiceType) return;
+              setInvoiceType(option.value);
+              getNextSaleDocumentNo(option.value)
+                .then(setInvoiceNo)
+                .catch(() => {});
+            }}
+          >
+            <Text
+              style={[
+                localStyles.typeChipText,
+                invoiceType === option.value && localStyles.typeChipTextActive,
+              ]}
+            >
+              {option.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       <FormInput
-        label="Invoice No"
+        label={invoiceType === 'bos' ? 'BOS No' : 'Invoice No'}
         value={invoiceNo}
         onChangeText={setInvoiceNo}
         placeholder="Auto-generated"

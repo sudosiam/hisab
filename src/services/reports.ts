@@ -9,6 +9,7 @@ import { subDays, parseISO, format } from 'date-fns';
 
 export interface SalesReportRow {
   invoice_no: string;
+  invoice_type: string;
   party_name: string;
   date: string;
   total_amount: number;
@@ -47,7 +48,7 @@ export async function getSalesReport(periodKey: string): Promise<SalesReportRow[
   const db = await getDatabase();
   const { start, end } = await resolvePeriodRange(periodKey);
   return db.getAllAsync<SalesReportRow>(
-    `SELECT s.invoice_no, s.party_name, s.date, s.total_amount, s.paid_amount, s.status
+    `SELECT s.invoice_no, s.invoice_type, s.party_name, s.date, s.total_amount, s.paid_amount, s.status
      FROM sales s
      WHERE s.date >= ? AND s.date <= ?
        AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id)
@@ -241,11 +242,11 @@ export function sumReportAmounts(rows: { total_amount: number }[]): number {
 }
 
 export async function getReceivablesReport(): Promise<
-  { party_name: string; invoice_no: string; due: number; date: string }[]
+  { party_name: string; invoice_no: string; invoice_type: string; due: number; date: string }[]
 > {
   const db = await getDatabase();
   return db.getAllAsync(
-    `SELECT party_name, invoice_no, (total_amount - paid_amount) as due, date
+    `SELECT party_name, invoice_no, invoice_type, (total_amount - paid_amount) as due, date
      FROM sales
      WHERE total_amount - paid_amount > 0.01
        AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = sales.id)
@@ -320,11 +321,12 @@ export async function getDayBookReport(startDate: string, endDate: string): Prom
   const sales = await db.getAllAsync<{
     id: number;
     invoice_no: string;
+    invoice_type: string | null;
     party_name: string;
     date: string;
     total_amount: number;
   }>(
-    `SELECT s.id, s.invoice_no, s.party_name, s.date, s.total_amount
+    `SELECT s.id, s.invoice_no, s.invoice_type, s.party_name, s.date, s.total_amount
      FROM sales s
      WHERE s.date >= ? AND s.date <= ?
        AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id)
@@ -334,7 +336,7 @@ export async function getDayBookReport(startDate: string, endDate: string): Prom
   for (const sale of sales) {
     entries.push({
       date: sale.date,
-      voucherType: 'Sales',
+      voucherType: sale.invoice_type === 'bos' ? 'BOS' : 'Sales',
       voucherNo: sale.invoice_no,
       particulars: sale.party_name,
       debit: roundMoney(sale.total_amount),

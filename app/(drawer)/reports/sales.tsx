@@ -35,6 +35,8 @@ export default function SalesReportScreen() {
           borderColor: colors.border,
         },
         invoice: { fontWeight: '600', color: colors.text },
+        typeMeta: { fontSize: 11, fontWeight: '700', color: colors.primary, marginTop: 2 },
+        typeMetaBos: { color: colors.warning },
         party: { fontSize: 13, color: colors.textSecondary },
         date: { fontSize: 11, color: colors.textSecondary },
         amount: { fontWeight: '700', marginTop: 4, color: colors.text },
@@ -103,6 +105,14 @@ export default function SalesReportScreen() {
           >
             <Text style={localStyles.invoice} numberOfLines={1}>
               {item.invoice_no}
+            </Text>
+            <Text
+              style={[
+                localStyles.typeMeta,
+                item.invoice_type === 'bos' && localStyles.typeMetaBos,
+              ]}
+            >
+              {item.invoice_type === 'bos' ? 'BOS' : 'Invoice'}
             </Text>
             <Text style={localStyles.party} numberOfLines={1}>
               {item.party_name}

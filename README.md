@@ -2,7 +2,7 @@
 
 Android business management app built with **Expo SDK 54** and **SQLite**. All data stays on your device.
 
-**Current version:** `8.0.0` (Android `versionCode` 19)
+**Current version:** `8.1.0` (Android `versionCode` 20)
 
 ## What's in Hisab
 
@@ -14,6 +14,15 @@ Android business management app built with **Expo SDK 54** and **SQLite**. All d
 - **Backup & restore** — Daily auto-backup with WAL checkpoint; exclusive backup/restore lock
 - **Data safety** — Corrupt DB never auto-wiped; restore-first recovery; integrity repair on boot
 - **Automated tests** — 35 unit + integration tests (money, payments, sale/purchase flows)
+
+## What's new in 8.1.0
+
+**Bill of Supply (BOS)**
+- Sales support Invoice and Bill of Supply as separate document types
+- Independent BOS numbering sequence and prefix (Settings → Next BOS number)
+- Type badges and filters on sales list; labels on party history, reports, and PDFs
+- Ledger journal descriptions distinguish Invoice vs Bill of Supply (amounts unchanged)
+- Schema v24 — `sales.invoice_type` with safe migration (existing rows default to invoice)
 
 ## What's new in 8.0.0
 
@@ -48,7 +57,7 @@ Android business management app built with **Expo SDK 54** and **SQLite**. All d
 ## Features
 
 - **Sidebar navigation** — Dashboard, Sales, Purchases, Inventory, Banking, Balance Sheet, Growth, Reports, Settings
-- **SQLite database** — Local-first storage (schema v23)
+- **SQLite database** — Local-first storage (schema v24)
 - **Dashboard** — Revenue, purchases, profit, expense, liquid cash, receivable, payable, inventory, net worth
 - **Sales & Purchases** — Paid/unpaid lists, split payments, edit with stock checks, invoice detail with add/remove payment
 - **Inventory** — Weighted average cost, opening stock, movement history, soft-delete when referenced
@@ -126,7 +135,7 @@ Settings → About reads `app.json` via `expo-constants`.
 
 - Expo SDK 54 / React Native 0.81
 - expo-router (drawer sidebar)
-- expo-sqlite (schema v23, 23 migrations)
+- expo-sqlite (schema v24, 24 migrations)
 - expo-file-system (SAF backup on Android)
 - Jest — unit + integration tests (`better-sqlite3` harness)
 

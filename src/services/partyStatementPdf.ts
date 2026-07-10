@@ -58,9 +58,14 @@ function parseVoucher(partyType: PartyType, line: PartyStatementLine): {
 } {
   if (partyType === 'customer') {
     if (line.reference_type === 'sale') {
-      const match = line.description.match(/^Invoice\s+(.+)$/i);
+      const match = line.description.match(/^(?:Invoice|Bill of Supply)\s+(.+)$/i);
       const vchNo = match?.[1]?.trim() ?? String(line.reference_id);
-      return { vchType: 'Sales', vchNo, particulars: line.description };
+      const isBos = /^Bill of Supply\b/i.test(line.description);
+      return {
+        vchType: isBos ? 'BOS' : 'Sales',
+        vchNo,
+        particulars: line.description,
+      };
     }
     if (line.reference_type === 'payment') {
       const match = line.description.match(/^Payment\s+[—-]\s+(.+)$/i);

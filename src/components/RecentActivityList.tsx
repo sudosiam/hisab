@@ -13,12 +13,6 @@ const ROUTES: Record<ActivityItem['type'], (id: number) => string> = {
   expense: (id) => `/(drawer)/expense/${id}`,
 };
 
-const TYPE_LABEL: Record<ActivityItem['type'], string> = {
-  sale: 'Sale',
-  purchase: 'Purchase',
-  expense: 'Expense',
-};
-
 export function RecentActivityList({ items }: { items: ActivityItem[] }) {
   const router = useRouter();
   const { colors, isDark } = useTheme();
@@ -42,7 +36,7 @@ export function RecentActivityList({ items }: { items: ActivityItem[] }) {
               {item.title}
             </Text>
             <Text style={styles.subtitle} numberOfLines={1}>
-              {TYPE_LABEL[item.type]} · {item.subtitle} · {item.date}
+              {item.subtitle} · {item.date}
             </Text>
           </View>
           <MoneyText amount={item.amount} size="md" style={styles.amount} />

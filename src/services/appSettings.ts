@@ -9,9 +9,11 @@ const FINANCIAL_YEAR_START_MONTH_KEY = 'financial_year_start_month';
 const FINANCIAL_YEAR_START_YEAR_KEY = 'financial_year_start_year';
 const FINANCIAL_YEAR_PINNED_KEY = 'financial_year_pinned';
 const SALE_INVOICE_PREFIX_KEY = 'sale_invoice_prefix';
+const BOS_INVOICE_PREFIX_KEY = 'bos_invoice_prefix';
 const PURCHASE_INVOICE_PREFIX_KEY = 'purchase_invoice_prefix';
 const DEFAULT_FINANCIAL_YEAR_START_MONTH = 4;
 const DEFAULT_SALE_INVOICE_PREFIX = 'S';
+const DEFAULT_BOS_INVOICE_PREFIX = 'BOS';
 const DEFAULT_PURCHASE_INVOICE_PREFIX = 'P';
 const INVOICE_SETTING_MAX_LEN = 40;
 
@@ -139,6 +141,20 @@ export async function setSaleInvoicePrefix(prefix: string): Promise<void> {
     throw new Error('Use your next invoice number, e.g. BPH2627-0003');
   }
   await setSettingValue(SALE_INVOICE_PREFIX_KEY, cleaned.slice(0, INVOICE_SETTING_MAX_LEN));
+}
+
+export async function getBosInvoicePrefix(): Promise<string> {
+  const value = await getSettingValue(BOS_INVOICE_PREFIX_KEY);
+  if (value) return value.trim().toUpperCase();
+  return DEFAULT_BOS_INVOICE_PREFIX;
+}
+
+export async function setBosInvoicePrefix(prefix: string): Promise<void> {
+  const cleaned = prefix.trim().replace(/\s+/g, '').toUpperCase();
+  if (!isValidInvoiceSetting(cleaned)) {
+    throw new Error('Use your next BOS number, e.g. BOS2627-0001');
+  }
+  await setSettingValue(BOS_INVOICE_PREFIX_KEY, cleaned.slice(0, INVOICE_SETTING_MAX_LEN));
 }
 
 export async function getPurchaseInvoicePrefix(): Promise<string> {

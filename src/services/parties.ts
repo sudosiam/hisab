@@ -150,20 +150,22 @@ export async function getPartyStatement(partyId: number): Promise<PartyStatement
     const sales = await db.getAllAsync<{
       id: number;
       invoice_no: string;
+      invoice_type: string | null;
       date: string;
       total_amount: number;
       created_at: string;
     }>(
-      `SELECT id, invoice_no, date, total_amount, created_at
+      `SELECT id, invoice_no, invoice_type, date, total_amount, created_at
        FROM sales WHERE party_id = ? OR (party_id IS NULL AND party_name = ? COLLATE NOCASE)`,
       [party.id, party.name]
     );
     for (const sale of sales) {
+      const docLabel = sale.invoice_type === 'bos' ? 'Bill of Supply' : 'Invoice';
       entries.push({
         sort_date: sale.date,
         sort_created: sortKey('0', sale.id),
         date: sale.date,
-        description: `Invoice ${sale.invoice_no}`,
+        description: `${docLabel} ${sale.invoice_no}`,
         debit: sale.total_amount,
         credit: 0,
         reference_type: 'sale',
@@ -314,7 +316,7 @@ export async function getPartyHistory(partyId: number): Promise<PartyHistoryItem
   const db = await getDatabase();
   if (party.type === 'customer') {
     return db.getAllAsync<PartyHistoryItem>(
-      `SELECT id, invoice_no, date, total_amount, paid_amount, status, 'sale' as record_type
+      `SELECT id, invoice_no, invoice_type, date, total_amount, paid_amount, status, 'sale' as record_type
        FROM sales WHERE party_id = ? OR (party_id IS NULL AND party_name = ? COLLATE NOCASE)
        ORDER BY date DESC, id DESC`,
       [party.id, party.name]

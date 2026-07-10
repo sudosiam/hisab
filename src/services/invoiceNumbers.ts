@@ -1,10 +1,13 @@
 import { getDatabase } from '../db/database';
 import {
+  getBosInvoicePrefix,
   getPurchaseInvoicePrefix,
   getSaleInvoicePrefix,
+  setBosInvoicePrefix,
   setPurchaseInvoicePrefix,
   setSaleInvoicePrefix,
 } from './appSettings';
+import type { SaleInvoiceType } from '../types';
 
 export interface InvoiceNumberTemplate {
   /** Text before the trailing sequence, e.g. BPH2627 or GHP2728 */
@@ -76,10 +79,17 @@ export function parseInvoiceSequence(invoiceNo: string, stem: string): number | 
 
 async function getMaxInvoiceSequence(
   table: 'sales' | 'purchases',
-  stem: string
+  stem: string,
+  invoiceType?: SaleInvoiceType
 ): Promise<number> {
   const db = await getDatabase();
-  const rows = await db.getAllAsync<{ invoice_no: string }>(`SELECT invoice_no FROM ${table}`);
+  const rows =
+    table === 'sales' && invoiceType
+      ? await db.getAllAsync<{ invoice_no: string }>(
+          `SELECT invoice_no FROM sales WHERE invoice_type = ?`,
+          [invoiceType]
+        )
+      : await db.getAllAsync<{ invoice_no: string }>(`SELECT invoice_no FROM ${table}`);
   let max = 0;
   for (const row of rows) {
     const seq = parseInvoiceSequence(row.invoice_no, stem);
@@ -100,7 +110,8 @@ function resolveNextSequence(
 async function getNextInvoiceNo(
   table: 'sales' | 'purchases',
   getSetting: () => Promise<string>,
-  defaultStem: string
+  defaultStem: string,
+  invoiceType?: SaleInvoiceType
 ): Promise<string> {
   const settingValue = await getSetting();
   const template = parseInvoiceTemplate(settingValue) ?? {
@@ -108,13 +119,21 @@ async function getNextInvoiceNo(
     nextSequence: 1,
     digitWidth: 4,
   };
-  const maxDb = await getMaxInvoiceSequence(table, template.stem);
+  const maxDb = await getMaxInvoiceSequence(table, template.stem, invoiceType);
   const { sequence, digitWidth } = resolveNextSequence(template, maxDb);
   return formatInvoiceSequence(template.stem, sequence, digitWidth);
 }
 
 export async function getNextSaleInvoiceNo(): Promise<string> {
-  return getNextInvoiceNo('sales', getSaleInvoicePrefix, 'S');
+  return getNextInvoiceNo('sales', getSaleInvoicePrefix, 'S', 'invoice');
+}
+
+export async function getNextBosInvoiceNo(): Promise<string> {
+  return getNextInvoiceNo('sales', getBosInvoicePrefix, 'BOS', 'bos');
+}
+
+export async function getNextSaleDocumentNo(invoiceType: SaleInvoiceType = 'invoice'): Promise<string> {
+  return invoiceType === 'bos' ? getNextBosInvoiceNo() : getNextSaleInvoiceNo();
 }
 
 export async function getNextPurchaseInvoiceNo(): Promise<string> {
@@ -137,14 +156,24 @@ export function previewNextInvoiceFromSetting(value: string, fallbackStem: strin
 
 /** After a sale/purchase is saved, advance the stored next number. */
 export async function syncNextInvoiceSettingAfterUse(
-  kind: 'sale' | 'purchase',
+  kind: 'sale' | 'bos' | 'purchase',
   usedInvoiceNo: string
 ): Promise<void> {
   const used = parseInvoiceTemplate(usedInvoiceNo);
   if (!used) return;
 
-  const getSetting = kind === 'sale' ? getSaleInvoicePrefix : getPurchaseInvoicePrefix;
-  const setSetting = kind === 'sale' ? setSaleInvoicePrefix : setPurchaseInvoicePrefix;
+  const getSetting =
+    kind === 'sale'
+      ? getSaleInvoicePrefix
+      : kind === 'bos'
+        ? getBosInvoicePrefix
+        : getPurchaseInvoicePrefix;
+  const setSetting =
+    kind === 'sale'
+      ? setSaleInvoicePrefix
+      : kind === 'bos'
+        ? setBosInvoicePrefix
+        : setPurchaseInvoicePrefix;
 
   const currentValue = await getSetting();
   const current = parseInvoiceTemplate(currentValue);
@@ -195,10 +224,13 @@ export async function assertUniqueInvoiceNo(
   }
 }
 
-export async function resolveSaleInvoiceNo(requested?: string): Promise<string> {
+export async function resolveSaleInvoiceNo(
+  requested?: string,
+  invoiceType: SaleInvoiceType = 'invoice'
+): Promise<string> {
   const trimmed = requested?.trim();
   if (trimmed) return trimmed;
-  return getNextSaleInvoiceNo();
+  return getNextSaleDocumentNo(invoiceType);
 }
 
 export async function resolvePurchaseInvoiceNo(requested?: string): Promise<string> {

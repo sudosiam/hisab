@@ -3,7 +3,7 @@ import { waitForDatabaseAccess } from '../services/dbMaintenance';
 import { roundMoney } from '../utils/money';
 
 export const DB_NAME = 'hisab.db';
-const SCHEMA_VERSION = 23;
+const SCHEMA_VERSION = 24;
 
 /** Removes the legacy attachment media folder left over from the removed attachments feature. */
 async function clearLegacyMediaFolder(): Promise<void> {
@@ -321,6 +321,7 @@ async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Pr
   await ensurePurchasesSubtotalDiscountColumns(db);
   await ensureOtherIncomeTable(db);
   await ensureSalesServiceChargesColumn(db);
+  await ensureSalesInvoiceTypeColumn(db);
   await ensureUniqueInvoiceNumbers(db);
   await ensureInvoiceNumberIndexes(db);
   await ensureTransactionsPaymentIdColumn(db);
@@ -865,6 +866,21 @@ async function ensureSalesServiceChargesColumn(db: SQLite.SQLiteDatabase): Promi
   }
 }
 
+async function ensureSalesInvoiceTypeColumn(db: SQLite.SQLiteDatabase): Promise<void> {
+  const table = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='sales'`
+  );
+  if (!table) return;
+
+  const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(sales)');
+  const names = new Set(columns.map((col) => col.name));
+  if (!names.has('invoice_type')) {
+    await db.execAsync(
+      "ALTER TABLE sales ADD COLUMN invoice_type TEXT NOT NULL DEFAULT 'invoice'"
+    );
+  }
+}
+
 async function ensureOtherIncomeTable(db: SQLite.SQLiteDatabase): Promise<void> {
   const table = await db.getFirstAsync<{ name: string }>(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='other_income'`
@@ -1223,7 +1239,7 @@ async function verifySchema(db: SQLite.SQLiteDatabase): Promise<boolean> {
       'SELECT opening_qty, opening_cost, avg_cost, sell_price, current_qty, category, is_hidden FROM products LIMIT 1'
     );
     await db.getFirstAsync(
-      'SELECT paid_amount, status, discount_amount, service_charges FROM sales LIMIT 1'
+      'SELECT paid_amount, status, discount_amount, service_charges, invoice_type FROM sales LIMIT 1'
     );
     await db.getFirstAsync(
       'SELECT paid_amount, status, vendor_invoice_no, subtotal, discount_amount FROM purchases LIMIT 1'
@@ -1375,6 +1391,7 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
     CREATE TABLE sales (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       invoice_no TEXT NOT NULL,
+      invoice_type TEXT NOT NULL DEFAULT 'invoice',
       party_id INTEGER,
       party_name TEXT NOT NULL,
       date TEXT NOT NULL,
