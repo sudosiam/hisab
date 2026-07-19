@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../context/ThemeContext';
+import { formatDisplayDate } from '../utils/date';
 import { spacing } from '../constants/theme';
 import { cardSurface } from '../constants/shadows';
 import { MoneyText } from './MoneyText';
@@ -36,7 +37,7 @@ export function RecentActivityList({ items }: { items: ActivityItem[] }) {
               {item.title}
             </Text>
             <Text style={styles.subtitle} numberOfLines={1}>
-              {item.subtitle} · {item.date}
+              {item.subtitle} · {formatDisplayDate(item.date)}
             </Text>
           </View>
           <MoneyText amount={item.amount} size="md" style={styles.amount} />
@@ -51,12 +52,14 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     list: {
       ...cardSurface(colors, isDark),
       paddingHorizontal: spacing.md,
+      overflow: 'hidden',
     },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingVertical: spacing.sm + 2,
-      borderBottomWidth: 1,
+      paddingVertical: spacing.sm,
+      minHeight: 48,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.borderLight,
       gap: spacing.sm,
     },
@@ -64,17 +67,17 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     rowLast: {
       borderBottomWidth: 0,
     },
-    title: { fontSize: 14, fontWeight: '500', color: colors.text },
-    subtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+    title: { fontSize: 13, fontWeight: '500', color: colors.text },
+    subtitle: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
     amount: {
       flexShrink: 0,
       maxWidth: '46%',
     },
     empty: {
-      fontSize: 14,
+      fontSize: 13,
       color: colors.textSecondary,
       textAlign: 'center',
-      paddingVertical: spacing.lg,
+      paddingVertical: spacing.md,
     },
   });
 }

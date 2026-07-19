@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getExpensesByCategoryReport } from '../../../src/services/reports';
@@ -13,34 +13,34 @@ import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { shareExpenseCategoriesPdf } from '../../../src/services/reportPdf';
 import { roundMoney } from '../../../src/utils/money';
 import { formatSqliteError } from '../../../src/db/database';
-import { radius, spacing } from '../../../src/constants/theme';
+import { spacing } from '../../../src/constants/theme';
+import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 
 export default function ExpenseCategoriesReportScreen() {
   const styles = useScreenStyles();
   const { refreshKey } = useDatabase();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
         totalWrap: { alignItems: 'center', padding: spacing.md },
         row: {
-          backgroundColor: colors.surface,
-          padding: spacing.md,
-          borderRadius: radius.sm,
+          ...cardSurface(colors, isDark),
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
           marginBottom: spacing.xs,
-          borderWidth: 1,
-          borderColor: colors.border,
         },
         category: { fontWeight: '600', color: colors.text },
         count: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
       }),
-    [colors]
+    [colors, isDark]
   );
   const [rows, setRows] = useState<Awaited<ReturnType<typeof getExpensesByCategoryReport>>>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [booting, setBooting] = useState(true);
 
   const load = useCallback(async () => {
     void refreshKey;
@@ -49,6 +49,8 @@ export default function ExpenseCategoriesReportScreen() {
       setError(null);
     } catch (e) {
       setError(formatSqliteError(e));
+    } finally {
+      setBooting(false);
     }
   }, [monthKey, refreshKey]);
 
@@ -68,6 +70,14 @@ export default function ExpenseCategoriesReportScreen() {
 
   if (error) {
     return <ErrorState message={error} onRetry={load} />;
+  }
+
+  if (booting) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
   }
 
   return (

@@ -9,8 +9,10 @@ import {
 } from '../db/database';
 import { resolveSaleInvoiceNo, syncNextInvoiceSettingAfterUse } from './invoiceNumbers';
 import { upsertParty } from './parties';
+import { assertGstPlaceOfSupply, computeGstDocument, enforceInvoiceTypeForTax } from './gst';
+import { getBusinessState, isGstEnabled, isTaxInclusivePricing } from './appSettings';
 import { formatCurrency } from '../utils/format';
-import { addMoney, mulMoney, roundMoney, subMoney } from '../utils/money';
+import { addMoney, roundMoney, subMoney } from '../utils/money';
 import { resolvePeriodRange } from '../utils/period';
 import { pickLegacyPaymentMatch } from '../utils/paymentPair';
 import type { PaymentInput, Sale, SaleInvoiceType, SaleItem, SaleItemInput, SalePayment } from '../types';
@@ -25,6 +27,82 @@ function validateSaleItems(items: SaleItemInput[]): void {
     if (item.qty <= 0) throw new Error('Item quantity must be greater than zero');
     if (item.unit_price <= 0) throw new Error('Item unit price must be greater than zero');
   }
+}
+
+async function resolvePartyState(
+  db: Awaited<ReturnType<typeof getDatabase>>,
+  partyName: string,
+  partyId?: number | null
+): Promise<string | null> {
+  if (partyId) {
+    const row = await db.getFirstAsync<{ state: string | null; gstin: string | null }>(
+      'SELECT state, gstin FROM parties WHERE id = ?',
+      [partyId]
+    );
+    if (row?.state) return row.state;
+    if (row?.gstin) {
+      const { stateCodeFromGstin } = await import('./gst');
+      return stateCodeFromGstin(row.gstin);
+    }
+  }
+  const byName = await db.getFirstAsync<{ state: string | null; gstin: string | null }>(
+    `SELECT state, gstin FROM parties WHERE name = ? COLLATE NOCASE AND type = 'customer' LIMIT 1`,
+    [partyName.trim()]
+  );
+  if (byName?.state) return byName.state;
+  if (byName?.gstin) {
+    const { stateCodeFromGstin } = await import('./gst');
+    return stateCodeFromGstin(byName.gstin);
+  }
+  return null;
+}
+
+async function buildSaleGst(
+  db: Awaited<ReturnType<typeof getDatabase>>,
+  params: {
+    party_name: string;
+    party_id?: number | null;
+    items: SaleItemInput[];
+    discount_amount?: number;
+    service_charges?: number;
+    invoice_type?: SaleInvoiceType;
+  }
+) {
+  const gstEnabled = await isGstEnabled();
+  const businessState = await getBusinessState();
+  const taxInclusive = await isTaxInclusivePricing();
+  const partyState = await resolvePartyState(db, params.party_name, params.party_id);
+  const gst = computeGstDocument({
+    lines: params.items.map((item) => ({
+      qty: item.qty,
+      unit_price: item.unit_price,
+      gst_rate: item.gst_rate,
+      hsn_sac: item.hsn_sac,
+    })),
+    discount_amount: params.discount_amount,
+    service_charges: params.service_charges,
+    business_state: businessState,
+    party_state: partyState,
+    gst_enabled: gstEnabled,
+    tax_inclusive: taxInclusive,
+  });
+  assertGstPlaceOfSupply({
+    gst_enabled: gstEnabled,
+    tax_amount: gst.tax_amount,
+    business_state: businessState,
+    party_state: partyState,
+  });
+  // Honour explicit invoice_type from UI only when it remains valid with tax.
+  let invoiceType = params.invoice_type
+    ? normalizeInvoiceType(params.invoice_type)
+    : gst.suggested_invoice_type;
+  invoiceType = enforceInvoiceTypeForTax(invoiceType, gst.tax_amount);
+  if (params.invoice_type === 'bos' && gst.tax_amount > 0.009) {
+    throw new Error(
+      'Bill of Supply cannot include GST. Clear tax rates or switch to Tax Invoice.'
+    );
+  }
+  return { gst, invoiceType, partyState };
 }
 
 function validatePaymentAmount(
@@ -137,37 +215,11 @@ export async function createSale(params: {
   validateSaleItems(params.items);
 
   const db = await getDatabase();
-  const invoiceType = normalizeInvoiceType(params.invoice_type);
-
-  let subtotal = 0;
-  const itemDetails: {
-    product_id: number;
-    qty: number;
-    unit_price: number;
-    unit_cost: number;
-    total: number;
-  }[] = [];
-
-  for (const item of params.items) {
-    const total = mulMoney(item.qty, item.unit_price);
-    subtotal = addMoney(subtotal, total);
-    itemDetails.push({
-      product_id: item.product_id,
-      qty: item.qty,
-      unit_price: item.unit_price,
-      unit_cost: 0,
-      total,
-    });
-  }
-
-  const discount = roundMoney(Math.max(0, params.discount_amount ?? 0));
-  const serviceCharges = roundMoney(Math.max(0, params.service_charges ?? 0));
-  if (discount > subtotal + 0.01) {
-    throw new Error('Discount cannot exceed subtotal');
-  }
-  const totalAmount = roundMoney(
-    Math.max(0, addMoney(subMoney(subtotal, discount), serviceCharges))
-  );
+  const { gst, invoiceType } = await buildSaleGst(db, params);
+  const subtotal = gst.subtotal;
+  const discount = gst.discount_amount;
+  const serviceCharges = gst.service_charges;
+  const totalAmount = gst.total_amount;
 
   let paidAmount = 0;
   for (const payment of params.payments) {
@@ -186,8 +238,11 @@ export async function createSale(params: {
     const partyId = await upsertParty(params.party_name, 'customer', db, params.party_phone);
 
     const result = await db.runAsync(
-      `INSERT INTO sales (invoice_no, invoice_type, party_id, party_name, date, subtotal, discount_amount, service_charges, total_amount, paid_amount, status, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO sales (
+         invoice_no, invoice_type, party_id, party_name, date, subtotal, discount_amount, service_charges,
+         taxable_amount, cgst_amount, sgst_amount, igst_amount, is_inter_state, place_of_supply,
+         total_amount, paid_amount, status, notes
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         invoiceNo,
         invoiceType,
@@ -197,6 +252,12 @@ export async function createSale(params: {
         subtotal,
         discount,
         serviceCharges,
+        gst.taxable_amount,
+        gst.cgst_amount,
+        gst.sgst_amount,
+        gst.igst_amount,
+        gst.is_inter_state ? 1 : 0,
+        gst.place_of_supply,
         totalAmount,
         paidAmount,
         status,
@@ -205,19 +266,33 @@ export async function createSale(params: {
     );
     saleId = result.lastInsertRowId;
 
-    for (let i = 0; i < itemDetails.length; i++) {
-      itemDetails[i].unit_cost = await reduceInventory(
-        db,
-        itemDetails[i].product_id,
-        itemDetails[i].qty
-      );
+    const unitCosts: number[] = [];
+    for (let i = 0; i < params.items.length; i++) {
+      unitCosts.push(await reduceInventory(db, params.items[i].product_id, params.items[i].qty));
     }
 
-    for (const item of itemDetails) {
+    for (let i = 0; i < params.items.length; i++) {
+      const item = params.items[i];
+      const line = gst.lines[i];
       await db.runAsync(
-        `INSERT INTO sale_items (sale_id, product_id, qty, unit_price, unit_cost, total)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [saleId, item.product_id, item.qty, item.unit_price, item.unit_cost, item.total]
+        `INSERT INTO sale_items (
+           sale_id, product_id, qty, unit_price, unit_cost, total,
+           hsn_sac, gst_rate, taxable_amount, cgst_amount, sgst_amount, igst_amount
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          saleId,
+          item.product_id,
+          item.qty,
+          item.unit_price,
+          unitCosts[i],
+          line.line_total,
+          line.hsn_sac,
+          line.gst_rate,
+          line.taxable_amount,
+          line.cgst_amount,
+          line.sgst_amount,
+          line.igst_amount,
+        ]
       );
       await db.runAsync(
         `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, reference_id, notes)
@@ -225,7 +300,7 @@ export async function createSale(params: {
         [
           item.product_id,
           -item.qty,
-          item.unit_cost,
+          unitCosts[i],
           saleId,
           `${invoiceType === 'bos' ? 'BOS' : 'Sale'} ${invoiceNo}`,
         ]
@@ -291,7 +366,8 @@ async function replaceSaleItems(
   saleId: number,
   invoiceNo: string,
   items: SaleItemInput[],
-  invoiceType: SaleInvoiceType = 'invoice'
+  invoiceType: SaleInvoiceType,
+  gstLines: ReturnType<typeof computeGstDocument>['lines']
 ): Promise<number> {
   validateSaleItems(items);
 
@@ -331,39 +407,30 @@ async function replaceSaleItems(
   }
 
   let subtotal = 0;
-  const itemDetails: {
-    product_id: number;
-    qty: number;
-    unit_price: number;
-    unit_cost: number;
-    total: number;
-  }[] = [];
-
-  for (const item of items) {
-    const total = mulMoney(item.qty, item.unit_price);
-    subtotal = addMoney(subtotal, total);
-    itemDetails.push({
-      product_id: item.product_id,
-      qty: item.qty,
-      unit_price: item.unit_price,
-      unit_cost: 0,
-      total,
-    });
-  }
-
-  for (let i = 0; i < itemDetails.length; i++) {
-    itemDetails[i].unit_cost = await reduceInventory(
-      db,
-      itemDetails[i].product_id,
-      itemDetails[i].qty
-    );
-  }
-
-  for (const item of itemDetails) {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const line = gstLines[i];
+    subtotal = addMoney(subtotal, line.line_total);
+    const unitCost = await reduceInventory(db, item.product_id, item.qty);
     await db.runAsync(
-      `INSERT INTO sale_items (sale_id, product_id, qty, unit_price, unit_cost, total)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [saleId, item.product_id, item.qty, item.unit_price, item.unit_cost, item.total]
+      `INSERT INTO sale_items (
+         sale_id, product_id, qty, unit_price, unit_cost, total,
+         hsn_sac, gst_rate, taxable_amount, cgst_amount, sgst_amount, igst_amount
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        saleId,
+        item.product_id,
+        item.qty,
+        item.unit_price,
+        unitCost,
+        line.line_total,
+        line.hsn_sac,
+        line.gst_rate,
+        line.taxable_amount,
+        line.cgst_amount,
+        line.sgst_amount,
+        line.igst_amount,
+      ]
     );
     await db.runAsync(
       `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, reference_id, notes)
@@ -371,7 +438,7 @@ async function replaceSaleItems(
       [
         item.product_id,
         -item.qty,
-        item.unit_cost,
+        unitCost,
         saleId,
         `${invoiceType === 'bos' ? 'BOS' : 'Sale'} ${invoiceNo}`,
       ]
@@ -410,17 +477,57 @@ export async function updateSale(
   const serviceCharges = roundMoney(Math.max(0, params.service_charges ?? sale.service_charges ?? 0));
 
   await db.withTransactionAsync(async () => {
-    const subtotal =
-      params.items !== undefined
-        ? await replaceSaleItems(db, saleId, invoiceNo, params.items, invoiceType)
-        : sale.subtotal;
+    let subtotal = sale.subtotal;
+    let gst = {
+      taxable_amount: sale.taxable_amount ?? sale.subtotal,
+      cgst_amount: sale.cgst_amount ?? 0,
+      sgst_amount: sale.sgst_amount ?? 0,
+      igst_amount: sale.igst_amount ?? 0,
+      is_inter_state: !!(sale.is_inter_state ?? 0),
+      place_of_supply: sale.place_of_supply ?? null,
+      total_amount: sale.total_amount,
+      lines: [] as ReturnType<typeof computeGstDocument>['lines'],
+    };
 
-    if (discount > subtotal + 0.01) {
-      throw new Error('Discount cannot exceed subtotal');
+    if (params.items !== undefined) {
+      const built = await buildSaleGst(db, {
+        party_name: partyName,
+        party_id: sale.party_id,
+        items: params.items,
+        discount_amount: discount,
+        service_charges: serviceCharges,
+        invoice_type: invoiceType,
+      });
+      gst = built.gst;
+      subtotal = await replaceSaleItems(
+        db,
+        saleId,
+        invoiceNo,
+        params.items,
+        invoiceType,
+        built.gst.lines
+      );
+    } else {
+      const existingItems = await getSaleItems(saleId);
+      const built = await buildSaleGst(db, {
+        party_name: partyName,
+        party_id: sale.party_id,
+        items: existingItems.map((item) => ({
+          product_id: item.product_id,
+          qty: item.qty,
+          unit_price: item.unit_price,
+          hsn_sac: item.hsn_sac,
+          gst_rate: item.gst_rate,
+        })),
+        discount_amount: discount,
+        service_charges: serviceCharges,
+        invoice_type: invoiceType,
+      });
+      gst = built.gst;
+      subtotal = built.gst.subtotal;
     }
-    const totalAmount = roundMoney(
-      Math.max(0, addMoney(subMoney(subtotal, discount), serviceCharges))
-    );
+
+    const totalAmount = gst.total_amount;
     if (totalAmount + 0.01 < sale.paid_amount) {
       throw new Error(
         `New total (${formatCurrency(totalAmount)}) cannot be less than the amount already paid (${formatCurrency(sale.paid_amount)}). Remove payments first.`
@@ -430,7 +537,11 @@ export async function updateSale(
     const status = getPaymentStatus(totalAmount, sale.paid_amount);
     const partyId = await upsertParty(partyName, 'customer', db, params.party_phone);
     await db.runAsync(
-      `UPDATE sales SET invoice_no = ?, invoice_type = ?, party_id = ?, party_name = ?, date = ?, subtotal = ?, discount_amount = ?, service_charges = ?, total_amount = ?, status = ?, notes = ? WHERE id = ?`,
+      `UPDATE sales SET invoice_no = ?, invoice_type = ?, party_id = ?, party_name = ?, date = ?,
+       subtotal = ?, discount_amount = ?, service_charges = ?,
+       taxable_amount = ?, cgst_amount = ?, sgst_amount = ?, igst_amount = ?,
+       is_inter_state = ?, place_of_supply = ?,
+       total_amount = ?, status = ?, notes = ? WHERE id = ?`,
       [
         invoiceNo,
         invoiceType,
@@ -440,6 +551,12 @@ export async function updateSale(
         subtotal,
         discount,
         serviceCharges,
+        gst.taxable_amount,
+        gst.cgst_amount,
+        gst.sgst_amount,
+        gst.igst_amount,
+        gst.is_inter_state ? 1 : 0,
+        gst.place_of_supply,
         totalAmount,
         status,
         params.notes ?? null,

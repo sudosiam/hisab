@@ -17,6 +17,7 @@ import { isValidISODate } from '../../src/utils/date';
 import { useDatabase } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
+import { useUnsavedChangesGuard } from '../../src/hooks/useUnsavedChangesGuard';
 import { formatSqliteError } from '../../src/db/database';
 import { spacing, typography } from '../../src/constants/theme';
 import { cardSurface } from '../../src/constants/shadows';
@@ -38,13 +39,42 @@ export default function LoansScreen() {
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const savedFormSnapshotRef = useRef<string | null>(null);
+
+  const formSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        editingId,
+        lenderName,
+        principalAmount,
+        outstandingAmount,
+        interestRate,
+        startDate,
+        notes,
+      }),
+    [
+      editingId,
+      lenderName,
+      principalAmount,
+      outstandingAmount,
+      interestRate,
+      startDate,
+      notes,
+    ]
+  );
+  const formDirty =
+    showForm &&
+    savedFormSnapshotRef.current !== null &&
+    formSnapshot !== savedFormSnapshotRef.current;
+  useUnsavedChangesGuard(formDirty);
 
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
         hero: {
           ...cardSurface(colors, isDark),
-          padding: spacing.lg,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.md,
           marginBottom: spacing.lg,
           alignItems: 'center',
         },
@@ -106,26 +136,52 @@ export default function LoansScreen() {
     setNotes('');
     setEditingId(null);
     setShowForm(false);
+    savedFormSnapshotRef.current = null;
   };
 
   const startAdd = () => {
-    resetForm();
+    const blank = {
+      editingId: null as number | null,
+      lenderName: '',
+      principalAmount: '',
+      outstandingAmount: '',
+      interestRate: '',
+      startDate: '',
+      notes: '',
+    };
+    setEditingId(blank.editingId);
+    setLenderName(blank.lenderName);
+    setPrincipalAmount(blank.principalAmount);
+    setOutstandingAmount(blank.outstandingAmount);
+    setInterestRate(blank.interestRate);
+    setStartDate(blank.startDate);
+    setNotes(blank.notes);
     setShowForm(true);
+    savedFormSnapshotRef.current = JSON.stringify(blank);
   };
 
   const startEdit = (loan: Loan) => {
-    setEditingId(loan.id);
-    setLenderName(loan.lender_name);
-    setPrincipalAmount(formatAmountInput(loan.principal_amount));
-    setOutstandingAmount(formatAmountInput(loan.outstanding_amount));
-    setInterestRate(
-      loan.interest_rate === null || Number.isNaN(loan.interest_rate)
-        ? ''
-        : formatAmountInput(loan.interest_rate)
-    );
-    setStartDate(loan.start_date ?? '');
-    setNotes(loan.notes ?? '');
+    const next = {
+      editingId: loan.id as number | null,
+      lenderName: loan.lender_name,
+      principalAmount: formatAmountInput(loan.principal_amount),
+      outstandingAmount: formatAmountInput(loan.outstanding_amount),
+      interestRate:
+        loan.interest_rate === null || Number.isNaN(loan.interest_rate)
+          ? ''
+          : formatAmountInput(loan.interest_rate),
+      startDate: loan.start_date ?? '',
+      notes: loan.notes ?? '',
+    };
+    setEditingId(next.editingId);
+    setLenderName(next.lenderName);
+    setPrincipalAmount(next.principalAmount);
+    setOutstandingAmount(next.outstandingAmount);
+    setInterestRate(next.interestRate);
+    setStartDate(next.startDate);
+    setNotes(next.notes);
     setShowForm(true);
+    savedFormSnapshotRef.current = JSON.stringify(next);
   };
 
   const handleSave = async () => {

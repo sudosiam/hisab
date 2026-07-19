@@ -1,6 +1,6 @@
-import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useState, useCallback } from 'react';
 import { Alert, Text, StyleSheet, View } from 'react-native';
-import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
+import { useLocalSearchParams, useRouter, useNavigation, useFocusEffect } from 'expo-router';
 import { FormInput, FormScreen, PrimaryButton, DatePickerField, useScreenStyles } from '../../../src/components/ui';
 import { AccountPicker } from '../../../src/components/AccountPicker';
 import { getSelectableAccounts, recordDeposit, recordWithdrawal } from '../../../src/services/banking';
@@ -9,6 +9,7 @@ import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
+import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import type { Account } from '../../../src/types';
@@ -23,7 +24,7 @@ export default function CashMovementScreen() {
   const mode: Mode = modeParam === 'withdraw' ? 'withdraw' : 'deposit';
   const router = useRouter();
   const navigation = useNavigation();
-  const { refresh } = useDatabase();
+  const { refresh, refreshKey } = useDatabase();
   const styles = useScreenStyles();
   const { colors, isDark } = useTheme();
   const localStyles = useMemo(
@@ -46,30 +47,32 @@ export default function CashMovementScreen() {
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
 
+  useUnsavedChangesGuard(amount.trim() !== '' || description.trim() !== '');
+
   useLayoutEffect(() => {
     navigation.setOptions({ title: mode === 'deposit' ? 'Deposit' : 'Withdraw' });
   }, [mode, navigation]);
 
-  useEffect(() => {
-    let cancelled = false;
-    getSelectableAccounts()
-      .then((a) => {
-        if (cancelled) return;
-        setAccounts(a);
+  const reloadAccounts = useCallback(async () => {
+    try {
+      const a = await getSelectableAccounts();
+      setAccounts(a);
+      setAccountId((current) => {
         const preselected = accountIdParam ? parseInt(accountIdParam, 10) : 0;
-        if (preselected && a.some((acc) => acc.id === preselected)) {
-          setAccountId(preselected);
-        } else if (a.length > 0) {
-          setAccountId(a[0].id);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) Alert.alert('Error', formatSqliteError(e));
+        if (preselected && a.some((acc) => acc.id === preselected)) return preselected;
+        if (current && a.some((acc) => acc.id === current)) return current;
+        return a[0]?.id ?? 0;
       });
-    return () => {
-      cancelled = true;
-    };
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
   }, [accountIdParam]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void reloadAccounts();
+    }, [reloadAccounts, refreshKey])
+  );
 
   const selected = accounts.find((a) => a.id === accountId);
 

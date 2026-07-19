@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Alert } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import {
   FormInput,
   FormScreen,
@@ -21,7 +21,7 @@ import type { Account } from '../../../src/types';
 
 export default function NewOtherIncomeScreen() {
   const router = useRouter();
-  const { refresh } = useDatabase();
+  const { refresh, refreshKey } = useDatabase();
   const [category, setCategory] = useState('');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
@@ -29,6 +29,24 @@ export default function NewOtherIncomeScreen() {
   const [accounts, setAccounts] = React.useState<Account[]>([]);
   const [accountId, setAccountId] = useState(0);
   const [loading, setLoading] = useState(false);
+
+  const reloadAccounts = React.useCallback(async () => {
+    try {
+      const a = await getSelectableAccounts();
+      setAccounts(a);
+      setAccountId((current) =>
+        current && a.some((acc) => acc.id === current) ? current : a[0]?.id ?? 0
+      );
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      void reloadAccounts();
+    }, [reloadAccounts, refreshKey])
+  );
 
   React.useEffect(() => {
     let cancelled = false;

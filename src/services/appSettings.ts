@@ -11,10 +11,20 @@ const FINANCIAL_YEAR_PINNED_KEY = 'financial_year_pinned';
 const SALE_INVOICE_PREFIX_KEY = 'sale_invoice_prefix';
 const BOS_INVOICE_PREFIX_KEY = 'bos_invoice_prefix';
 const PURCHASE_INVOICE_PREFIX_KEY = 'purchase_invoice_prefix';
+const BUSINESS_NAME_KEY = 'business_name';
+const BUSINESS_ADDRESS_KEY = 'business_address';
+const BUSINESS_GSTIN_KEY = 'business_gstin';
+const BUSINESS_STATE_KEY = 'business_state';
+const GST_ENABLED_KEY = 'gst_enabled';
+const TAX_INCLUSIVE_KEY = 'tax_inclusive_pricing';
+const UPI_ID_KEY = 'business_upi_id';
+const WHATSAPP_MESSAGE_TEMPLATE_KEY = 'whatsapp_message_template';
 const DEFAULT_FINANCIAL_YEAR_START_MONTH = 4;
 const DEFAULT_SALE_INVOICE_PREFIX = 'S';
 const DEFAULT_BOS_INVOICE_PREFIX = 'BOS';
 const DEFAULT_PURCHASE_INVOICE_PREFIX = 'P';
+const DEFAULT_WHATSAPP_TEMPLATE =
+  'Hi {party}, please find {doc_type} {invoice_no} for {amount}. Thank you.';
 const INVOICE_SETTING_MAX_LEN = 40;
 
 function isValidInvoiceSetting(value: string): boolean {
@@ -169,4 +179,134 @@ export async function setPurchaseInvoicePrefix(prefix: string): Promise<void> {
     throw new Error('Use your next invoice number, e.g. GHP2728-000000013');
   }
   await setSettingValue(PURCHASE_INVOICE_PREFIX_KEY, cleaned.slice(0, INVOICE_SETTING_MAX_LEN));
+}
+
+export async function getBusinessName(): Promise<string> {
+  return (await getSettingValue(BUSINESS_NAME_KEY))?.trim() || '';
+}
+
+export async function setBusinessName(name: string): Promise<void> {
+  await setSettingValue(BUSINESS_NAME_KEY, name.trim().slice(0, 120));
+}
+
+export async function getBusinessAddress(): Promise<string> {
+  return (await getSettingValue(BUSINESS_ADDRESS_KEY))?.trim() || '';
+}
+
+export async function setBusinessAddress(address: string): Promise<void> {
+  await setSettingValue(BUSINESS_ADDRESS_KEY, address.trim().slice(0, 500));
+}
+
+export async function getBusinessGstin(): Promise<string> {
+  return (await getSettingValue(BUSINESS_GSTIN_KEY))?.trim().toUpperCase() || '';
+}
+
+export async function setBusinessGstin(gstin: string): Promise<void> {
+  const cleaned = gstin.trim().toUpperCase();
+  if (cleaned) {
+    const { isValidGstin } = await import('./gst');
+    if (!isValidGstin(cleaned)) {
+      throw new Error('Enter a valid 15-character GSTIN');
+    }
+  }
+  await setSettingValue(BUSINESS_GSTIN_KEY, cleaned.slice(0, 15));
+}
+
+export async function getBusinessState(): Promise<string> {
+  return (await getSettingValue(BUSINESS_STATE_KEY))?.trim() || '';
+}
+
+export async function setBusinessState(stateCode: string): Promise<void> {
+  const cleaned = stateCode.trim().slice(0, 2);
+  if (cleaned) {
+    const { isValidStateCode } = await import('./gst');
+    if (!isValidStateCode(cleaned)) {
+      throw new Error('Enter a valid 2-digit GST state code (e.g. 27 for Maharashtra)');
+    }
+  }
+  await setSettingValue(BUSINESS_STATE_KEY, cleaned);
+}
+
+export async function isGstEnabled(): Promise<boolean> {
+  const value = await getSettingValue(GST_ENABLED_KEY);
+  if (value === null) return true;
+  return value === '1' || value === 'true';
+}
+
+export async function setGstEnabled(enabled: boolean): Promise<void> {
+  await setSettingValue(GST_ENABLED_KEY, enabled ? '1' : '0');
+}
+
+export async function isTaxInclusivePricing(): Promise<boolean> {
+  const value = await getSettingValue(TAX_INCLUSIVE_KEY);
+  return value === '1' || value === 'true';
+}
+
+export async function setTaxInclusivePricing(enabled: boolean): Promise<void> {
+  await setSettingValue(TAX_INCLUSIVE_KEY, enabled ? '1' : '0');
+}
+
+export async function getBusinessUpiId(): Promise<string> {
+  return (await getSettingValue(UPI_ID_KEY))?.trim() || '';
+}
+
+export async function setBusinessUpiId(upiId: string): Promise<void> {
+  const cleaned = upiId.trim().toLowerCase();
+  if (cleaned && !/^[\w.\-]+@[\w.\-]+$/.test(cleaned)) {
+    throw new Error('Enter a valid UPI ID, e.g. business@okaxis');
+  }
+  await setSettingValue(UPI_ID_KEY, cleaned.slice(0, 80));
+}
+
+export async function getWhatsappMessageTemplate(): Promise<string> {
+  return (await getSettingValue(WHATSAPP_MESSAGE_TEMPLATE_KEY))?.trim() || DEFAULT_WHATSAPP_TEMPLATE;
+}
+
+export async function setWhatsappMessageTemplate(template: string): Promise<void> {
+  const cleaned = template.trim();
+  await setSettingValue(
+    WHATSAPP_MESSAGE_TEMPLATE_KEY,
+    cleaned ? cleaned.slice(0, 500) : DEFAULT_WHATSAPP_TEMPLATE
+  );
+}
+
+export async function getBusinessProfile(): Promise<{
+  business_name: string;
+  business_address: string;
+  business_gstin: string;
+  business_state: string;
+  gst_enabled: boolean;
+  tax_inclusive: boolean;
+  business_upi_id: string;
+  whatsapp_message_template: string;
+}> {
+  const [
+    business_name,
+    business_address,
+    business_gstin,
+    business_state,
+    gst_enabled,
+    tax_inclusive,
+    business_upi_id,
+    whatsapp_message_template,
+  ] = await Promise.all([
+    getBusinessName(),
+    getBusinessAddress(),
+    getBusinessGstin(),
+    getBusinessState(),
+    isGstEnabled(),
+    isTaxInclusivePricing(),
+    getBusinessUpiId(),
+    getWhatsappMessageTemplate(),
+  ]);
+  return {
+    business_name,
+    business_address,
+    business_gstin,
+    business_state,
+    gst_enabled,
+    tax_inclusive,
+    business_upi_id,
+    whatsapp_message_template,
+  };
 }

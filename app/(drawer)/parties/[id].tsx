@@ -23,18 +23,24 @@ import { LedgerTable } from '../../../src/components/LedgerTable';
 import {
   deleteParty,
   getPartyHistory,
-  getPartyStatement,
+  getPartyStatementInRange,
   getPartySummary,
   updateParty,
 } from '../../../src/services/parties';
+import { MonthPicker } from '../../../src/components/MonthPicker';
+import { OverflowMenu } from '../../../src/components/OverflowMenu';
 import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { formatCurrency } from '../../../src/utils/format';
+import { formatDisplayDate, getCurrentMonthKey, getPeriodRange } from '../../../src/utils/date';
 import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
+import { useFinancialYear } from '../../../src/context/FinancialYearContext';
 import { spacing, radius, typography } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
+import { stateName } from '../../../src/services/gst';
 import type { PartyHistoryItem, PartyStatementLine, PartySummary, PartyType } from '../../../src/types';
+import { MoneyText } from '../../../src/components/MoneyText';
 
 type Tab = 'statement' | 'history';
 
@@ -43,6 +49,7 @@ export default function PartyDetailScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const { refresh } = useDatabase();
+  const { fyStartMonth } = useFinancialYear();
   const styles = useScreenStyles();
   const { colors, isDark } = useTheme();
   const localStyles = useMemo(
@@ -51,18 +58,19 @@ export default function PartyDetailScreen() {
         profileCard: {
           ...cardSurface(colors, isDark),
           marginBottom: spacing.md,
-          padding: spacing.lg,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.md,
         },
-        profileTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+        profileTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
         avatar: {
-          width: 56,
-          height: 56,
-          borderRadius: radius.lg,
+          width: 48,
+          height: 48,
+          borderRadius: radius.full,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: colors.primary + '18',
+          backgroundColor: colors.primaryContainer,
         },
-        avatarText: { fontSize: 22, fontWeight: '700', color: colors.primary },
+        avatarText: { fontSize: 18, fontWeight: '700', color: colors.onPrimaryContainer },
         profileInfo: { flex: 1 },
         name: { ...typography.title, color: colors.text },
         badgeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs },
@@ -97,16 +105,17 @@ export default function PartyDetailScreen() {
           justifyContent: 'center',
           gap: spacing.xs,
           paddingVertical: 10,
-          borderRadius: radius.md,
-          borderWidth: 1,
-          borderColor: colors.border,
-          backgroundColor: colors.surface,
+          minHeight: 40,
+          borderRadius: radius.full,
+          borderWidth: 0,
+          backgroundColor: colors.primaryContainer,
         },
-        editBtnText: { color: colors.primary, fontWeight: '700', fontSize: 14 },
+        editBtnText: { color: colors.onPrimaryContainer, fontWeight: '700', fontSize: 13 },
         financeCard: {
           ...cardSurface(colors, isDark),
           marginBottom: spacing.md,
-          padding: spacing.lg,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.md,
         },
         balanceLabel: {
           ...typography.section,
@@ -195,6 +204,24 @@ export default function PartyDetailScreen() {
           letterSpacing: 0.4,
         },
         sectionCount: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
+        filterWrap: { marginBottom: spacing.sm },
+        balanceChips: {
+          flexDirection: 'row',
+          gap: spacing.sm,
+          marginBottom: spacing.sm,
+        },
+        balanceChip: {
+          flex: 1,
+          ...cardSurface(colors, isDark),
+          padding: spacing.sm,
+          borderRadius: radius.sm,
+        },
+        balanceChipLabel: {
+          fontSize: 10,
+          color: colors.textMuted,
+          textTransform: 'uppercase',
+          marginBottom: 2,
+        },
         stmtRow: {
           paddingHorizontal: spacing.md,
           paddingVertical: spacing.md,
@@ -276,7 +303,11 @@ export default function PartyDetailScreen() {
 
   const [summary, setSummary] = useState<PartySummary | null>(null);
   const [statement, setStatement] = useState<PartyStatementLine[]>([]);
+  const [openingBalance, setOpeningBalance] = useState(0);
+  const [closingBalance, setClosingBalance] = useState(0);
   const [history, setHistory] = useState<PartyHistoryItem[]>([]);
+  const [allHistory, setAllHistory] = useState<PartyHistoryItem[]>([]);
+  const [periodKey, setPeriodKey] = useState(getCurrentMonthKey);
   const [tab, setTab] = useState<Tab>('statement');
   const [loading, setLoading] = useState(true);
   const [showEdit, setShowEdit] = useState(false);
@@ -284,6 +315,9 @@ export default function PartyDetailScreen() {
   const [type, setType] = useState<PartyType>('customer');
   const [phone, setPhone] = useState('');
   const [notes, setNotes] = useState('');
+  const [gstin, setGstin] = useState('');
+  const [stateCode, setStateCode] = useState('');
+  const [address, setAddress] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -294,6 +328,11 @@ export default function PartyDetailScreen() {
     const parsed = Number.parseInt(rawId, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }, [rawId]);
+
+  const periodKeyRef = React.useRef(periodKey);
+  periodKeyRef.current = periodKey;
+  const fyStartMonthRef = React.useRef(fyStartMonth);
+  fyStartMonthRef.current = fyStartMonth;
 
   useEffect(() => {
     if (rawId === 'index') {
@@ -315,19 +354,29 @@ export default function PartyDetailScreen() {
       setSummary(s);
       setStatement([]);
       setHistory([]);
+      setAllHistory([]);
+      setOpeningBalance(0);
+      setClosingBalance(0);
       setError(s ? null : 'Party not found');
       if (s) {
         setName(s.party.name);
         setType(s.party.type);
         setPhone(s.party.phone ?? '');
         setNotes(s.party.notes ?? '');
+        setGstin(s.party.gstin ?? '');
+        setStateCode(s.party.state ?? '');
+        setAddress(s.party.address ?? '');
         setLoading(false);
+        const range = getPeriodRange(periodKeyRef.current, fyStartMonthRef.current);
         const [st, h] = await Promise.all([
-          getPartyStatement(partyId),
+          getPartyStatementInRange(partyId, range.start, range.end),
           getPartyHistory(partyId),
         ]);
-        setStatement(st);
-        setHistory(h);
+        setOpeningBalance(st.openingBalance);
+        setClosingBalance(st.closingBalance);
+        setStatement(st.lines);
+        setAllHistory(h);
+        setHistory(h.filter((item) => item.date >= range.start && item.date <= range.end));
       }
     } catch (e) {
       setError(formatSqliteError(e));
@@ -356,48 +405,36 @@ export default function PartyDetailScreen() {
     }, [load, rawId])
   );
 
-  useLayoutEffect(() => {
-    navigation.setOptions({ title: summary?.party.name ?? 'Party Details' });
-  }, [navigation, summary?.party.name]);
-
-  const isEditDirty = useMemo(() => {
-    if (!showEdit || !summary) return false;
-    const party = summary.party;
-    return (
-      name.trim() !== party.name ||
-      type !== party.type ||
-      (phone.trim() || '') !== (party.phone ?? '') ||
-      (notes.trim() || '') !== (party.notes ?? '')
-    );
-  }, [showEdit, summary, name, type, phone, notes]);
-  useUnsavedChangesGuard(isEditDirty);
-
-  const handleSave = async () => {
-    if (saving) return;
-    if (!summary || !name.trim()) {
-      Alert.alert('Error', 'Name is required');
+  // Period changes after first load — refresh statement/history without full-screen spinner.
+  const appliedPeriodRef = React.useRef(periodKey);
+  useEffect(() => {
+    if (!hasLoadedRef.current || !partyId || showEditRef.current) {
+      appliedPeriodRef.current = periodKey;
       return;
     }
-    setSaving(true);
-    try {
-      await updateParty(summary.party.id, {
-        name: name.trim(),
-        type,
-        phone: phone.trim() || undefined,
-        notes: notes.trim() || undefined,
-      });
-      refresh();
-      setShowEdit(false);
-      setLoading(true);
-      await load();
-    } catch (e) {
-      Alert.alert('Error', formatSqliteError(e));
-    } finally {
-      setSaving(false);
-    }
-  };
+    if (appliedPeriodRef.current === periodKey) return;
+    appliedPeriodRef.current = periodKey;
 
-  const handleDelete = () => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const range = getPeriodRange(periodKey, fyStartMonth);
+        const st = await getPartyStatementInRange(partyId, range.start, range.end);
+        if (cancelled) return;
+        setOpeningBalance(st.openingBalance);
+        setClosingBalance(st.closingBalance);
+        setStatement(st.lines);
+        setHistory(allHistory.filter((item) => item.date >= range.start && item.date <= range.end));
+      } catch (e) {
+        if (!cancelled) Alert.alert('Error', formatSqliteError(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [periodKey, fyStartMonth, partyId, allHistory]);
+
+  const handleDelete = useCallback(() => {
     if (!summary) return;
     Alert.alert('Delete Party', `Remove ${summary.party.name}?`, [
       { text: 'Cancel', style: 'cancel' },
@@ -415,6 +452,68 @@ export default function PartyDetailScreen() {
         },
       },
     ]);
+  }, [summary, refresh, router]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: summary?.party.name ?? 'Party Details',
+      headerRight: summary
+        ? () => (
+            <OverflowMenu
+              actions={[
+                {
+                  label: 'Delete Party',
+                  destructive: true,
+                  onPress: handleDelete,
+                },
+              ]}
+            />
+          )
+        : undefined,
+    });
+  }, [navigation, summary, handleDelete]);
+
+  const isEditDirty = useMemo(() => {
+    if (!showEdit || !summary) return false;
+    const party = summary.party;
+    return (
+      name.trim() !== party.name ||
+      type !== party.type ||
+      (phone.trim() || '') !== (party.phone ?? '') ||
+      (notes.trim() || '') !== (party.notes ?? '') ||
+      (gstin.trim() || '') !== (party.gstin ?? '') ||
+      (stateCode.trim() || '') !== (party.state ?? '') ||
+      (address.trim() || '') !== (party.address ?? '')
+    );
+  }, [showEdit, summary, name, type, phone, notes, gstin, stateCode, address]);
+  useUnsavedChangesGuard(isEditDirty);
+
+  const handleSave = async () => {
+    if (saving) return;
+    if (!summary || !name.trim()) {
+      Alert.alert('Error', 'Name is required');
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateParty(summary.party.id, {
+        name: name.trim(),
+        type,
+        phone: phone.trim() || undefined,
+        notes: notes.trim() || undefined,
+        gstin: gstin.trim() || undefined,
+        state: stateCode.trim() || undefined,
+        address: address.trim() || undefined,
+      });
+      refresh();
+      setShowEdit(false);
+      setLoading(true);
+      await load();
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const openRecord = (item: PartyHistoryItem) => {
@@ -535,6 +634,26 @@ export default function PartyDetailScreen() {
             <Text style={localStyles.metaText}>{party.notes}</Text>
           </View>
         ) : null}
+        {party.gstin ? (
+          <View style={localStyles.metaRow}>
+            <Ionicons name="card-outline" size={16} color={colors.textSecondary} />
+            <Text style={localStyles.metaText}>GSTIN: {party.gstin}</Text>
+          </View>
+        ) : null}
+        {party.state ? (
+          <View style={localStyles.metaRow}>
+            <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
+            <Text style={localStyles.metaText}>
+              State: {stateName(party.state) || party.state}
+            </Text>
+          </View>
+        ) : null}
+        {party.address ? (
+          <View style={localStyles.metaRow}>
+            <Ionicons name="home-outline" size={16} color={colors.textSecondary} />
+            <Text style={localStyles.metaText}>{party.address}</Text>
+          </View>
+        ) : null}
 
         <TouchableOpacity style={localStyles.editBtn} onPress={() => setShowEdit(!showEdit)}>
           <Ionicons name={showEdit ? 'close-outline' : 'create-outline'} size={16} color={colors.primary} />
@@ -560,6 +679,31 @@ export default function PartyDetailScreen() {
           </View>
           <FormInput label="Name" value={name} onChangeText={setName} />
           <FormInput label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+          <FormInput
+            label="GSTIN (optional)"
+            value={gstin}
+            onChangeText={setGstin}
+            placeholder="15-character GSTIN"
+            autoCapitalize="characters"
+          />
+          <FormInput
+            label="State code (optional)"
+            value={stateCode}
+            onChangeText={setStateCode}
+            placeholder="e.g. 27"
+            keyboardType="number-pad"
+            helperText={
+              stateCode.trim()
+                ? stateName(stateCode.trim()) || 'Unknown state code'
+                : '2-digit GST state code'
+            }
+          />
+          <FormInput
+            label="Address (optional)"
+            value={address}
+            onChangeText={setAddress}
+            multiline
+          />
           <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
           <PrimaryButton title="Save Changes" onPress={handleSave} loading={saving} />
         </View>
@@ -616,15 +760,34 @@ export default function PartyDetailScreen() {
         </TouchableOpacity>
       </View>
 
+      <View style={localStyles.filterWrap}>
+        <MonthPicker monthKey={periodKey} onChange={setPeriodKey} />
+      </View>
+
       {tab === 'statement' ? (
         <>
+          <View style={localStyles.balanceChips}>
+            <View style={localStyles.balanceChip}>
+              <Text style={localStyles.balanceChipLabel}>Opening</Text>
+              <MoneyText amount={openingBalance} size="md" style={{ textAlign: 'left' }} />
+            </View>
+            <View style={localStyles.balanceChip}>
+              <Text style={localStyles.balanceChipLabel}>Closing</Text>
+              <MoneyText
+                amount={closingBalance}
+                size="md"
+                color={colors.primary}
+                style={{ textAlign: 'left' }}
+              />
+            </View>
+          </View>
           <View style={localStyles.sectionHeader}>
             <Text style={localStyles.sectionTitle}>Account Statement</Text>
             <Text style={localStyles.sectionCount}>{statement.length} entries</Text>
           </View>
           <LedgerTable
             rows={statement}
-            emptyText="No transactions yet for this party."
+            emptyText="No transactions in this period."
           />
         </>
       ) : (
@@ -639,7 +802,9 @@ export default function PartyDetailScreen() {
             <View style={localStyles.emptyBox}>
               <Ionicons name="receipt-outline" size={32} color={colors.textMuted} />
               <Text style={localStyles.emptyText}>
-                {isCustomer ? 'No sales yet for this party.' : 'No purchases yet for this party.'}
+                {isCustomer
+                  ? 'No sales in this period.'
+                  : 'No purchases in this period.'}
               </Text>
             </View>
           ) : (
@@ -667,10 +832,10 @@ export default function PartyDetailScreen() {
                     </View>
                     {item.record_type === 'sale' ? (
                       <Text style={[localStyles.historyType, isBos && localStyles.historyTypeBos]}>
-                        {isBos ? 'BOS' : 'Invoice'}
+                        {isBos ? 'BOS' : 'Tax Invoice'}
                       </Text>
                     ) : null}
-                    <Text style={localStyles.historyMeta}>{item.date}</Text>
+                    <Text style={localStyles.historyMeta}>{formatDisplayDate(item.date)}</Text>
                     <View style={localStyles.historyAmounts}>
                       <Text style={localStyles.historyAmt}>Total {formatCurrency(item.total_amount)}</Text>
                       <Text style={localStyles.historyAmt}>Paid {formatCurrency(item.paid_amount)}</Text>
@@ -686,10 +851,6 @@ export default function PartyDetailScreen() {
           )}
         </View>
       )}
-
-      <View style={localStyles.footer}>
-        <PrimaryButton title="Delete Party" onPress={handleDelete} variant="danger" />
-      </View>
     </ScrollView>
   );
 }

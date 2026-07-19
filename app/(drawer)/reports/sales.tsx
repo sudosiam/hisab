@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getSalesReport, sumReportAmounts } from '../../../src/services/reports';
@@ -12,27 +12,26 @@ import { ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { shareSalesReportPdf } from '../../../src/services/reportPdf';
-import { isFinancialYearPeriodKey } from '../../../src/utils/date';
+import { formatDisplayDate, isFinancialYearPeriodKey } from '../../../src/utils/date';
 import { formatSqliteError } from '../../../src/db/database';
-import { radius, spacing } from '../../../src/constants/theme';
+import { spacing } from '../../../src/constants/theme';
+import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 
 export default function SalesReportScreen() {
   const { refreshKey } = useDatabase();
   const styles = useScreenStyles();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
         header: { padding: spacing.sm },
         total: { fontWeight: '700', textAlign: 'center', marginBottom: spacing.sm, color: colors.text },
         row: {
-          backgroundColor: colors.surface,
-          padding: spacing.md,
-          borderRadius: radius.sm,
+          ...cardSurface(colors, isDark),
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
           marginBottom: spacing.xs,
-          borderWidth: 1,
-          borderColor: colors.border,
         },
         invoice: { fontWeight: '600', color: colors.text },
         typeMeta: { fontSize: 11, fontWeight: '700', color: colors.primary, marginTop: 2 },
@@ -41,12 +40,13 @@ export default function SalesReportScreen() {
         date: { fontSize: 11, color: colors.textSecondary },
         amount: { fontWeight: '700', marginTop: 4, color: colors.text },
       }),
-    [colors]
+    [colors, isDark]
   );
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [rows, setRows] = useState<Awaited<ReturnType<typeof getSalesReport>>>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [booting, setBooting] = useState(true);
 
   const load = useCallback(async () => {
     void refreshKey;
@@ -55,6 +55,8 @@ export default function SalesReportScreen() {
       setError(null);
     } catch (e) {
       setError(formatSqliteError(e));
+    } finally {
+      setBooting(false);
     }
   }, [monthKey, refreshKey]);
 
@@ -77,6 +79,14 @@ export default function SalesReportScreen() {
 
   if (error) {
     return <ErrorState message={error} onRetry={load} />;
+  }
+
+  if (booting) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
   }
 
   return (
@@ -117,7 +127,7 @@ export default function SalesReportScreen() {
             <Text style={localStyles.party} numberOfLines={1}>
               {item.party_name}
             </Text>
-            <Text style={localStyles.date}>{item.date}</Text>
+            <Text style={localStyles.date}>{formatDisplayDate(item.date)}</Text>
           </ReportRow>
         )}
       />

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Alert, Switch, TouchableOpacity, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import {
   FormInput,
   FormScreen,
@@ -37,7 +37,7 @@ function isExpenseDraftEmpty(d: ExpenseFormDraft): boolean {
 
 export default function NewExpenseScreen() {
   const router = useRouter();
-  const { refresh } = useDatabase();
+  const { refresh, refreshKey } = useDatabase();
   const styles = useScreenStyles();
   const { colors } = useTheme();
   const [category, setCategory] = useState('');
@@ -92,6 +92,24 @@ export default function NewExpenseScreen() {
       },
     ]);
   };
+
+  const reloadAccounts = React.useCallback(async () => {
+    try {
+      const a = await getPaymentAccounts();
+      setAccounts(a);
+      setAccountId((current) =>
+        current && a.some((acc) => acc.id === current) ? current : a[0]?.id ?? 0
+      );
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      void reloadAccounts();
+    }, [reloadAccounts, refreshKey])
+  );
 
   React.useEffect(() => {
     let cancelled = false;

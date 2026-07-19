@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import type { ThemeColors } from '../constants/theme';
 import { spacing, radius, typography } from '../constants/theme';
-import { cardSurface, fabShadow } from '../constants/shadows';
+import { cardSurface, elevatedSurface, fabShadow } from '../constants/shadows';
 import { formatCurrency } from '../utils/format';
 import { MoneyText } from './MoneyText';
 import type { DashboardStats } from '../types';
@@ -37,30 +37,42 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
       alignItems: 'center',
       backgroundColor: colors.background,
     },
-    section: { marginBottom: spacing.lg },
+    section: { marginBottom: spacing.md },
     sectionTitle: {
       ...typography.section,
       color: colors.textSecondary,
       textTransform: 'uppercase',
-      marginBottom: spacing.sm,
+      marginBottom: spacing.xs,
     },
     card: {
       ...surface,
-      padding: spacing.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm + 2,
       marginBottom: spacing.sm,
     },
+    /** Compact summary / net-worth hero used on finance screens. */
+    heroCard: {
+      ...elevatedSurface(colors, isDark),
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.md,
+      marginBottom: spacing.md,
+    },
     cardTitle: { ...typography.bodyMedium, color: colors.text, fontWeight: '600' },
-    cardSub: { fontSize: 13, color: colors.textSecondary, marginTop: 3, lineHeight: 18 },
+    cardSub: {
+      ...typography.caption,
+      color: colors.textSecondary,
+      marginTop: 2,
+    },
     row: {
       flexDirection: 'row',
       justifyContent: 'space-between',
-      alignItems: 'flex-start',
+      alignItems: 'center',
       gap: spacing.sm,
     },
     label: { ...typography.label, color: colors.textSecondary, marginBottom: spacing.xs },
     value: { ...typography.bodyMedium, color: colors.text },
     amount: {
-      fontSize: 17,
+      fontSize: 16,
       fontWeight: '600',
       color: colors.text,
       letterSpacing: -0.3,
@@ -69,30 +81,28 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
     empty: {
       textAlign: 'center',
       color: colors.textSecondary,
-      marginTop: 48,
-      fontSize: 15,
-      lineHeight: 22,
+      marginTop: spacing.xl,
+      fontSize: 14,
+      lineHeight: 20,
       paddingHorizontal: spacing.lg,
     },
-    link: { color: colors.accent, fontWeight: '600', fontSize: 14 },
+    link: { color: colors.accent, fontWeight: '600', fontSize: 13 },
     divider: { height: 1, backgroundColor: colors.borderLight, marginVertical: spacing.sm },
     filters: { flexDirection: 'row', padding: spacing.md, gap: spacing.sm },
-    list: { padding: spacing.md, paddingBottom: 120 },
+    list: { padding: spacing.md, paddingBottom: 96 },
     fab: {
       position: 'absolute',
       bottom: spacing.lg,
       right: spacing.lg,
-      backgroundColor: colors.primary,
-      paddingHorizontal: spacing.lg,
-      paddingVertical: 14,
-      minHeight: 48,
-      minWidth: 112,
-      borderRadius: radius.md,
+      backgroundColor: colors.primaryContainer,
+      width: 56,
+      height: 56,
+      borderRadius: radius.full,
       alignItems: 'center',
       justifyContent: 'center',
       ...fabShadow(isDark),
     },
-    fabText: { color: colors.onPrimary, fontWeight: '600', fontSize: 14 },
+    fabText: { color: colors.onPrimaryContainer, fontWeight: '600', fontSize: 12 },
     dangerBtn: {
       marginTop: spacing.md,
       padding: spacing.md,
@@ -101,13 +111,12 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
       borderColor: colors.danger + '55',
       alignItems: 'center',
       backgroundColor: colors.surface,
-      ...cardSurface(colors, isDark),
     },
-    dangerText: { color: colors.danger, fontWeight: '600', fontSize: 15 },
+    dangerText: { color: colors.danger, fontWeight: '600', fontSize: 14 },
     infoBox: {
-      marginTop: spacing.lg,
+      marginTop: spacing.md,
       padding: spacing.md,
-      backgroundColor: colors.navActive,
+      backgroundColor: colors.primaryContainer,
       borderRadius: radius.lg,
       borderWidth: isDark ? 1 : 0,
       borderColor: colors.border,
@@ -152,7 +161,7 @@ export function PrimaryButton({
         : styles.primaryText;
   const spinnerColor =
     variant === 'secondary'
-      ? colors.primary
+      ? colors.onPrimaryContainer
       : variant === 'danger'
         ? colors.danger
         : colors.onPrimary;
@@ -176,41 +185,44 @@ export function PrimaryButton({
   );
 }
 
-function createButtonStyles(colors: ThemeColors, isDark: boolean) {
+function createButtonStyles(colors: ThemeColors, _isDark: boolean) {
   return StyleSheet.create({
     primary: {
       backgroundColor: colors.primary,
-      paddingVertical: 14,
+      paddingVertical: 12,
       paddingHorizontal: spacing.md,
-      borderRadius: radius.md,
+      borderRadius: radius.full,
       alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 44,
       marginVertical: spacing.xs,
     },
     secondary: {
-      backgroundColor: colors.surface,
-      paddingVertical: 15,
+      backgroundColor: colors.primaryContainer,
+      paddingVertical: 12,
       paddingHorizontal: spacing.md,
-      borderRadius: radius.md,
+      borderRadius: radius.full,
       alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 44,
       marginVertical: spacing.xs,
-      borderWidth: 1,
-      borderColor: colors.border,
-      ...cardSurface(colors, isDark),
     },
     danger: {
-      backgroundColor: colors.surface,
-      paddingVertical: 15,
+      backgroundColor: 'transparent',
+      paddingVertical: 12,
       paddingHorizontal: spacing.md,
-      borderRadius: radius.md,
+      borderRadius: radius.full,
       alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 44,
       marginVertical: spacing.xs,
       borderWidth: 1,
-      borderColor: colors.danger + '44',
+      borderColor: colors.danger + '66',
     },
     disabled: { opacity: 0.5 },
-    primaryText: { color: colors.onPrimary, fontSize: 15, fontWeight: '600' },
-    secondaryText: { color: colors.primary, fontSize: 15, fontWeight: '500' },
-    dangerText: { color: colors.danger, fontSize: 15, fontWeight: '600' },
+    primaryText: { color: colors.onPrimary, fontSize: 14, fontWeight: '600' },
+    secondaryText: { color: colors.onPrimaryContainer, fontSize: 14, fontWeight: '600' },
+    dangerText: { color: colors.danger, fontSize: 14, fontWeight: '600' },
   });
 }
 
@@ -226,16 +238,17 @@ export function FinanceHero({
     () =>
       StyleSheet.create({
         hero: {
-          ...cardSurface(colors, isDark),
+          ...elevatedSurface(colors, isDark),
           padding: spacing.md,
           marginBottom: spacing.md,
+          backgroundColor: colors.surface,
         },
         heroTop: {
           flexDirection: 'row',
           justifyContent: 'space-between',
           alignItems: 'flex-start',
           gap: spacing.md,
-          paddingBottom: spacing.md,
+          paddingBottom: spacing.sm,
           borderBottomWidth: 1,
           borderBottomColor: colors.borderLight,
         },
@@ -249,26 +262,31 @@ export function FinanceHero({
           marginTop: spacing.xs,
           textAlign: 'left',
         },
-        heroSub: { fontSize: 11, color: colors.textSecondary, marginTop: 4 },
+        heroSub: { fontSize: 11, color: colors.textSecondary, marginTop: 2, lineHeight: 14 },
         chipRow: {
           flexDirection: 'row',
           flexWrap: 'wrap',
-          marginTop: spacing.md,
+          marginTop: spacing.sm,
+          gap: spacing.xs,
         },
         chip: {
-          width: '50%',
+          width: '48%',
+          flexGrow: 1,
           minWidth: 0,
           paddingVertical: spacing.sm,
-          paddingRight: spacing.sm,
+          paddingHorizontal: spacing.sm,
+          backgroundColor: colors.surfaceContainer,
+          borderRadius: radius.md,
         },
         chipLabel: {
-          fontSize: 11,
+          fontSize: 10,
           color: colors.textSecondary,
           textTransform: 'uppercase',
+          letterSpacing: 0.3,
           marginBottom: 2,
         },
         chipValue: {
-          marginTop: 2,
+          marginTop: 1,
         },
       }),
     [colors, isDark]
@@ -447,16 +465,16 @@ export function ErrorState({
   const styles = useScreenStyles();
   return (
     <View style={styles.center}>
-      <Ionicons name="cloud-offline-outline" size={40} color={colors.textMuted} />
+      <Ionicons name="cloud-offline-outline" size={36} color={colors.textMuted} />
       <Text
         style={{
           color: colors.textSecondary,
-          fontSize: 15,
+          fontSize: 14,
           textAlign: 'center',
           marginTop: spacing.md,
           marginBottom: spacing.md,
           paddingHorizontal: spacing.xl,
-          lineHeight: 22,
+          lineHeight: 20,
         }}
       >
         {message || 'Something went wrong while loading this screen.'}
@@ -469,11 +487,13 @@ export function ErrorState({
           style={{
             paddingHorizontal: spacing.lg,
             paddingVertical: 10,
-            borderRadius: radius.md,
+            borderRadius: radius.full,
             backgroundColor: colors.primary,
+            minHeight: 44,
+            justifyContent: 'center',
           }}
         >
-          <Text style={{ color: colors.onPrimary, fontWeight: '700', fontSize: 14 }}>
+          <Text style={{ color: colors.onPrimary, fontWeight: '600', fontSize: 14 }}>
             Try Again
           </Text>
         </TouchableOpacity>
@@ -496,10 +516,24 @@ export function EmptyState({
   const { colors } = useTheme();
   const styles = useScreenStyles();
   return (
-    <View style={{ alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: 48 }}>
-      <Ionicons name="file-tray-outline" size={36} color={colors.textMuted} />
-      <Text style={[styles.cardTitle, { marginTop: spacing.md, textAlign: 'center' }]}>{title}</Text>
-      {message ? <Text style={styles.empty}>{message}</Text> : null}
+    <View style={{ alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.xl }}>
+      <View
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: radius.full,
+          backgroundColor: colors.surfaceContainer,
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: spacing.sm,
+        }}
+      >
+        <Ionicons name="file-tray-outline" size={28} color={colors.textMuted} />
+      </View>
+      <Text style={[styles.cardTitle, { textAlign: 'center' }]}>{title}</Text>
+      {message ? (
+        <Text style={[styles.empty, { marginTop: spacing.sm }]}>{message}</Text>
+      ) : null}
       {actionLabel && onAction ? (
         <TouchableOpacity
           onPress={onAction}
@@ -510,11 +544,13 @@ export function EmptyState({
             marginTop: spacing.md,
             paddingHorizontal: spacing.lg,
             paddingVertical: 10,
-            borderRadius: radius.md,
+            borderRadius: radius.full,
             backgroundColor: colors.primary,
+            minHeight: 44,
+            justifyContent: 'center',
           }}
         >
-          <Text style={{ color: colors.onPrimary, fontWeight: '700', fontSize: 14 }}>
+          <Text style={{ color: colors.onPrimary, fontWeight: '600', fontSize: 14 }}>
             {actionLabel}
           </Text>
         </TouchableOpacity>
@@ -529,25 +565,25 @@ function createInputStyles(colors: ThemeColors) {
     label: {
       ...typography.label,
       color: colors.textSecondary,
-      marginBottom: 6,
+      marginBottom: 4,
     },
     input: {
-      borderWidth: 1,
-      borderColor: colors.border,
+      borderWidth: 0,
       borderRadius: radius.md,
       paddingHorizontal: spacing.md,
-      paddingVertical: 13,
+      paddingVertical: 11,
       backgroundColor: colors.inputBg,
-      fontSize: 15,
+      fontSize: 14,
       color: colors.text,
+      minHeight: 44,
     },
-    multiline: { minHeight: 96, textAlignVertical: 'top', paddingTop: 13 },
-    inputDisabled: { backgroundColor: colors.chip, color: colors.textSecondary },
+    multiline: { minHeight: 88, textAlignVertical: 'top', paddingTop: 11 },
+    inputDisabled: { backgroundColor: colors.surfaceContainerHigh, color: colors.textSecondary },
     moneyInput: { fontVariant: ['tabular-nums'] },
     helperText: {
-      ...typography.label,
+      ...typography.caption,
       color: colors.textMuted,
-      marginTop: 6,
+      marginTop: 4,
     },
   });
 }
@@ -589,8 +625,8 @@ export function FilterRow({ children }: { children: React.ReactNode }) {
     <View
       style={{
         flexDirection: 'row',
-        paddingHorizontal: spacing.sm,
-        paddingVertical: spacing.xs + 2,
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.sm,
         gap: spacing.xs,
         backgroundColor: colors.surface,
         borderBottomWidth: 1,
@@ -624,15 +660,15 @@ export function SearchField({
           marginBottom: spacing.sm,
           marginTop: spacing.xs,
           paddingHorizontal: spacing.md,
-          paddingVertical: 10,
-          borderRadius: radius.md,
-          borderWidth: 1,
-          borderColor: colors.border,
-          backgroundColor: colors.inputBg,
+          paddingVertical: 8,
+          minHeight: 44,
+          borderRadius: radius.full,
+          borderWidth: 0,
+          backgroundColor: colors.surfaceContainer,
         },
         input: {
           flex: 1,
-          fontSize: 15,
+          fontSize: 14,
           color: colors.text,
           paddingVertical: 0,
         },
@@ -675,18 +711,16 @@ function createChipStyles(colors: ThemeColors) {
     chip: {
       flex: 1,
       minWidth: 0,
-      paddingVertical: 6,
+      paddingVertical: 7,
       paddingHorizontal: spacing.xs,
-      borderRadius: radius.sm,
+      borderRadius: radius.full,
       backgroundColor: colors.chip,
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: colors.border,
+      minHeight: 32,
     },
     chipActive: {
       backgroundColor: colors.chipActive,
-      borderColor: colors.chipActive,
     },
     chipText: {
       fontSize: 11,
@@ -694,7 +728,7 @@ function createChipStyles(colors: ThemeColors) {
       fontWeight: '500',
       textAlign: 'center',
     },
-    chipTextActive: { color: colors.chipTextActive, fontWeight: '600' },
+    chipTextActive: { color: colors.chipTextActive, fontWeight: '700' },
   });
 }
 
@@ -735,7 +769,7 @@ export function SectionHeader({ title }: { title: string }) {
         ...typography.section,
         color: colors.textSecondary,
         textTransform: 'uppercase',
-        marginBottom: spacing.sm,
+        marginBottom: spacing.xs,
         marginTop: spacing.md,
       }}
     >
@@ -774,19 +808,18 @@ function createThemeOptionStyles(colors: ThemeColors) {
   return StyleSheet.create({
     option: {
       flex: 1,
-      paddingVertical: 12,
+      paddingVertical: 10,
       alignItems: 'center',
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.surface,
+      borderRadius: radius.full,
+      backgroundColor: colors.surfaceContainer,
+      minHeight: 40,
+      justifyContent: 'center',
     },
     optionActive: {
-      backgroundColor: colors.navActive,
-      borderColor: colors.primary,
+      backgroundColor: colors.primaryContainer,
     },
-    optionText: { fontSize: 13, fontWeight: '600', color: colors.text },
-    optionTextActive: { color: colors.primary, fontWeight: '700' },
+    optionText: { fontSize: 13, fontWeight: '500', color: colors.text },
+    optionTextActive: { color: colors.onPrimaryContainer, fontWeight: '700' },
   });
 }
 
@@ -812,6 +845,7 @@ export function ListRow({
           paddingVertical: spacing.sm,
           borderBottomWidth: 1,
           borderBottomColor: colors.borderLight,
+          minHeight: 44,
         },
         style,
       ]}
@@ -821,7 +855,7 @@ export function ListRow({
           {left}
         </Text>
         {subtitle ? (
-          <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }} numberOfLines={1}>
+          <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 1 }} numberOfLines={1}>
             {subtitle}
           </Text>
         ) : null}
@@ -838,10 +872,10 @@ export function ListRow({
 export function ScreenTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   const { colors } = useTheme();
   return (
-    <View style={{ marginBottom: spacing.lg }}>
+    <View style={{ marginBottom: spacing.md }}>
       <Text style={{ ...typography.display, color: colors.text }}>{title}</Text>
       {subtitle ? (
-        <Text style={{ fontSize: 14, color: colors.textSecondary, marginTop: 6, lineHeight: 20 }}>
+        <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 4, lineHeight: 18 }}>
           {subtitle}
         </Text>
       ) : null}
@@ -849,8 +883,60 @@ export function ScreenTitle({ title, subtitle }: { title: string; subtitle?: str
   );
 }
 
-export function Fab({ label, onPress }: { label: string; onPress: () => void }) {
-  const styles = useScreenStyles();
+/** Infer a Material FAB icon from common action labels. */
+function fabIconForLabel(label: string): React.ComponentProps<typeof Ionicons>['name'] {
+  const lower = label.toLowerCase();
+  if (lower.includes('sale')) return 'cart-outline';
+  if (lower.includes('purchase')) return 'bag-handle-outline';
+  if (lower.includes('expense')) return 'receipt-outline';
+  if (lower.includes('income')) return 'cash-outline';
+  if (lower.includes('product') || lower.includes('item')) return 'cube-outline';
+  if (lower.includes('party') || lower.includes('customer') || lower.includes('vendor')) {
+    return 'person-add-outline';
+  }
+  if (lower.includes('account') || lower.includes('bank')) return 'wallet-outline';
+  if (lower.includes('transfer')) return 'swap-horizontal-outline';
+  return 'add';
+}
+
+export function Fab({
+  label,
+  onPress,
+  icon,
+}: {
+  label: string;
+  onPress: () => void;
+  icon?: React.ComponentProps<typeof Ionicons>['name'];
+}) {
+  const { colors, isDark } = useTheme();
+  const iconName = icon ?? fabIconForLabel(label);
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        fab: {
+          position: 'absolute',
+          bottom: spacing.lg,
+          right: spacing.lg,
+          backgroundColor: colors.primaryContainer,
+          minHeight: 56,
+          paddingHorizontal: spacing.md,
+          borderRadius: radius.full,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 6,
+          ...fabShadow(isDark),
+        },
+        text: {
+          color: colors.onPrimaryContainer,
+          fontWeight: '600',
+          fontSize: 13,
+          maxWidth: 100,
+        },
+      }),
+    [colors, isDark]
+  );
+
   return (
     <TouchableOpacity
       style={styles.fab}
@@ -859,7 +945,10 @@ export function Fab({ label, onPress }: { label: string; onPress: () => void }) 
       accessibilityRole="button"
       accessibilityLabel={label}
     >
-      <Text style={styles.fabText}>{label}</Text>
+      <Ionicons name={iconName} size={22} color={colors.onPrimaryContainer} />
+      <Text style={styles.text} numberOfLines={1}>
+        {label.replace(/^\+\s*/, '')}
+      </Text>
     </TouchableOpacity>
   );
 }
@@ -910,7 +999,9 @@ function ShortcutRow({
             accessibilityLabel={item.label}
             accessibilityRole="button"
           >
-            <Ionicons name={item.icon} size={16} color={colors.textSecondary} style={{ marginRight: 8 }} />
+            <View style={styles.iconWrap}>
+              <Ionicons name={item.icon} size={16} color={colors.onPrimaryContainer} />
+            </View>
             <Text style={styles.itemLabel} numberOfLines={1}>
               {item.label}
             </Text>
@@ -952,8 +1043,8 @@ function createShortcutStyles(colors: ThemeColors, isDark: boolean) {
       ...typography.section,
       color: colors.textSecondary,
       textTransform: 'uppercase',
-      marginTop: spacing.md,
-      marginBottom: spacing.sm,
+      marginTop: spacing.sm,
+      marginBottom: spacing.xs,
     },
     row: {
       flexDirection: 'row',
@@ -969,6 +1060,15 @@ function createShortcutStyles(colors: ThemeColors, isDark: boolean) {
       paddingHorizontal: spacing.sm,
       ...cardSurface(colors, isDark),
       minHeight: 44,
+      gap: spacing.sm,
+    },
+    iconWrap: {
+      width: 32,
+      height: 32,
+      borderRadius: radius.full,
+      backgroundColor: colors.primaryContainer,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     itemLabel: {
       fontSize: 13,

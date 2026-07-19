@@ -14,6 +14,7 @@ import {
 import { useRouter } from 'expo-router';
 import {
   ErrorState,
+  Fab,
   FilterChip,
   FilterRow,
   FormInput,
@@ -34,6 +35,7 @@ import { spacing, radius } from '../../../src/constants/theme';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 import { cardSurface } from '../../../src/constants/shadows';
+import { stateName } from '../../../src/services/gst';
 import type { PartyType, PartyWithSummary } from '../../../src/types';
 
 type Filter = 'all' | PartyType;
@@ -52,7 +54,8 @@ export default function PartiesScreen() {
           marginHorizontal: spacing.md,
           marginTop: spacing.sm,
           marginBottom: spacing.sm,
-          padding: spacing.md,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
           gap: spacing.sm,
         },
         summaryItem: { flex: 1, alignItems: 'center' },
@@ -60,7 +63,8 @@ export default function PartiesScreen() {
         summaryLabel: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
         partyRow: {
           ...cardSurface(colors, isDark),
-          padding: spacing.md,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
           marginHorizontal: spacing.md,
           marginBottom: spacing.sm,
         },
@@ -88,7 +92,8 @@ export default function PartiesScreen() {
           ...cardSurface(colors, isDark),
           marginHorizontal: spacing.md,
           marginBottom: spacing.md,
-          padding: spacing.md,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
         },
         typeRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
         typeChip: {
@@ -115,6 +120,9 @@ export default function PartiesScreen() {
   const [type, setType] = useState<PartyType>('customer');
   const [phone, setPhone] = useState('');
   const [notes, setNotes] = useState('');
+  const [gstin, setGstin] = useState('');
+  const [stateCode, setStateCode] = useState('');
+  const [address, setAddress] = useState('');
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -149,6 +157,9 @@ export default function PartiesScreen() {
     setType('customer');
     setPhone('');
     setNotes('');
+    setGstin('');
+    setStateCode('');
+    setAddress('');
     setShowForm(false);
   };
 
@@ -165,6 +176,9 @@ export default function PartiesScreen() {
         type,
         phone: phone.trim() || undefined,
         notes: notes.trim() || undefined,
+        gstin: gstin.trim() || undefined,
+        state: stateCode.trim() || undefined,
+        address: address.trim() || undefined,
       });
       if (!id) {
         Alert.alert('Error', 'Could not open the new party record');
@@ -238,6 +252,31 @@ export default function PartiesScreen() {
           </View>
           <FormInput label="Name" value={name} onChangeText={setName} placeholder="Company or person name" />
           <FormInput label="Phone (optional)" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+          <FormInput
+            label="GSTIN (optional)"
+            value={gstin}
+            onChangeText={setGstin}
+            placeholder="15-character GSTIN"
+            autoCapitalize="characters"
+          />
+          <FormInput
+            label="State code (optional)"
+            value={stateCode}
+            onChangeText={setStateCode}
+            placeholder="e.g. 27"
+            keyboardType="number-pad"
+            helperText={
+              stateCode.trim()
+                ? stateName(stateCode.trim()) || 'Unknown state code'
+                : '2-digit GST state code for CGST/SGST vs IGST'
+            }
+          />
+          <FormInput
+            label="Address (optional)"
+            value={address}
+            onChangeText={setAddress}
+            multiline
+          />
           <FormInput label="Notes (optional)" value={notes} onChangeText={setNotes} multiline />
           <PrimaryButton title="Add Party" onPress={handleSave} loading={saving} />
           <TouchableOpacity style={{ marginTop: spacing.sm, alignItems: 'center' }} onPress={resetForm}>
@@ -323,15 +362,13 @@ export default function PartiesScreen() {
       )}
 
       {!showForm ? (
-        <TouchableOpacity
-          style={styles.fab}
+        <Fab
+          label="+ Add Party"
           onPress={() => {
             resetForm();
             setShowForm(true);
           }}
-        >
-          <Text style={styles.fabText}>+ Add Party</Text>
-        </TouchableOpacity>
+        />
       ) : null}
     </View>
   );

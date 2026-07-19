@@ -40,22 +40,23 @@ export function AppBootScreen() {
         },
         brand: {
           ...typography.display,
-          fontSize: 28,
+          fontSize: 26,
           color: colors.text,
           letterSpacing: -0.3,
+          fontWeight: '700',
         },
         tagline: {
           marginTop: spacing.sm,
-          fontSize: 14,
+          fontSize: 13,
           color: colors.textSecondary,
           letterSpacing: 0.2,
         },
         indicator: {
           marginTop: spacing.xl,
-          width: 36,
+          width: 40,
           height: 4,
           borderRadius: 999,
-          backgroundColor: colors.primary,
+          backgroundColor: colors.primaryContainer,
         },
       }),
     [colors]

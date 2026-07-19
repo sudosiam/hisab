@@ -10,17 +10,16 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
-import { ErrorState, SearchField, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import { ErrorState, Fab, SearchField, SectionHeader, useScreenStyles } from '../../../src/components/ui';
 import { getExpenses } from '../../../src/services/banking';
 import { formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
-import { formatDisplayDate } from '../../../src/utils/date';
+import { formatDisplayDate, getPeriodTotalLabel } from '../../../src/utils/date';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useDatabase } from '../../../src/context/DatabaseContext';
-import { getPeriodTotalLabel } from '../../../src/utils/date';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
-import { spacing, radius } from '../../../src/constants/theme';
+import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 import type { Expense } from '../../../src/types';
@@ -33,19 +32,10 @@ export default function ExpenseListScreen() {
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        fab: {
-          position: 'absolute',
-          bottom: spacing.lg,
-          right: spacing.lg,
-          backgroundColor: colors.primary,
-          paddingHorizontal: spacing.lg,
-          paddingVertical: 14,
-          borderRadius: radius.xl,
-        },
-        fabText: { color: colors.onPrimary, fontWeight: '700' },
         expenseRow: {
           ...cardSurface(colors, isDark),
-          padding: spacing.md,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
           marginBottom: spacing.sm,
         },
         recurring: { fontSize: 11, color: colors.primary, fontWeight: '600', marginTop: 4 },
@@ -217,13 +207,7 @@ export default function ExpenseListScreen() {
         }
       />
 
-      <TouchableOpacity
-        style={localStyles.fab}
-        onPress={() => router.push('/(drawer)/expense/new' as never)}
-        accessibilityLabel="Add expense"
-      >
-        <Text style={localStyles.fabText}>+ Add Expense</Text>
-      </TouchableOpacity>
+      <Fab label="+ Add Expense" onPress={() => router.push('/(drawer)/expense/new' as never)} />
     </View>
   );
 }

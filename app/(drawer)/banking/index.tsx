@@ -32,7 +32,8 @@ export default function BankingScreen() {
         totalCard: {
           ...cardSurface(colors, isDark),
           margin: spacing.md,
-          padding: spacing.lg,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.md,
           alignItems: 'center',
         },
         totalLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
@@ -52,25 +53,29 @@ export default function BankingScreen() {
           backgroundColor: colors.primary,
           paddingVertical: 12,
           minHeight: 44,
-          borderRadius: radius.md,
+          borderRadius: radius.full,
           alignItems: 'center',
           justifyContent: 'center',
         },
-        actionBtnAlt: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+        actionBtnAlt: { backgroundColor: colors.primaryContainer, borderWidth: 0 },
         actionBtnSuccess: { backgroundColor: colors.success },
-        actionBtnDanger: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.danger },
-        actionText: { color: colors.onPrimary, fontWeight: '700', fontSize: 14 },
-        actionTextAlt: { color: colors.primary, fontWeight: '700', fontSize: 14 },
-        actionTextDanger: { color: colors.danger, fontWeight: '700', fontSize: 14 },
+        actionBtnDanger: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.danger + '55' },
+        actionText: { color: colors.onPrimary, fontWeight: '700', fontSize: 13 },
+        actionTextAlt: { color: colors.onPrimaryContainer, fontWeight: '700', fontSize: 13 },
+        /** Not onPrimary — success green needs its own contrasting label in light/dark. */
+        actionTextSuccess: { color: isDark ? '#0B1F14' : '#FFFFFF', fontWeight: '700', fontSize: 13 },
+        actionTextDanger: { color: colors.danger, fontWeight: '700', fontSize: 13 },
         accountRow: {
           ...cardSurface(colors, isDark),
           flexDirection: 'row',
           alignItems: 'center',
-          padding: spacing.md,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
           marginHorizontal: spacing.md,
           marginBottom: spacing.sm,
+          minHeight: 56,
         },
-        accountName: { fontSize: 16, fontWeight: '600', color: colors.text },
+        accountName: { fontSize: 14, fontWeight: '600', color: colors.text },
         accountType: { fontSize: 12, color: colors.textSecondary, marginTop: 2, textTransform: 'capitalize' },
         excludedBadge: {
           alignSelf: 'flex-start',
@@ -141,7 +146,7 @@ export default function BankingScreen() {
           accessibilityRole="button"
           accessibilityLabel="Deposit money"
         >
-          <Text style={localStyles.actionText}>Deposit</Text>
+          <Text style={localStyles.actionTextSuccess}>Deposit</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[localStyles.actionBtn, localStyles.actionBtnDanger]}

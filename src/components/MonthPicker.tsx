@@ -35,7 +35,7 @@ export function MonthPicker({ monthKey, onChange }: Props) {
           accessibilityRole="button"
           accessibilityLabel="Previous period"
         >
-          <Ionicons name="chevron-back" size={18} color={colors.textSecondary} />
+          <Ionicons name="chevron-back" size={18} color={colors.onPrimaryContainer} />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.labelWrap}
@@ -57,7 +57,7 @@ export function MonthPicker({ monthKey, onChange }: Props) {
           accessibilityRole="button"
           accessibilityLabel="Next period"
         >
-          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+          <Ionicons name="chevron-forward" size={18} color={colors.onPrimaryContainer} />
         </TouchableOpacity>
       </View>
     </View>
@@ -69,23 +69,23 @@ function createStyles(
   isFinancialYear: boolean
 ) {
   return StyleSheet.create({
-    wrap: { marginBottom: spacing.md },
+    wrap: { marginBottom: spacing.sm },
     container: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: radius.md,
-      backgroundColor: colors.surface,
-      paddingVertical: spacing.xs,
-      paddingHorizontal: spacing.xs,
+      borderRadius: radius.full,
+      backgroundColor: colors.surfaceContainer,
+      paddingVertical: 2,
+      paddingHorizontal: 2,
     },
     btn: {
-      width: 36,
-      height: 36,
+      width: 40,
+      height: 40,
       alignItems: 'center',
       justifyContent: 'center',
+      borderRadius: radius.full,
+      backgroundColor: colors.primaryContainer,
     },
     labelWrap: {
       flex: 1,
@@ -94,15 +94,16 @@ function createStyles(
     },
     label: {
       ...typography.label,
-      fontSize: 14,
-      color: isFinancialYear ? colors.primary : colors.text,
+      fontSize: 13,
+      fontWeight: '600',
+      color: isFinancialYear ? colors.onPrimaryContainer : colors.text,
       textAlign: 'center',
     },
     hint: {
       fontSize: 10,
       color: colors.textMuted,
       textAlign: 'center',
-      marginTop: 2,
+      marginTop: 1,
     },
   });
 }

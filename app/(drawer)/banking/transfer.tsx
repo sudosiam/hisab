@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { Alert, TouchableOpacity, Text, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import {
   FormInput,
   FormScreen,
@@ -14,12 +14,13 @@ import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
 import { parsePositiveAmount } from '../../../src/utils/format';
+import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { radius, spacing } from '../../../src/constants/theme';
 import type { Account } from '../../../src/types';
 
 export default function TransferScreen() {
   const router = useRouter();
-  const { refresh } = useDatabase();
+  const { refresh, refreshKey } = useDatabase();
   const styles = useScreenStyles();
   const { colors } = useTheme();
   const localStyles = useMemo(
@@ -47,22 +48,27 @@ export default function TransferScreen() {
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    getPaymentAccounts()
-      .then((a) => {
-        if (cancelled) return;
-        setAccounts(a);
-        if (a.length > 0) setFromId(a[0].id);
-        if (a.length > 1) setToId(a[1].id);
-      })
-      .catch((e) => {
-        if (!cancelled) Alert.alert('Error', formatSqliteError(e));
+  useUnsavedChangesGuard(amount.trim() !== '' || description.trim() !== '');
+
+  const reloadAccounts = useCallback(async () => {
+    try {
+      const a = await getPaymentAccounts();
+      setAccounts(a);
+      setFromId((current) => (current && a.some((acc) => acc.id === current) ? current : a[0]?.id ?? 0));
+      setToId((current) => {
+        if (current && a.some((acc) => acc.id === current)) return current;
+        return a.length > 1 ? a[1].id : a[0]?.id ?? 0;
       });
-    return () => {
-      cancelled = true;
-    };
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void reloadAccounts();
+    }, [reloadAccounts, refreshKey])
+  );
 
   const needsMoreAccounts = accounts.length < 2;
 

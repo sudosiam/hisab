@@ -29,6 +29,12 @@ const SYSTEM_ACCOUNTS: {
   { system_key: 'inventory', name: 'Inventory', account_type: 'asset' },
   { system_key: 'fixed_assets', name: 'Fixed Assets', account_type: 'asset' },
   { system_key: 'loans', name: 'Loans Payable', account_type: 'liability' },
+  { system_key: 'input_cgst', name: 'Input CGST', account_type: 'asset' },
+  { system_key: 'input_sgst', name: 'Input SGST', account_type: 'asset' },
+  { system_key: 'input_igst', name: 'Input IGST', account_type: 'asset' },
+  { system_key: 'output_cgst', name: 'Output CGST', account_type: 'liability' },
+  { system_key: 'output_sgst', name: 'Output SGST', account_type: 'liability' },
+  { system_key: 'output_igst', name: 'Output IGST', account_type: 'liability' },
 ];
 
 interface JournalLineInput {
@@ -167,7 +173,7 @@ export async function hasGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<bool
   return (row?.count ?? 0) > 0;
 }
 
-const LEDGER_CODE_VERSION = '4';
+const LEDGER_CODE_VERSION = '6';
 let rebuildInFlight: Promise<void> | null = null;
 let ledgerRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -176,7 +182,9 @@ export function scheduleGeneralLedgerRefresh(): void {
   if (ledgerRefreshTimer) clearTimeout(ledgerRefreshTimer);
   ledgerRefreshTimer = setTimeout(() => {
     ledgerRefreshTimer = null;
-    void rebuildGeneralLedger().catch(() => {});
+    void rebuildGeneralLedger().catch((err) => {
+      console.warn('[ledger] rebuild failed', err);
+    });
   }, 400);
   if (ledgerRefreshTimer && typeof ledgerRefreshTimer === 'object' && 'unref' in ledgerRefreshTimer) {
     (ledgerRefreshTimer as NodeJS.Timeout).unref();
@@ -235,6 +243,12 @@ export async function rebuildGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<
   const equityAccount = accounts.get('equity');
   const fixedAssetsAccount = accounts.get('fixed_assets');
   const loansAccount = accounts.get('loans');
+  const outputCgst = accounts.get('output_cgst');
+  const outputSgst = accounts.get('output_sgst');
+  const outputIgst = accounts.get('output_igst');
+  const inputCgst = accounts.get('input_cgst');
+  const inputSgst = accounts.get('input_sgst');
+  const inputIgst = accounts.get('input_igst');
 
   if (
     !salesAccount ||
@@ -245,7 +259,13 @@ export async function rebuildGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<
     !otherIncomeAccount ||
     !equityAccount ||
     !fixedAssetsAccount ||
-    !loansAccount
+    !loansAccount ||
+    !outputCgst ||
+    !outputSgst ||
+    !outputIgst ||
+    !inputCgst ||
+    !inputSgst ||
+    !inputIgst
   ) {
     return;
   }
@@ -261,8 +281,14 @@ export async function rebuildGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<
     party_id: number | null;
     date: string;
     total_amount: number;
+    taxable_amount: number | null;
+    cgst_amount: number | null;
+    sgst_amount: number | null;
+    igst_amount: number | null;
+    service_charges: number | null;
   }>(
-    `SELECT s.id, s.invoice_no, s.invoice_type, s.party_name, s.party_id, s.date, s.total_amount
+    `SELECT s.id, s.invoice_no, s.invoice_type, s.party_name, s.party_id, s.date, s.total_amount,
+            s.taxable_amount, s.cgst_amount, s.sgst_amount, s.igst_amount, s.service_charges
      FROM sales s
      WHERE EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id)
        AND s.total_amount > 0`
@@ -271,16 +297,31 @@ export async function rebuildGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<
   for (const sale of sales) {
     const partyId = await resolvePartyId(database, sale.party_name, 'customer', sale.party_id);
     const amount = roundMoney(sale.total_amount);
-    const docLabel = sale.invoice_type === 'bos' ? 'Bill of Supply' : 'Invoice';
+    const cgst = roundMoney(sale.cgst_amount ?? 0);
+    const sgst = roundMoney(sale.sgst_amount ?? 0);
+    const igst = roundMoney(sale.igst_amount ?? 0);
+    const taxTotal = roundMoney(cgst + sgst + igst);
+    const salesCredit = roundMoney(amount - taxTotal);
+    const docLabel = sale.invoice_type === 'bos' ? 'Bill of Supply' : 'Tax Invoice';
+    const lines: JournalLineInput[] = [
+      { ledgerAccountId: arAccount, partyId, debit: amount, credit: 0 },
+      { ledgerAccountId: salesAccount, debit: 0, credit: salesCredit },
+    ];
+    if (cgst > 0.009) {
+      lines.push({ ledgerAccountId: outputCgst, debit: 0, credit: cgst });
+    }
+    if (sgst > 0.009) {
+      lines.push({ ledgerAccountId: outputSgst, debit: 0, credit: sgst });
+    }
+    if (igst > 0.009) {
+      lines.push({ ledgerAccountId: outputIgst, debit: 0, credit: igst });
+    }
     await postJournalEntry(database, {
       date: sale.date,
       description: `${docLabel} ${sale.invoice_no}`,
       referenceType: 'sale',
       referenceId: sale.id,
-      lines: [
-        { ledgerAccountId: arAccount, partyId, debit: amount, credit: 0 },
-        { ledgerAccountId: salesAccount, debit: 0, credit: amount },
-      ],
+      lines,
     });
   }
 
@@ -356,8 +397,13 @@ export async function rebuildGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<
     party_id: number | null;
     date: string;
     total_amount: number;
+    taxable_amount: number | null;
+    cgst_amount: number | null;
+    sgst_amount: number | null;
+    igst_amount: number | null;
   }>(
-    `SELECT p.id, p.invoice_no, p.supplier_name, p.party_id, p.date, p.total_amount
+    `SELECT p.id, p.invoice_no, p.supplier_name, p.party_id, p.date, p.total_amount,
+            p.taxable_amount, p.cgst_amount, p.sgst_amount, p.igst_amount
      FROM purchases p
      WHERE EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = p.id)
        AND p.total_amount > 0`
@@ -366,15 +412,30 @@ export async function rebuildGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<
   for (const purchase of purchases) {
     const partyId = await resolvePartyId(database, purchase.supplier_name, 'vendor', purchase.party_id);
     const amount = roundMoney(purchase.total_amount);
+    const cgst = roundMoney(purchase.cgst_amount ?? 0);
+    const sgst = roundMoney(purchase.sgst_amount ?? 0);
+    const igst = roundMoney(purchase.igst_amount ?? 0);
+    const taxTotal = roundMoney(cgst + sgst + igst);
+    const inventoryDebit = roundMoney(amount - taxTotal);
+    const lines: JournalLineInput[] = [
+      { ledgerAccountId: inventoryAccount, debit: inventoryDebit, credit: 0 },
+    ];
+    if (cgst > 0.009) {
+      lines.push({ ledgerAccountId: inputCgst, debit: cgst, credit: 0 });
+    }
+    if (sgst > 0.009) {
+      lines.push({ ledgerAccountId: inputSgst, debit: sgst, credit: 0 });
+    }
+    if (igst > 0.009) {
+      lines.push({ ledgerAccountId: inputIgst, debit: igst, credit: 0 });
+    }
+    lines.push({ ledgerAccountId: apAccount, partyId, debit: 0, credit: amount });
     await postJournalEntry(database, {
       date: purchase.date,
       description: `Bill ${purchase.invoice_no}`,
       referenceType: 'purchase',
       referenceId: purchase.id,
-      lines: [
-        { ledgerAccountId: inventoryAccount, debit: amount, credit: 0 },
-        { ledgerAccountId: apAccount, partyId, debit: 0, credit: amount },
-      ],
+      lines,
     });
   }
 
@@ -816,6 +877,8 @@ export interface GeneralLedgerLine {
   accountName: string;
   debit: number;
   credit: number;
+  /** Running balance for this ledger account after the line (debit − credit). */
+  balance: number;
 }
 
 export async function getGeneralLedgerReport(
@@ -823,6 +886,21 @@ export async function getGeneralLedgerReport(
   endDate: string
 ): Promise<GeneralLedgerLine[]> {
   const db = await getDatabase();
+
+  const openings = await db.getAllAsync<{ account_name: string; opening: number }>(
+    `SELECT la.name as account_name,
+            COALESCE(SUM(jl.debit), 0) - COALESCE(SUM(jl.credit), 0) as opening
+     FROM ledger_accounts la
+     JOIN journal_lines jl ON jl.ledger_account_id = la.id
+     JOIN journal_entries je ON je.id = jl.journal_entry_id
+     WHERE je.entry_date < ?
+     GROUP BY la.id, la.name`,
+    [startDate]
+  );
+  const balances = new Map<string, number>(
+    openings.map((row) => [row.account_name, roundMoney(row.opening)])
+  );
+
   const rows = await db.getAllAsync<{
     id: number;
     entry_date: string;
@@ -836,18 +914,25 @@ export async function getGeneralLedgerReport(
      JOIN journal_entries je ON je.id = jl.journal_entry_id
      JOIN ledger_accounts la ON la.id = jl.ledger_account_id
      WHERE je.entry_date >= ? AND je.entry_date <= ?
-     ORDER BY je.entry_date ASC, je.id ASC, jl.id ASC`,
+     ORDER BY la.name ASC, je.entry_date ASC, je.id ASC, jl.id ASC`,
     [startDate, endDate]
   );
 
-  return rows.map((row) => ({
-    id: String(row.id),
-    date: row.entry_date,
-    description: row.description,
-    accountName: row.account_name,
-    debit: roundMoney(row.debit),
-    credit: roundMoney(row.credit),
-  }));
+  return rows.map((row) => {
+    const debit = roundMoney(row.debit);
+    const credit = roundMoney(row.credit);
+    const next = roundMoney((balances.get(row.account_name) ?? 0) + debit - credit);
+    balances.set(row.account_name, next);
+    return {
+      id: String(row.id),
+      date: row.entry_date,
+      description: row.description,
+      accountName: row.account_name,
+      debit,
+      credit,
+      balance: next,
+    };
+  });
 }
 
 export interface TrialBalanceLedgerRow {

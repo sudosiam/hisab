@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { Platform, Pressable } from 'react-native';
+import { Platform, Pressable, StyleSheet } from 'react-native';
 import {
   CommonActions,
   DrawerActions,
@@ -42,15 +42,15 @@ export function useHeaderScreenOptions() {
   return {
     headerStyle: {
       backgroundColor: colors.header,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.borderLight,
     },
     headerTintColor: colors.headerText,
     headerTitleStyle: {
       fontWeight: '600' as const,
-      fontSize: 16,
+      fontSize: 17,
       color: colors.headerText,
-      letterSpacing: -0.1,
+      letterSpacing: -0.15,
     },
     headerTitleAlign: 'left' as const,
     headerLeftContainerStyle: { paddingLeft: 4 },

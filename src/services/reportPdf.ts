@@ -152,12 +152,13 @@ export async function shareTrialBalancePdf(data: {
 export async function shareDayBookPdf(
   fromDate: string,
   toDate: string,
-  rows: { date: string; description: string; debit: number; credit: number }[],
+  rows: { date: string; description: string; debit: number; credit: number; balance?: number }[],
   totalDebit: number,
   totalCredit: number
 ) {
   const period = `${fromDate} to ${toDate}`;
   const body = buildLedgerTableHtml(rows, {
+    showBalance: true,
     footer: { label: 'Total', debit: totalDebit, credit: totalCredit },
   });
   const html = wrapReportHtml({ title: 'Day Book', period }, body);
@@ -171,7 +172,14 @@ export async function shareDayBookPdf(
 export async function shareGeneralLedgerPdf(
   fromDate: string,
   toDate: string,
-  rows: { date: string; accountName: string; description: string; debit: number; credit: number }[]
+  rows: {
+    date: string;
+    accountName: string;
+    description: string;
+    debit: number;
+    credit: number;
+    balance?: number;
+  }[]
 ) {
   const period = `${fromDate} to ${toDate}`;
   const body = buildLedgerTableHtml(
@@ -180,8 +188,9 @@ export async function shareGeneralLedgerPdf(
       description: `${row.accountName} — ${row.description}`,
       debit: row.debit,
       credit: row.credit,
+      balance: row.balance,
     })),
-    { showDate: true, showBalance: false }
+    { showDate: true, showBalance: true }
   );
   const html = wrapReportHtml({ title: 'General Ledger', period }, body);
   return exportPdf(
@@ -370,24 +379,41 @@ export async function shareExpenseCategoriesPdf(
 }
 
 export async function shareBalanceSheetPdf(data: BalanceSheet) {
+  const assetCurrent = data.assets.currentAssets.map((line) => ({
+    label: line.label,
+    value: pdfMoney(line.amount),
+  }));
+  const assetNonCurrent = data.assets.nonCurrentAssets.map((line) => ({
+    label: line.label,
+    value: pdfMoney(line.amount),
+  }));
+  const liabilityCurrent = data.liabilities.currentLiabilities.map((line) => ({
+    label: line.label,
+    value: pdfMoney(line.amount),
+  }));
+  const liabilityNonCurrent = data.liabilities.nonCurrentLiabilities.map((line) => ({
+    label: line.label,
+    value: pdfMoney(line.amount),
+  }));
+
+  const currentAssetsTotal = data.assets.currentAssets.reduce((sum, line) => sum + line.amount, 0);
+
   const body =
     buildLinesSection([
+      { label: 'Total Current Assets', value: pdfMoney(currentAssetsTotal), bold: true },
       { label: 'Total Assets', value: pdfMoney(data.assets.total), bold: true },
       { label: 'Total Liabilities', value: pdfMoney(data.liabilities.total), bold: true },
       { label: 'Net Worth (Equity)', value: pdfMoney(data.equity), bold: true },
     ]) +
-    '<div class="section-title">Assets</div>' +
-    buildLinesSection([
-      { label: 'Cash & Bank', value: pdfMoney(data.assets.cashAndBank) },
-      { label: 'Accounts Receivable', value: pdfMoney(data.assets.receivables) },
-      { label: 'Inventory', value: pdfMoney(data.assets.inventory) },
-      { label: 'Fixed Assets', value: pdfMoney(data.assets.fixedAssets) },
-    ]) +
-    '<div class="section-title">Liabilities</div>' +
-    buildLinesSection([
-      { label: 'Accounts Payable', value: pdfMoney(data.liabilities.payables) },
-      { label: 'Loans', value: pdfMoney(data.liabilities.loans) },
-    ]);
+    '<div class="section-title">Assets — Current</div>' +
+    buildLinesSection(assetCurrent) +
+    buildLinesSection([{ label: 'Total Current Assets', value: pdfMoney(currentAssetsTotal), bold: true }]) +
+    '<div class="section-title">Assets — Non-current</div>' +
+    buildLinesSection(assetNonCurrent) +
+    '<div class="section-title">Liabilities — Current</div>' +
+    buildLinesSection(liabilityCurrent) +
+    '<div class="section-title">Liabilities — Non-current</div>' +
+    buildLinesSection(liabilityNonCurrent);
 
   const html = wrapReportHtml(
     { title: 'Balance Sheet', subtitle: 'As of today' },
@@ -437,5 +463,141 @@ export async function shareGrowthReportPdf(data: GrowthReport) {
     html,
     `Growth-${safeFilePart(data.financialYearRangeLabel)}.pdf`,
     'Download Growth Report PDF'
+  );
+}
+
+export async function shareGstSummaryPdf(
+  periodKey: string,
+  data: import('./gstReports').GstSummaryRow
+) {
+  const period = monthKeyToLabel(periodKey);
+  const body =
+    buildLinesSection([
+      { label: 'Outward taxable', value: pdfMoney(data.outwardTaxable) },
+      { label: 'Output CGST', value: pdfMoney(data.outwardCgst) },
+      { label: 'Output SGST', value: pdfMoney(data.outwardSgst) },
+      { label: 'Output IGST', value: pdfMoney(data.outwardIgst) },
+      { label: 'Output tax', value: pdfMoney(data.outwardTax), bold: true },
+      { label: 'Inward taxable', value: pdfMoney(data.inwardTaxable) },
+      { label: 'Input CGST', value: pdfMoney(data.inwardCgst) },
+      { label: 'Input SGST', value: pdfMoney(data.inwardSgst) },
+      { label: 'Input IGST', value: pdfMoney(data.inwardIgst) },
+      { label: 'Input tax', value: pdfMoney(data.inwardTax), bold: true },
+      { label: 'Net payable / (credit)', value: pdfMoney(data.netPayable), bold: true },
+    ]);
+  const html = wrapReportHtml({ title: 'GST Summary', period, subtitle: 'GSTR-3B style' }, body);
+  return exportPdf(html, `GST-Summary-${safeFilePart(period)}.pdf`, 'Download GST Summary PDF');
+}
+
+export async function shareGstOutwardPdf(
+  periodKey: string,
+  rows: import('./gstReports').GstOutwardLine[]
+) {
+  const period = monthKeyToLabel(periodKey);
+  const body = buildTableHtml(
+    [
+      { key: 'date', label: 'Date', width: '72px' },
+      { key: 'invoice', label: 'Invoice' },
+      { key: 'party', label: 'Party' },
+      { key: 'type', label: 'Type', width: '48px' },
+      { key: 'taxable', label: 'Taxable', align: 'right', width: '72px' },
+      { key: 'tax', label: 'Tax', align: 'right', width: '64px' },
+      { key: 'total', label: 'Total', align: 'right', width: '72px' },
+    ],
+    rows.map((row) => ({
+      date: row.date,
+      invoice: row.invoice_no,
+      party: row.party_name,
+      type: row.supply_type,
+      taxable: pdfMoney(row.taxable_amount),
+      tax: pdfMoney(row.cgst_amount + row.sgst_amount + row.igst_amount),
+      total: pdfMoney(row.total_amount),
+    }))
+  );
+  const html = wrapReportHtml(
+    { title: 'Outward Supplies', period, subtitle: 'GSTR-1 style' },
+    body
+  );
+  return exportPdf(html, `GST-Outward-${safeFilePart(period)}.pdf`, 'Download Outward Supplies PDF');
+}
+
+export async function shareGstHsnPdf(periodKey: string, rows: import('./gstReports').GstHsnLine[]) {
+  const period = monthKeyToLabel(periodKey);
+  const body = buildTableHtml(
+    [
+      { key: 'hsn', label: 'HSN' },
+      { key: 'qty', label: 'Qty', align: 'right', width: '56px' },
+      { key: 'taxable', label: 'Taxable', align: 'right', width: '80px' },
+      { key: 'tax', label: 'Tax', align: 'right', width: '72px' },
+    ],
+    rows.map((row) => ({
+      hsn: row.hsn_sac,
+      qty: String(row.qty),
+      taxable: pdfMoney(row.taxable_amount),
+      tax: pdfMoney(row.tax_amount),
+    }))
+  );
+  const html = wrapReportHtml({ title: 'HSN Summary', period }, body);
+  return exportPdf(html, `GST-HSN-${safeFilePart(period)}.pdf`, 'Download HSN Summary PDF');
+}
+
+export async function shareGstStateWisePdf(
+  periodKey: string,
+  rows: import('./gstReports').GstStateWiseRow[]
+) {
+  const period = monthKeyToLabel(periodKey);
+  const body = buildTableHtml(
+    [
+      { key: 'state', label: 'State' },
+      { key: 'count', label: 'Invoices', align: 'right', width: '64px' },
+      { key: 'taxable', label: 'Taxable', align: 'right', width: '80px' },
+      { key: 'tax', label: 'Tax', align: 'right', width: '72px' },
+      { key: 'total', label: 'Total', align: 'right', width: '80px' },
+    ],
+    rows.map((row) => ({
+      state: `${row.state_label}${row.state_code !== '—' ? ` (${row.state_code})` : ''}`,
+      count: String(row.invoice_count),
+      taxable: pdfMoney(row.taxable_amount),
+      tax: pdfMoney(row.tax_amount),
+      total: pdfMoney(row.total_amount),
+    }))
+  );
+  const html = wrapReportHtml(
+    { title: 'GST Customers by State', period },
+    body
+  );
+  return exportPdf(html, `GST-By-State-${safeFilePart(period)}.pdf`, 'Download State-wise GST PDF');
+}
+
+export async function shareVendorAccountPurchasesPdf(
+  periodKey: string,
+  rows: import('./gstReports').VendorAccountPurchaseRow[]
+) {
+  const period = monthKeyToLabel(periodKey);
+  const body = buildTableHtml(
+    [
+      { key: 'vendor', label: 'Vendor' },
+      { key: 'bills', label: 'Bills', align: 'right', width: '48px' },
+      { key: 'itc', label: 'ITC', align: 'right', width: '72px' },
+      { key: 'total', label: 'Total', align: 'right', width: '80px' },
+      { key: 'accounts', label: 'Paid via' },
+    ],
+    rows.map((row) => ({
+      vendor: row.vendor_name,
+      bills: String(row.bill_count),
+      itc: pdfMoney(row.input_tax),
+      total: pdfMoney(row.total_amount),
+      accounts:
+        row.accounts.map((a) => `${a.account_name} ${pdfMoney(a.paid)}`).join(', ') || '—',
+    }))
+  );
+  const html = wrapReportHtml(
+    { title: 'Purchases by Vendor × Account', period },
+    body
+  );
+  return exportPdf(
+    html,
+    `Vendor-Account-Purchases-${safeFilePart(period)}.pdf`,
+    'Download Vendor Account Purchases PDF'
   );
 }

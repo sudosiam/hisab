@@ -3,7 +3,7 @@ import { waitForDatabaseAccess } from '../services/dbMaintenance';
 import { roundMoney } from '../utils/money';
 
 export const DB_NAME = 'hisab.db';
-const SCHEMA_VERSION = 24;
+const SCHEMA_VERSION = 25;
 
 /** Removes the legacy attachment media folder left over from the removed attachments feature. */
 async function clearLegacyMediaFolder(): Promise<void> {
@@ -336,6 +336,7 @@ async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Pr
   await cleanupOrphanChildRows(db);
   await ensurePerformanceIndexes(db);
   await ensureLedgerTables(db);
+  await ensureGstColumns(db);
 
   if (fromVersion < SCHEMA_VERSION) {
     await db.runAsync(
@@ -881,6 +882,114 @@ async function ensureSalesInvoiceTypeColumn(db: SQLite.SQLiteDatabase): Promise<
   }
 }
 
+async function addMissingColumns(
+  db: SQLite.SQLiteDatabase,
+  tableName: string,
+  columns: { name: string; ddl: string }[]
+): Promise<void> {
+  const table = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
+    [tableName]
+  );
+  if (!table) return;
+
+  const existing = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${tableName})`);
+  const names = new Set(existing.map((col) => col.name));
+  for (const col of columns) {
+    if (!names.has(col.name)) {
+      await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN ${col.ddl}`);
+    }
+  }
+}
+
+/** Additive GST columns for Regular scheme (schema v25). */
+async function ensureGstColumns(db: SQLite.SQLiteDatabase): Promise<void> {
+  await addMissingColumns(db, 'parties', [
+    { name: 'gstin', ddl: 'gstin TEXT' },
+    { name: 'state', ddl: 'state TEXT' },
+    { name: 'address', ddl: 'address TEXT' },
+  ]);
+
+  await addMissingColumns(db, 'products', [
+    { name: 'hsn_sac', ddl: 'hsn_sac TEXT' },
+    { name: 'gst_rate', ddl: 'gst_rate REAL NOT NULL DEFAULT 0' },
+  ]);
+
+  await addMissingColumns(db, 'sales', [
+    { name: 'place_of_supply', ddl: 'place_of_supply TEXT' },
+    { name: 'taxable_amount', ddl: 'taxable_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'cgst_amount', ddl: 'cgst_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'sgst_amount', ddl: 'sgst_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'igst_amount', ddl: 'igst_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'is_inter_state', ddl: 'is_inter_state INTEGER NOT NULL DEFAULT 0' },
+  ]);
+
+  await addMissingColumns(db, 'sale_items', [
+    { name: 'hsn_sac', ddl: 'hsn_sac TEXT' },
+    { name: 'gst_rate', ddl: 'gst_rate REAL NOT NULL DEFAULT 0' },
+    { name: 'taxable_amount', ddl: 'taxable_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'cgst_amount', ddl: 'cgst_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'sgst_amount', ddl: 'sgst_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'igst_amount', ddl: 'igst_amount REAL NOT NULL DEFAULT 0' },
+  ]);
+
+  await addMissingColumns(db, 'purchases', [
+    { name: 'place_of_supply', ddl: 'place_of_supply TEXT' },
+    { name: 'taxable_amount', ddl: 'taxable_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'cgst_amount', ddl: 'cgst_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'sgst_amount', ddl: 'sgst_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'igst_amount', ddl: 'igst_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'is_inter_state', ddl: 'is_inter_state INTEGER NOT NULL DEFAULT 0' },
+  ]);
+
+  await addMissingColumns(db, 'purchase_items', [
+    { name: 'hsn_sac', ddl: 'hsn_sac TEXT' },
+    { name: 'gst_rate', ddl: 'gst_rate REAL NOT NULL DEFAULT 0' },
+    { name: 'taxable_amount', ddl: 'taxable_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'cgst_amount', ddl: 'cgst_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'sgst_amount', ddl: 'sgst_amount REAL NOT NULL DEFAULT 0' },
+    { name: 'igst_amount', ddl: 'igst_amount REAL NOT NULL DEFAULT 0' },
+  ]);
+
+  // Backfill taxable_amount for legacy rows (tax = 0, taxable = total).
+  await db.execAsync(`
+    UPDATE sales
+    SET taxable_amount = total_amount
+    WHERE COALESCE(taxable_amount, 0) = 0
+      AND COALESCE(cgst_amount, 0) = 0
+      AND COALESCE(sgst_amount, 0) = 0
+      AND COALESCE(igst_amount, 0) = 0
+      AND total_amount > 0
+  `);
+  await db.execAsync(`
+    UPDATE sale_items
+    SET taxable_amount = total
+    WHERE COALESCE(taxable_amount, 0) = 0
+      AND COALESCE(cgst_amount, 0) = 0
+      AND COALESCE(sgst_amount, 0) = 0
+      AND COALESCE(igst_amount, 0) = 0
+      AND total > 0
+  `);
+  await db.execAsync(`
+    UPDATE purchases
+    SET taxable_amount = total_amount
+    WHERE COALESCE(taxable_amount, 0) = 0
+      AND COALESCE(cgst_amount, 0) = 0
+      AND COALESCE(sgst_amount, 0) = 0
+      AND COALESCE(igst_amount, 0) = 0
+      AND total_amount > 0
+  `);
+  await db.execAsync(`
+    UPDATE purchase_items
+    SET taxable_amount = total
+    WHERE COALESCE(taxable_amount, 0) = 0
+      AND COALESCE(cgst_amount, 0) = 0
+      AND COALESCE(sgst_amount, 0) = 0
+      AND COALESCE(igst_amount, 0) = 0
+      AND total > 0
+  `);
+}
+
 async function ensureOtherIncomeTable(db: SQLite.SQLiteDatabase): Promise<void> {
   const table = await db.getFirstAsync<{ name: string }>(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='other_income'`
@@ -1236,13 +1345,19 @@ async function verifySchema(db: SQLite.SQLiteDatabase): Promise<boolean> {
   try {
     await db.getFirstAsync('SELECT opening_balance, current_balance, is_excluded FROM accounts LIMIT 1');
     await db.getFirstAsync(
-      'SELECT opening_qty, opening_cost, avg_cost, sell_price, current_qty, category, is_hidden FROM products LIMIT 1'
+      'SELECT opening_qty, opening_cost, avg_cost, sell_price, current_qty, category, is_hidden, hsn_sac, gst_rate FROM products LIMIT 1'
     );
     await db.getFirstAsync(
-      'SELECT paid_amount, status, discount_amount, service_charges, invoice_type FROM sales LIMIT 1'
+      'SELECT paid_amount, status, discount_amount, service_charges, invoice_type, taxable_amount, cgst_amount, sgst_amount, igst_amount, is_inter_state, place_of_supply FROM sales LIMIT 1'
     );
     await db.getFirstAsync(
-      'SELECT paid_amount, status, vendor_invoice_no, subtotal, discount_amount FROM purchases LIMIT 1'
+      'SELECT paid_amount, status, vendor_invoice_no, subtotal, discount_amount, taxable_amount, cgst_amount, sgst_amount, igst_amount, is_inter_state, place_of_supply FROM purchases LIMIT 1'
+    );
+    await db.getFirstAsync(
+      'SELECT hsn_sac, gst_rate, taxable_amount, cgst_amount, sgst_amount, igst_amount FROM sale_items LIMIT 1'
+    );
+    await db.getFirstAsync(
+      'SELECT hsn_sac, gst_rate, taxable_amount, cgst_amount, sgst_amount, igst_amount FROM purchase_items LIMIT 1'
     );
     await db.getFirstAsync('SELECT unit_cost FROM inventory_movements LIMIT 1');
     await db.getFirstAsync('SELECT type, amount, payment_id FROM transactions LIMIT 1');
@@ -1250,7 +1365,7 @@ async function verifySchema(db: SQLite.SQLiteDatabase): Promise<boolean> {
     await db.getFirstAsync('SELECT category, amount FROM other_income LIMIT 1');
     await db.getFirstAsync('SELECT value FROM fixed_assets LIMIT 1');
     await db.getFirstAsync('SELECT lender_name, outstanding_amount FROM loans LIMIT 1');
-    await db.getFirstAsync('SELECT name, type, phone, notes FROM parties LIMIT 1');
+    await db.getFirstAsync('SELECT name, type, phone, notes, gstin, state, address FROM parties LIMIT 1');
     await db.getFirstAsync('SELECT name FROM product_categories LIMIT 1');
     await db.getFirstAsync('SELECT name FROM expense_categories LIMIT 1');
     await db.getFirstAsync('SELECT name FROM other_income_categories LIMIT 1');
@@ -1343,6 +1458,8 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       sell_price REAL NOT NULL DEFAULT 0,
       current_qty REAL NOT NULL DEFAULT 0,
       is_hidden INTEGER NOT NULL DEFAULT 0,
+      hsn_sac TEXT,
+      gst_rate REAL NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -1365,6 +1482,9 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       type TEXT NOT NULL CHECK(type IN ('customer', 'vendor')),
       phone TEXT,
       notes TEXT,
+      gstin TEXT,
+      state TEXT,
+      address TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(name, type)
     );
@@ -1398,6 +1518,12 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       subtotal REAL NOT NULL DEFAULT 0,
       discount_amount REAL NOT NULL DEFAULT 0,
       service_charges REAL NOT NULL DEFAULT 0,
+      taxable_amount REAL NOT NULL DEFAULT 0,
+      cgst_amount REAL NOT NULL DEFAULT 0,
+      sgst_amount REAL NOT NULL DEFAULT 0,
+      igst_amount REAL NOT NULL DEFAULT 0,
+      is_inter_state INTEGER NOT NULL DEFAULT 0,
+      place_of_supply TEXT,
       total_amount REAL NOT NULL DEFAULT 0,
       paid_amount REAL NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'unpaid',
@@ -1414,6 +1540,12 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       unit_price REAL NOT NULL,
       unit_cost REAL NOT NULL DEFAULT 0,
       total REAL NOT NULL,
+      hsn_sac TEXT,
+      gst_rate REAL NOT NULL DEFAULT 0,
+      taxable_amount REAL NOT NULL DEFAULT 0,
+      cgst_amount REAL NOT NULL DEFAULT 0,
+      sgst_amount REAL NOT NULL DEFAULT 0,
+      igst_amount REAL NOT NULL DEFAULT 0,
       FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
       FOREIGN KEY (product_id) REFERENCES products(id)
     );
@@ -1438,6 +1570,12 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       date TEXT NOT NULL,
       subtotal REAL NOT NULL DEFAULT 0,
       discount_amount REAL NOT NULL DEFAULT 0,
+      taxable_amount REAL NOT NULL DEFAULT 0,
+      cgst_amount REAL NOT NULL DEFAULT 0,
+      sgst_amount REAL NOT NULL DEFAULT 0,
+      igst_amount REAL NOT NULL DEFAULT 0,
+      is_inter_state INTEGER NOT NULL DEFAULT 0,
+      place_of_supply TEXT,
       total_amount REAL NOT NULL DEFAULT 0,
       paid_amount REAL NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'unpaid',
@@ -1453,6 +1591,12 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       qty REAL NOT NULL,
       unit_cost REAL NOT NULL,
       total REAL NOT NULL,
+      hsn_sac TEXT,
+      gst_rate REAL NOT NULL DEFAULT 0,
+      taxable_amount REAL NOT NULL DEFAULT 0,
+      cgst_amount REAL NOT NULL DEFAULT 0,
+      sgst_amount REAL NOT NULL DEFAULT 0,
+      igst_amount REAL NOT NULL DEFAULT 0,
       FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE,
       FOREIGN KEY (product_id) REFERENCES products(id)
     );

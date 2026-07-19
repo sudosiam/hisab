@@ -484,7 +484,7 @@ export default function AccountDetailScreen() {
       {listHeader}
 
       <Text style={{ marginHorizontal: spacing.md, marginBottom: spacing.xs, fontSize: 12, color: colors.textSecondary }}>
-        Tap a row to delete a transaction.
+        Long-press a row to delete a transaction.
       </Text>
 
       <View style={{ paddingHorizontal: spacing.md }}>
@@ -493,8 +493,8 @@ export default function AccountDetailScreen() {
           emptyText={
             search.trim() ? 'No transactions match your search.' : 'No transactions for this account'
           }
-          onRowPress={(row) => handleDeleteRow(row.id)}
           onRowLongPress={(row) => handleDeleteRow(row.id)}
+          rowActionHint="Long-press to delete"
         />
       </View>
     </ScrollView>

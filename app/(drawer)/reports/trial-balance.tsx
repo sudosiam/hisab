@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { LedgerTable } from '../../../src/components/LedgerTable';
@@ -19,6 +19,7 @@ export default function TrialBalanceReportScreen() {
   const [data, setData] = useState<Awaited<ReturnType<typeof getTrialBalanceReport>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [booting, setBooting] = useState(true);
 
   const localStyles = useMemo(
     () =>
@@ -39,6 +40,8 @@ export default function TrialBalanceReportScreen() {
       setError(null);
     } catch (e) {
       setError(formatSqliteError(e));
+    } finally {
+      setBooting(false);
     }
   }, [refreshKey]);
 
@@ -72,6 +75,14 @@ export default function TrialBalanceReportScreen() {
 
   if (error && !data) {
     return <ErrorState message={error} onRetry={load} />;
+  }
+
+  if (booting && !data) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
   }
 
   const balanced = data ? Math.abs(data.totalDebit - data.totalCredit) < 0.02 : false;

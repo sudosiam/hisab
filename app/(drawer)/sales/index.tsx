@@ -8,21 +8,21 @@ import {
   RefreshControl,
   StyleSheet,
 } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getSales } from '../../../src/services/sales';
 import { StatusBadge } from '../../../src/components/StatusBadge';
 import {
   ErrorState,
+  Fab,
   FilterChip,
   FilterRow,
   SearchField,
   useScreenStyles,
 } from '../../../src/components/ui';
 import { formatCurrency } from '../../../src/utils/format';
-import { getPeriodTotalLabel } from '../../../src/utils/date';
+import { formatDisplayDate, getPeriodTotalLabel } from '../../../src/utils/date';
 import { matchesSearch } from '../../../src/utils/search';
-import { formatDisplayDate } from '../../../src/utils/date';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
@@ -213,11 +213,7 @@ export default function SalesListScreen() {
         />
       )}
 
-      <Link href="/(drawer)/sales/new" asChild>
-        <TouchableOpacity style={styles.fab}>
-          <Text style={styles.fabText}>+ New Sale</Text>
-        </TouchableOpacity>
-      </Link>
+      <Fab label="+ New Sale" onPress={() => router.push('/(drawer)/sales/new' as never)} />
     </View>
   );
 }

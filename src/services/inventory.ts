@@ -106,6 +106,8 @@ export async function createProduct(params: {
   opening_qty?: number;
   opening_cost?: number;
   sell_price?: number;
+  hsn_sac?: string;
+  gst_rate?: number;
 }): Promise<number> {
   const db = await getDatabase();
   const trimmed = params.name.trim();
@@ -141,8 +143,8 @@ export async function createProduct(params: {
     const category = await ensureProductCategory(db, params.category);
 
     const result = await db.runAsync(
-      `INSERT INTO products (name, sku, category, unit, opening_qty, opening_cost, avg_cost, sell_price, current_qty)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO products (name, sku, category, unit, opening_qty, opening_cost, avg_cost, sell_price, current_qty, hsn_sac, gst_rate)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         trimmed,
         params.sku ?? null,
@@ -153,6 +155,8 @@ export async function createProduct(params: {
         openingCost,
         sellPrice,
         openingQty,
+        params.hsn_sac?.trim() || null,
+        roundMoney(Math.max(0, params.gst_rate ?? 0)),
       ]
     );
 
@@ -174,7 +178,15 @@ export async function createProduct(params: {
 
 export async function updateProduct(
   id: number,
-  params: { name: string; sku?: string; category?: string | null; unit?: string; sell_price?: number }
+  params: {
+    name: string;
+    sku?: string;
+    category?: string | null;
+    unit?: string;
+    sell_price?: number;
+    hsn_sac?: string | null;
+    gst_rate?: number;
+  }
 ): Promise<void> {
   const db = await getDatabase();
   const trimmed = params.name.trim();
@@ -195,13 +207,30 @@ export async function updateProduct(
     const category = await ensureProductCategory(db, params.category ?? null);
     if (sellPrice != null) {
       await db.runAsync(
-        'UPDATE products SET name = ?, sku = ?, category = ?, unit = ?, sell_price = ? WHERE id = ?',
-        [trimmed, params.sku ?? null, category, params.unit ?? 'pcs', sellPrice, id]
+        'UPDATE products SET name = ?, sku = ?, category = ?, unit = ?, sell_price = ?, hsn_sac = ?, gst_rate = ? WHERE id = ?',
+        [
+          trimmed,
+          params.sku ?? null,
+          category,
+          params.unit ?? 'pcs',
+          sellPrice,
+          params.hsn_sac?.trim() || null,
+          roundMoney(Math.max(0, params.gst_rate ?? 0)),
+          id,
+        ]
       );
     } else {
       await db.runAsync(
-        'UPDATE products SET name = ?, sku = ?, category = ?, unit = ? WHERE id = ?',
-        [trimmed, params.sku ?? null, category, params.unit ?? 'pcs', id]
+        'UPDATE products SET name = ?, sku = ?, category = ?, unit = ?, hsn_sac = ?, gst_rate = ? WHERE id = ?',
+        [
+          trimmed,
+          params.sku ?? null,
+          category,
+          params.unit ?? 'pcs',
+          params.hsn_sac?.trim() || null,
+          roundMoney(Math.max(0, params.gst_rate ?? 0)),
+          id,
+        ]
       );
     }
   });

@@ -30,7 +30,7 @@ import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatAmountInput, parsePositiveAmount } from '../../../src/utils/format';
-import { isValidISODate } from '../../../src/utils/date';
+import { isValidISODate, formatDisplayDate } from '../../../src/utils/date';
 import { formatSqliteError } from '../../../src/db/database';
 import { spacing } from '../../../src/constants/theme';
 import type { Account, OtherIncome } from '../../../src/types';
@@ -208,7 +208,7 @@ export default function OtherIncomeDetailScreen() {
         <>
           <Text style={localStyles.title}>{item.category}</Text>
           <Text style={localStyles.meta}>{item.description}</Text>
-          <Text style={localStyles.meta}>{item.date} · {item.account_name}</Text>
+          <Text style={localStyles.meta}>{formatDisplayDate(item.date)} · {item.account_name}</Text>
           <View style={localStyles.kpiRow}>
             <StatCard label="Amount" value={item.amount} color={colors.success} />
           </View>

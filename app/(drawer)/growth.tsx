@@ -36,7 +36,8 @@ export default function GrowthScreen() {
       StyleSheet.create({
         hero: {
           ...cardSurface(colors, isDark),
-          padding: spacing.lg,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.md,
           marginBottom: spacing.md,
           alignItems: 'center',
         },

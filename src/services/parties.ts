@@ -444,6 +444,9 @@ export async function createParty(params: {
   type: PartyType;
   phone?: string;
   notes?: string;
+  gstin?: string;
+  state?: string;
+  address?: string;
 }): Promise<number> {
   const trimmed = params.name.trim();
   if (!trimmed) throw new Error('Name is required');
@@ -459,9 +462,29 @@ export async function createParty(params: {
     );
   }
 
+  const gstin = params.gstin?.trim().toUpperCase() || null;
+  if (gstin) {
+    const { isValidGstin } = await import('./gst');
+    if (!isValidGstin(gstin)) {
+      throw new Error('Enter a valid 15-character GSTIN');
+    }
+  }
+  const derivedState =
+    params.state?.trim() ||
+    (gstin ? (await import('./gst')).stateCodeFromGstin(gstin) : null) ||
+    null;
+
   const result = await db.runAsync(
-    'INSERT INTO parties (name, type, phone, notes) VALUES (?, ?, ?, ?)',
-    [trimmed, params.type, params.phone?.trim() || null, params.notes?.trim() || null]
+    'INSERT INTO parties (name, type, phone, notes, gstin, state, address) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [
+      trimmed,
+      params.type,
+      params.phone?.trim() || null,
+      params.notes?.trim() || null,
+      gstin,
+      derivedState,
+      params.address?.trim() || null,
+    ]
   );
   if (result.lastInsertRowId) {
     return result.lastInsertRowId;
@@ -475,7 +498,15 @@ export async function createParty(params: {
 
 export async function updateParty(
   id: number,
-  params: { name: string; type: PartyType; phone?: string; notes?: string }
+  params: {
+    name: string;
+    type: PartyType;
+    phone?: string;
+    notes?: string;
+    gstin?: string;
+    state?: string;
+    address?: string;
+  }
 ): Promise<void> {
   const trimmed = params.name.trim();
   if (!trimmed) throw new Error('Name is required');
@@ -501,13 +532,30 @@ export async function updateParty(
   }
 
   await db.withTransactionAsync(async () => {
-    await db.runAsync('UPDATE parties SET name = ?, type = ?, phone = ?, notes = ? WHERE id = ?', [
-      trimmed,
-      params.type,
-      params.phone?.trim() || null,
-      params.notes?.trim() || null,
-      id,
-    ]);
+    const gstin = params.gstin?.trim().toUpperCase() || null;
+    if (gstin) {
+      const { isValidGstin } = await import('./gst');
+      if (!isValidGstin(gstin)) {
+        throw new Error('Enter a valid 15-character GSTIN');
+      }
+    }
+    const derivedState =
+      params.state?.trim() ||
+      (gstin ? (await import('./gst')).stateCodeFromGstin(gstin) : null) ||
+      null;
+    await db.runAsync(
+      'UPDATE parties SET name = ?, type = ?, phone = ?, notes = ?, gstin = ?, state = ?, address = ? WHERE id = ?',
+      [
+        trimmed,
+        params.type,
+        params.phone?.trim() || null,
+        params.notes?.trim() || null,
+        gstin,
+        derivedState,
+        params.address?.trim() || null,
+        id,
+      ]
+    );
 
     if (trimmed.toLowerCase() !== existing.name.toLowerCase()) {
       if (params.type === 'customer') {

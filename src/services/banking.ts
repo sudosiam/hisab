@@ -250,7 +250,13 @@ export async function getTotalBalance(): Promise<number> {
 export async function getExpenseCategories(): Promise<string[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<{ name: string }>(
-    `SELECT name FROM expense_categories ORDER BY name COLLATE NOCASE ASC`
+    `SELECT name FROM (
+       SELECT name FROM expense_categories
+       UNION
+       SELECT DISTINCT category AS name FROM expenses
+       WHERE category IS NOT NULL AND TRIM(category) != ''
+     )
+     ORDER BY name COLLATE NOCASE ASC`
   );
   return rows.map((r) => r.name);
 }
@@ -469,14 +475,39 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
     'SELECT COALESCE(SUM(value), 0) as total FROM fixed_assets'
   );
 
+  const { inputTaxCredit, outputTax } = await getGstBalancesForSheet(db);
+
   const cash = roundMoney(cashBank?.total ?? 0);
   const inv = roundMoney(inventory?.total ?? 0);
   const recv = roundMoney(receivables?.total ?? 0);
   const fixed = roundMoney(fixedAssets?.total ?? 0);
+  const inputTax = roundMoney(inputTaxCredit);
   const pay = roundMoney(payables?.total ?? 0);
   const loan = roundMoney(loans?.total ?? 0);
-  const totalAssets = addMoney(cash, inv, recv, fixed);
-  const totalLiabilities = addMoney(pay, loan);
+  const outTax = roundMoney(outputTax);
+
+  const currentAssets: BalanceSheet['assets']['currentAssets'] = [
+    { key: 'cash_bank', label: 'Cash & Bank', amount: cash },
+    { key: 'receivables', label: 'Accounts Receivable', amount: recv },
+    { key: 'inventory', label: 'Inventory', amount: inv },
+    { key: 'input_tax', label: 'Input Tax Credit', amount: inputTax },
+  ].filter((line) => Math.abs(line.amount) > 0.009 || line.key !== 'input_tax');
+
+  const nonCurrentAssets: BalanceSheet['assets']['nonCurrentAssets'] = [
+    { key: 'fixed_assets', label: 'Fixed Assets', amount: fixed },
+  ].filter((line) => Math.abs(line.amount) > 0.009 || line.key === 'fixed_assets');
+
+  const currentLiabilities: BalanceSheet['liabilities']['currentLiabilities'] = [
+    { key: 'payables', label: 'Accounts Payable', amount: pay },
+    { key: 'output_tax', label: 'Output Tax Payable', amount: outTax },
+  ].filter((line) => Math.abs(line.amount) > 0.009 || line.key !== 'output_tax');
+
+  const nonCurrentLiabilities: BalanceSheet['liabilities']['nonCurrentLiabilities'] = [
+    { key: 'loans', label: 'Loans', amount: loan },
+  ].filter((line) => Math.abs(line.amount) > 0.009 || line.key === 'loans');
+
+  const totalAssets = addMoney(cash, inv, recv, fixed, inputTax);
+  const totalLiabilities = addMoney(pay, loan, outTax);
   const equity = subMoney(totalAssets, totalLiabilities);
 
   return {
@@ -484,15 +515,72 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
       cashAndBank: cash,
       inventory: inv,
       receivables: recv,
+      inputTaxCredit: inputTax,
       fixedAssets: fixed,
       total: totalAssets,
+      currentAssets,
+      nonCurrentAssets,
     },
     liabilities: {
       payables: pay,
+      outputTax: outTax,
       loans: loan,
       total: totalLiabilities,
+      currentLiabilities,
+      nonCurrentLiabilities,
     },
     equity,
+  };
+}
+
+async function getGstBalancesForSheet(
+  db: Awaited<ReturnType<typeof getDatabase>>
+): Promise<{ inputTaxCredit: number; outputTax: number }> {
+  try {
+    const { hasGeneralLedger } = await import('./ledger');
+    if (await hasGeneralLedger(db)) {
+      const rows = await db.getAllAsync<{ system_key: string; net: number }>(
+        `SELECT la.system_key as system_key,
+                COALESCE(SUM(jl.debit), 0) - COALESCE(SUM(jl.credit), 0) as net
+         FROM ledger_accounts la
+         LEFT JOIN journal_lines jl ON jl.ledger_account_id = la.id
+         WHERE la.system_key IN (
+           'input_cgst', 'input_sgst', 'input_igst',
+           'output_cgst', 'output_sgst', 'output_igst'
+         )
+         GROUP BY la.system_key`
+      );
+
+      let inputTaxCredit = 0;
+      let outputTax = 0;
+      for (const row of rows) {
+        const net = roundMoney(row.net);
+        if (row.system_key.startsWith('input_')) {
+          inputTaxCredit = addMoney(inputTaxCredit, Math.max(0, net));
+        } else {
+          outputTax = addMoney(outputTax, Math.max(0, -net));
+        }
+      }
+      return { inputTaxCredit, outputTax };
+    }
+  } catch {
+    // Fall through to invoice tax totals.
+  }
+
+  const purchaseTax = await db.getFirstAsync<{ total: number }>(
+    `SELECT COALESCE(SUM(COALESCE(cgst_amount, 0) + COALESCE(sgst_amount, 0) + COALESCE(igst_amount, 0)), 0) as total
+     FROM purchases
+     WHERE EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = purchases.id)`
+  );
+  const salesTax = await db.getFirstAsync<{ total: number }>(
+    `SELECT COALESCE(SUM(COALESCE(cgst_amount, 0) + COALESCE(sgst_amount, 0) + COALESCE(igst_amount, 0)), 0) as total
+     FROM sales
+     WHERE EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = sales.id)`
+  );
+
+  return {
+    inputTaxCredit: roundMoney(purchaseTax?.total ?? 0),
+    outputTax: roundMoney(salesTax?.total ?? 0),
   };
 }
 

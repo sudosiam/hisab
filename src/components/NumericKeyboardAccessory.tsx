@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
-import { radius, spacing } from '../constants/theme';
+import { spacing } from '../constants/theme';
 
 export const NUMERIC_KEYBOARD_ACCESSORY_ID = 'hisab-numeric-done';
 

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, type StyleProp, type TextStyle } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, type StyleProp, type TextStyle } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { formatDisplayDate } from '../utils/date';
 import { spacing } from '../constants/theme';
@@ -18,6 +18,8 @@ interface Props {
   emptyText?: string;
   onRowLongPress?: (row: LedgerRow) => void;
   onRowPress?: (row: LedgerRow) => void;
+  /** Accessibility hint when a row is pressable (e.g. "Long-press to delete"). */
+  rowActionHint?: string;
   footerRows?: { label: string; debit: number; credit: number; balance?: number }[];
 }
 
@@ -47,10 +49,63 @@ function AmountCell({
   );
 }
 
-function tableMinWidth(showDate: boolean, showBalance: boolean): number {
-  const date = showDate ? 76 : 0;
-  const amounts = showBalance ? 3 : 2;
-  return date + 140 + amounts * 92;
+function AmountHeaders({
+  showBalance,
+  styles: s,
+}: {
+  showBalance: boolean;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  return (
+    <View style={s.amountRow}>
+      <Text style={[s.headerCell, s.amtHeader, s.amtCol]}>Dr</Text>
+      <Text style={[s.headerCell, s.amtHeader, s.amtCol]}>Cr</Text>
+      {showBalance ? (
+        <Text style={[s.headerCell, s.amtHeader, s.amtCol]}>Bal</Text>
+      ) : null}
+    </View>
+  );
+}
+
+function AmountValues({
+  debit,
+  credit,
+  balance,
+  showBalance,
+  bold,
+  styles: s,
+}: {
+  debit: number;
+  credit: number;
+  balance?: number;
+  showBalance: boolean;
+  bold?: boolean;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  return (
+    <View style={s.amountRow}>
+      <View style={s.amtCol}>
+        <AmountCell amount={debit} style={s.debit} bold={bold} />
+      </View>
+      <View style={s.amtCol}>
+        <AmountCell amount={credit} style={s.credit} bold={bold} />
+      </View>
+      {showBalance ? (
+        <View style={s.amtCol}>
+          {balance != null ? (
+            <MoneyText
+              amount={balance}
+              size="sm"
+              style={[s.balance, bold && styles.boldCell]}
+              minimumFontScale={0.55}
+            />
+          ) : (
+            <Text style={[s.balance, bold && styles.boldCell]}>—</Text>
+          )}
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
 export function LedgerTable({
@@ -60,11 +115,11 @@ export function LedgerTable({
   emptyText = 'No entries.',
   onRowLongPress,
   onRowPress,
+  rowActionHint,
   footerRows,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const minWidth = tableMinWidth(showDate, showBalance);
 
   if (rows.length === 0 && !footerRows?.length) {
     return (
@@ -74,45 +129,42 @@ export function LedgerTable({
     );
   }
 
-  const renderRow = (
-    row: LedgerRow,
-    isLast: boolean,
-    key: string
-  ) => {
+  const renderRow = (row: LedgerRow, isLast: boolean, key: string) => {
     const content = (
       <>
-        {showDate ? (
-          <Text style={[styles.cell, styles.dateCol]} numberOfLines={1}>
-            {formatDisplayDate(row.date)}
+        <View style={styles.line1}>
+          {showDate ? (
+            <Text style={styles.dateText} numberOfLines={1}>
+              {formatDisplayDate(row.date)}
+            </Text>
+          ) : null}
+          <Text style={styles.descText} numberOfLines={3}>
+            {row.description}
           </Text>
-        ) : null}
-        <Text style={[styles.cell, styles.descCol]} numberOfLines={2}>
-          {row.description}
-        </Text>
-        <View style={styles.amtCol}>
-          <AmountCell amount={row.debit} style={styles.debit} />
         </View>
-        <View style={styles.amtCol}>
-          <AmountCell amount={row.credit} style={styles.credit} />
-        </View>
-        {showBalance ? (
-          <View style={styles.amtCol}>
-            <MoneyText amount={row.balance} size="sm" style={styles.balance} minimumFontScale={0.55} />
-          </View>
-        ) : null}
+        <AmountValues
+          debit={row.debit}
+          credit={row.credit}
+          balance={row.balance}
+          showBalance={showBalance}
+          styles={styles}
+        />
       </>
     );
 
     if (onRowLongPress || onRowPress) {
+      const actionHint = rowActionHint ?? (onRowLongPress ? 'Long-press for actions' : 'Tap for actions');
       return (
         <TouchableOpacity
           key={key}
           style={[styles.dataRow, isLast && styles.dataRowLast]}
           onPress={onRowPress ? () => onRowPress(row) : undefined}
           onLongPress={onRowLongPress ? () => onRowLongPress(row) : undefined}
+          delayLongPress={400}
           activeOpacity={0.7}
           accessibilityRole="button"
-          accessibilityLabel={`${row.description}, tap to delete`}
+          accessibilityLabel={`${row.description}. ${actionHint}`}
+          accessibilityHint={actionHint}
         >
           {content}
         </TouchableOpacity>
@@ -127,57 +179,41 @@ export function LedgerTable({
   };
 
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}>
-      <View style={[styles.table, { minWidth }]}>
-        <View style={styles.headerRow}>
-          {showDate ? <Text style={[styles.headerCell, styles.dateCol]}>Date</Text> : null}
-          <Text style={[styles.headerCell, styles.descCol]}>Particulars</Text>
-          <Text style={[styles.headerCell, styles.amtCol, styles.amtHeader]}>Debit</Text>
-          <Text style={[styles.headerCell, styles.amtCol, styles.amtHeader]}>Credit</Text>
-          {showBalance ? (
-            <Text style={[styles.headerCell, styles.amtCol, styles.amtHeader]}>Balance</Text>
-          ) : null}
-        </View>
-        {rows.map((row, index) =>
-          renderRow(row, index === rows.length - 1 && !footerRows?.length, String(row.id))
-        )}
-        {footerRows?.map((row, index) => (
-          <View
-            key={`footer-${row.label}`}
-            style={[
-              styles.dataRow,
-              styles.footerRow,
-              index === footerRows.length - 1 && styles.dataRowLast,
-            ]}
-          >
-            {!showDate ? null : <Text style={[styles.cell, styles.dateCol]} />}
-            <Text style={[styles.cell, styles.descCol, styles.footerLabel]} numberOfLines={2}>
+    <View style={styles.table}>
+      <View style={styles.headerRow}>
+        <Text style={[styles.headerCell, styles.particularsHeader]}>
+          {showDate ? 'Date / Particulars' : 'Particulars'}
+        </Text>
+        <AmountHeaders showBalance={showBalance} styles={styles} />
+      </View>
+      {rows.map((row, index) =>
+        renderRow(row, index === rows.length - 1 && !footerRows?.length, String(row.id))
+      )}
+      {footerRows?.map((row, index) => (
+        <View
+          key={`footer-${row.label}`}
+          style={[
+            styles.dataRow,
+            styles.footerRow,
+            index === footerRows.length - 1 && styles.dataRowLast,
+          ]}
+        >
+          <View style={styles.line1}>
+            <Text style={[styles.descText, styles.footerLabel]} numberOfLines={2}>
               {row.label}
             </Text>
-            <View style={styles.amtCol}>
-              <AmountCell amount={row.debit} style={styles.footerLabel} bold />
-            </View>
-            <View style={styles.amtCol}>
-              <AmountCell amount={row.credit} style={styles.footerLabel} bold />
-            </View>
-            {showBalance ? (
-              <View style={styles.amtCol}>
-                {row.balance != null ? (
-                  <MoneyText
-                    amount={row.balance}
-                    size="sm"
-                    style={styles.footerLabel}
-                    minimumFontScale={0.55}
-                  />
-                ) : (
-                  <Text style={styles.footerLabel}>—</Text>
-                )}
-              </View>
-            ) : null}
           </View>
-        ))}
-      </View>
-    </ScrollView>
+          <AmountValues
+            debit={row.debit}
+            credit={row.credit}
+            balance={row.balance}
+            showBalance={showBalance}
+            bold
+            styles={styles}
+          />
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -188,52 +224,75 @@ const styles = StyleSheet.create({
 function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
     table: {
-      flexGrow: 1,
-      borderTopWidth: 1,
-      borderTopColor: colors.border,
+      width: '100%',
+      borderRadius: 12,
+      overflow: 'hidden',
+      backgroundColor: colors.surface,
     },
     headerRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: spacing.sm,
-      paddingVertical: spacing.sm,
-      borderBottomWidth: 1,
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.xs,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
-      backgroundColor: colors.background,
-      gap: 6,
+      backgroundColor: colors.surfaceContainer,
+      gap: 4,
     },
     headerCell: {
       fontSize: 10,
-      fontWeight: '600',
-      color: colors.textSecondary,
+      fontWeight: '700',
+      color: colors.textMuted,
       textTransform: 'uppercase',
-      letterSpacing: 0.3,
+      letterSpacing: 0.4,
     },
+    particularsHeader: { marginBottom: 2 },
     dataRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      paddingHorizontal: spacing.sm,
-      paddingVertical: 10,
-      borderBottomWidth: 1,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.borderLight,
-      gap: 6,
+      gap: 4,
+      minHeight: 48,
+      justifyContent: 'center',
     },
     dataRowLast: { borderBottomWidth: 0 },
-    cell: {
-      fontSize: 12,
-      color: colors.text,
-      fontVariant: ['tabular-nums'],
+    line1: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'flex-start',
+      gap: 6,
     },
-    dateCol: { width: 76, flexShrink: 0 },
-    descCol: { width: 140, flexShrink: 0, fontVariant: undefined, lineHeight: 16 },
-    amtCol: { width: 92, flexShrink: 0, alignItems: 'flex-end' },
-    amtHeader: { textAlign: 'right' },
+    dateText: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      fontVariant: ['tabular-nums'],
+      flexShrink: 0,
+    },
+    descText: {
+      flexGrow: 1,
+      flexShrink: 1,
+      flexBasis: '60%',
+      fontSize: 13,
+      color: colors.text,
+      lineHeight: 17,
+    },
+    amountRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    amtCol: {
+      flex: 1,
+      minWidth: 0,
+      alignItems: 'flex-end',
+    },
+    amtHeader: { textAlign: 'right', width: '100%' },
     debit: { color: colors.text, fontWeight: '500', textAlign: 'right' },
     credit: { color: colors.textSecondary, fontWeight: '500', textAlign: 'right' },
     balance: { color: colors.text, fontWeight: '600', textAlign: 'right' },
-    footerRow: { backgroundColor: colors.background },
-    footerLabel: { fontWeight: '600', color: colors.text, textAlign: 'right' },
-    emptyBox: { padding: spacing.xl, alignItems: 'center' },
-    emptyText: { color: colors.textSecondary, fontSize: 14, textAlign: 'center' },
+    footerRow: { backgroundColor: colors.surfaceContainer },
+    footerLabel: { fontWeight: '600', color: colors.text },
+    emptyBox: { padding: spacing.lg, alignItems: 'center' },
+    emptyText: { color: colors.textSecondary, fontSize: 13, textAlign: 'center' },
   });
 }

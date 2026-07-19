@@ -2,7 +2,7 @@
 
 Android business management app built with **Expo SDK 54** and **SQLite**. All data stays on your device.
 
-**Current version:** `8.1.0` (Android `versionCode` 20)
+**Current version:** `10.0.0` (Android `versionCode` 30)
 
 ## What's in Hisab
 
@@ -13,7 +13,21 @@ Android business management app built with **Expo SDK 54** and **SQLite**. All d
 - **Other income, loans & fixed assets** — Complete balance sheet beyond inventory
 - **Backup & restore** — Daily auto-backup with WAL checkpoint; exclusive backup/restore lock
 - **Data safety** — Corrupt DB never auto-wiped; restore-first recovery; integrity repair on boot
-- **Automated tests** — 35 unit + integration tests (money, payments, sale/purchase flows)
+- **Automated tests** — 42 unit + integration tests (money, payments, GST, sale/purchase flows)
+
+## What's new in 10.0.0
+
+**Material 3 Android UI**
+- Compact navy Material 3 theme — tonal surfaces, filled chips, circular FABs, denser list/form density
+- Shared UI kit refresh (drawer, headers, pickers as bottom sheets, ledger tables, status badges)
+- Light and dark modes aligned to the same compact layout system
+
+**GST**
+- Regular-scheme GST fields and reports (summary, outward supplies, HSN, state-wise)
+- Schema v25 — additive GST columns with safe migration
+
+**Quality**
+- `npm run verify` — typecheck + lint + **42/42 tests passed**
 
 ## What's new in 8.1.0
 
@@ -52,12 +66,12 @@ Android business management app built with **Expo SDK 54** and **SQLite**. All d
 
 **Testing**
 - Integration tests: sale/purchase create → stock → cash → payment add/remove (in-memory SQLite via `better-sqlite3`)
-- `npm run verify` — typecheck + lint + 35 tests
+- `npm run verify` — typecheck + lint + 42 tests
 
 ## Features
 
 - **Sidebar navigation** — Dashboard, Sales, Purchases, Inventory, Banking, Balance Sheet, Growth, Reports, Settings
-- **SQLite database** — Local-first storage (schema v24)
+- **SQLite database** — Local-first storage (schema v25)
 - **Dashboard** — Revenue, purchases, profit, expense, liquid cash, receivable, payable, inventory, net worth
 - **Sales & Purchases** — Paid/unpaid lists, split payments, edit with stock checks, invoice detail with add/remove payment
 - **Inventory** — Weighted average cost, opening stock, movement history, soft-delete when referenced
@@ -135,7 +149,7 @@ Settings → About reads `app.json` via `expo-constants`.
 
 - Expo SDK 54 / React Native 0.81
 - expo-router (drawer sidebar)
-- expo-sqlite (schema v24, 24 migrations)
+- expo-sqlite (schema v25, 25 migrations)
 - expo-file-system (SAF backup on Android)
 - Jest — unit + integration tests (`better-sqlite3` harness)
 
@@ -158,4 +172,3 @@ Settings → About reads `app.json` via `expo-constants`.
 - Money stored as SQLite `REAL` (rupees); `roundMoney()` used throughout — not integer paise columns
 - No receivables/payables aging buckets (flat outstanding lists only)
 - Loans are manual balance-sheet memos — not linked to banking repayments
-- General Ledger UI running-balance column not implemented (always shows 0)

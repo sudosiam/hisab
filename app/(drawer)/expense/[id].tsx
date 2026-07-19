@@ -34,7 +34,7 @@ import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
 import { formatSqliteError } from '../../../src/db/database';
-import { isValidISODate } from '../../../src/utils/date';
+import { isValidISODate, formatDisplayDate } from '../../../src/utils/date';
 import { spacing, radius } from '../../../src/constants/theme';
 import type { Account, Expense } from '../../../src/types';
 
@@ -289,7 +289,7 @@ export default function ExpenseDetailScreen() {
 
       <View style={localStyles.kpiRow}>
         <StatCard label="Amount" value={expense.amount} color={colors.warning} />
-        <StatCard label="Date" displayValue={expense.date} color={colors.primary} />
+        <StatCard label="Date" displayValue={formatDisplayDate(expense.date)} color={colors.primary} />
         <StatCard
           label="Account"
           displayValue={expense.account_name ?? '—'}

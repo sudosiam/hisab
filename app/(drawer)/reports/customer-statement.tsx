@@ -115,8 +115,8 @@ export default function CustomerStatementReportScreen() {
         stmtChipValue: { fontSize: 13, fontWeight: '600', color: colors.text },
         stmtBalChip: { backgroundColor: colors.navActive },
         stmtBalValue: { fontSize: 13, fontWeight: '700', color: colors.primary },
-        emptyBox: { padding: spacing.xl, alignItems: 'center' },
-        emptyText: { color: colors.textSecondary, fontSize: 14, textAlign: 'center' },
+        emptyBox: { padding: spacing.lg, alignItems: 'center' },
+        emptyText: { color: colors.textSecondary, fontSize: 13, textAlign: 'center' },
       }),
     [colors, isDark]
   );

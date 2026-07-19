@@ -30,7 +30,13 @@ async function syncGeneralLedgerAfterWrite(): Promise<void> {
 export async function getOtherIncomeCategories(): Promise<string[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<{ name: string }>(
-    `SELECT name FROM other_income_categories ORDER BY name COLLATE NOCASE ASC`
+    `SELECT name FROM (
+       SELECT name FROM other_income_categories
+       UNION
+       SELECT DISTINCT category AS name FROM other_income
+       WHERE category IS NOT NULL AND TRIM(category) != ''
+     )
+     ORDER BY name COLLATE NOCASE ASC`
   );
   return rows.map((r) => r.name);
 }

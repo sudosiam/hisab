@@ -20,7 +20,7 @@ import { useReportPdfHeader } from '../../src/hooks/useReportPdfHeader';
 import { shareBalanceSheetPdf } from '../../src/services/reportPdf';
 import { spacing, typography } from '../../src/constants/theme';
 import { cardSurface } from '../../src/constants/shadows';
-import type { BalanceSheet } from '../../src/types';
+import type { BalanceSheet, BalanceSheetLine } from '../../src/types';
 
 export default function BalanceSheetScreen() {
   const styles = useScreenStyles();
@@ -36,7 +36,8 @@ export default function BalanceSheetScreen() {
       StyleSheet.create({
         hero: {
           ...cardSurface(colors, isDark),
-          padding: spacing.lg,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.md,
           marginBottom: spacing.lg,
           alignItems: 'center',
         },
@@ -47,6 +48,16 @@ export default function BalanceSheetScreen() {
           padding: spacing.md,
           marginBottom: spacing.md,
         },
+        subsection: {
+          fontSize: 11,
+          fontWeight: '700',
+          color: colors.textMuted,
+          textTransform: 'uppercase',
+          letterSpacing: 0.4,
+          marginTop: spacing.sm,
+          marginBottom: spacing.xs,
+        },
+        subsectionFirst: { marginTop: 0 },
         sectionTotal: {
           borderTopWidth: 1,
           borderTopColor: colors.borderLight,
@@ -143,18 +154,20 @@ export default function BalanceSheetScreen() {
         </Text>
       </View>
 
-      <View style={localStyles.info}>
-        <Text style={localStyles.infoText}>
-          As of today. Deactivated accounts are excluded from cash/bank totals; inventory uses current stock value, and loans appear under liabilities.
-        </Text>
-      </View>
-
       <SectionHeader title="Assets" />
       <View style={localStyles.section}>
-        <Row localStyles={rowStyles} label="Cash & Bank" value={data.assets.cashAndBank} />
-        <Row localStyles={rowStyles} label="Accounts Receivable" value={data.assets.receivables} />
-        <Row localStyles={rowStyles} label="Inventory" value={data.assets.inventory} />
-        <Row localStyles={rowStyles} label="Fixed Assets" value={data.assets.fixedAssets} />
+        <Text style={[localStyles.subsection, localStyles.subsectionFirst]}>Current assets</Text>
+        <LineRows lines={data.assets.currentAssets} localStyles={rowStyles} />
+        <View style={localStyles.sectionTotal}>
+          <Row
+            localStyles={rowStyles}
+            label="Total Current Assets"
+            value={data.assets.currentAssets.reduce((sum, line) => sum + line.amount, 0)}
+            bold
+          />
+        </View>
+        <Text style={localStyles.subsection}>Non-current assets</Text>
+        <LineRows lines={data.assets.nonCurrentAssets} localStyles={rowStyles} />
         <View style={localStyles.sectionTotal}>
           <Row localStyles={rowStyles} label="Total Assets" value={data.assets.total} bold />
         </View>
@@ -162,8 +175,10 @@ export default function BalanceSheetScreen() {
 
       <SectionHeader title="Liabilities" />
       <View style={localStyles.section}>
-        <Row localStyles={rowStyles} label="Accounts Payable" value={data.liabilities.payables} />
-        <Row localStyles={rowStyles} label="Loans" value={data.liabilities.loans} />
+        <Text style={[localStyles.subsection, localStyles.subsectionFirst]}>Current liabilities</Text>
+        <LineRows lines={data.liabilities.currentLiabilities} localStyles={rowStyles} />
+        <Text style={localStyles.subsection}>Non-current liabilities</Text>
+        <LineRows lines={data.liabilities.nonCurrentLiabilities} localStyles={rowStyles} />
         <View style={localStyles.sectionTotal}>
           <Row localStyles={rowStyles} label="Total Liabilities" value={data.liabilities.total} bold />
         </View>
@@ -174,6 +189,31 @@ export default function BalanceSheetScreen() {
         <Row localStyles={rowStyles} label="Net Worth (Equity)" value={data.equity} bold highlight />
       </View>
     </ScrollView>
+  );
+}
+
+function LineRows({
+  lines,
+  localStyles,
+}: {
+  lines: BalanceSheetLine[];
+  localStyles: {
+    row: ViewStyle;
+    rowLabel: TextStyle;
+    rowValue: TextStyle;
+    bold: TextStyle;
+    highlight: TextStyle;
+  };
+}) {
+  if (lines.length === 0) {
+    return <Row localStyles={localStyles} label="None" value={0} />;
+  }
+  return (
+    <>
+      {lines.map((line) => (
+        <Row key={line.key} localStyles={localStyles} label={line.label} value={line.amount} />
+      ))}
+    </>
   );
 }
 

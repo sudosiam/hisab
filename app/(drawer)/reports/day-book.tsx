@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { DatePickerField, ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { LedgerTable } from '../../../src/components/LedgerTable';
@@ -29,13 +29,15 @@ export default function DayBookReportScreen() {
   const [error, setError] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [booting, setBooting] = useState(true);
 
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
         header: {
           ...cardSurface(colors, isDark),
-          padding: spacing.md,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
           marginBottom: spacing.md,
           borderRadius: radius.md,
         },
@@ -61,12 +63,14 @@ export default function DayBookReportScreen() {
       setRows([]);
       setHint('Choose valid from and to dates.');
       setError(null);
+      setBooting(false);
       return;
     }
     if (fromDate > toDate) {
       setRows([]);
       setHint('From date must be on or before the to date.');
       setError(null);
+      setBooting(false);
       return;
     }
     try {
@@ -74,23 +78,29 @@ export default function DayBookReportScreen() {
         setRows(await getDayBookFromLedger(fromDate, toDate));
       } else {
         const legacy = await getDayBookReport(fromDate, toDate);
+        let balance = 0;
         setRows(
-          legacy.map((row) => ({
-            id: row.id,
-            date: row.date,
-            description: `${row.voucherType} ${row.voucherNo} — ${row.particulars}`,
-            debit: row.debit,
-            credit: row.credit,
-            balance: 0,
-            reference_type: 'payment' as const,
-            reference_id: 0,
-          }))
+          legacy.map((row) => {
+            balance = roundMoney(balance + row.debit - row.credit);
+            return {
+              id: row.id,
+              date: row.date,
+              description: `${row.voucherType} ${row.voucherNo} — ${row.particulars}`,
+              debit: row.debit,
+              credit: row.credit,
+              balance,
+              reference_type: 'payment' as const,
+              reference_id: 0,
+            };
+          })
         );
       }
       setHint(null);
       setError(null);
     } catch (e) {
       setError(formatSqliteError(e));
+    } finally {
+      setBooting(false);
     }
   }, [fromDate, toDate, refreshKey]);
 
@@ -114,6 +124,14 @@ export default function DayBookReportScreen() {
 
   if (error) {
     return <ErrorState message={error} onRetry={load} />;
+  }
+
+  if (booting) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
   }
 
   return (

@@ -10,6 +10,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
+import { useDatabase } from '../context/DatabaseContext';
 import { spacing, radius } from '../constants/theme';
 import { searchCustomers, searchVendors } from '../services/customers';
 import type { PartyType } from '../types';
@@ -32,9 +33,11 @@ export function CustomerAutocomplete({
   searchFn,
 }: Props) {
   const { colors } = useTheme();
+  const { refreshKey } = useDatabase();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [focused, setFocused] = useState(false);
+  const [searchTick, setSearchTick] = useState(0);
 
   const resolveSearch =
     searchFn ?? (partyType === 'vendor' ? searchVendors : searchCustomers);
@@ -54,7 +57,7 @@ export function CustomerAutocomplete({
       active = false;
       clearTimeout(timer);
     };
-  }, [value, resolveSearch]);
+  }, [value, resolveSearch, refreshKey, searchTick]);
 
   const filtered = suggestions.filter(
     (n) => !value.trim() || n.toLowerCase().includes(value.trim().toLowerCase())
@@ -79,7 +82,10 @@ export function CustomerAutocomplete({
         onChangeText={onChange}
         placeholder={placeholder}
         placeholderTextColor={colors.textMuted}
-        onFocus={() => setFocused(true)}
+        onFocus={() => {
+          setFocused(true);
+          setSearchTick((tick) => tick + 1);
+        }}
         accessibilityLabel={label}
       />
       <Modal visible={showDropdown} transparent animationType="fade" onRequestClose={() => setFocused(false)}>
@@ -121,32 +127,31 @@ export function CustomerAutocomplete({
 function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
     wrap: { marginBottom: spacing.md },
-    label: { fontSize: 13, fontWeight: '600', color: colors.textSecondary, marginBottom: 6 },
+    label: { fontSize: 12, fontWeight: '500', color: colors.textSecondary, marginBottom: 4 },
     input: {
-      borderWidth: 1,
-      borderColor: colors.border,
+      borderWidth: 0,
       borderRadius: radius.md,
       paddingHorizontal: spacing.md,
-      paddingVertical: 13,
+      paddingVertical: 11,
+      minHeight: 44,
       backgroundColor: colors.inputBg,
-      fontSize: 15,
+      fontSize: 14,
       color: colors.text,
     },
     modalBackdrop: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.35)',
-      justifyContent: 'center',
-      padding: spacing.lg,
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      justifyContent: 'flex-end',
     },
     modalSheet: {
       backgroundColor: colors.surface,
-      borderRadius: radius.md,
+      borderTopLeftRadius: radius.xl,
+      borderTopRightRadius: radius.xl,
       padding: spacing.md,
-      borderWidth: 1,
-      borderColor: colors.border,
+      borderWidth: 0,
     },
     modalTitle: { fontSize: 14, fontWeight: '700', color: colors.text, marginBottom: spacing.sm },
-    suggestion: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderLight },
+    suggestion: { paddingVertical: 12, minHeight: 44, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderLight },
     suggestionText: { fontSize: 14, color: colors.text },
     createText: { fontSize: 14, color: colors.primary, fontWeight: '600' },
   });

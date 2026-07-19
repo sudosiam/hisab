@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { getInventoryReport } from '../../../src/services/reports';
 import { formatCurrency } from '../../../src/utils/format';
@@ -12,33 +12,33 @@ import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { shareInventoryReportPdf } from '../../../src/services/reportPdf';
 import { roundMoney } from '../../../src/utils/money';
 import { formatSqliteError } from '../../../src/db/database';
-import { radius, spacing } from '../../../src/constants/theme';
+import { spacing } from '../../../src/constants/theme';
+import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 
 export default function InventoryReportScreen() {
   const styles = useScreenStyles();
   const { refreshKey } = useDatabase();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
         totalWrap: { alignItems: 'center', padding: spacing.md },
         row: {
-          backgroundColor: colors.surface,
-          padding: spacing.md,
-          borderRadius: radius.sm,
+          ...cardSurface(colors, isDark),
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
           marginBottom: spacing.xs,
-          borderWidth: 1,
-          borderColor: colors.border,
         },
         name: { fontWeight: '600', color: colors.text },
         meta: { fontSize: 11, color: colors.textSecondary, marginTop: 2, lineHeight: 15 },
       }),
-    [colors]
+    [colors, isDark]
   );
   const [rows, setRows] = useState<Awaited<ReturnType<typeof getInventoryReport>>>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [booting, setBooting] = useState(true);
 
   const load = useCallback(async () => {
     void refreshKey;
@@ -47,6 +47,8 @@ export default function InventoryReportScreen() {
       setError(null);
     } catch (e) {
       setError(formatSqliteError(e));
+    } finally {
+      setBooting(false);
     }
   }, [refreshKey]);
 
@@ -66,6 +68,14 @@ export default function InventoryReportScreen() {
 
   if (error) {
     return <ErrorState message={error} onRetry={load} />;
+  }
+
+  if (booting) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
   }
 
   return (

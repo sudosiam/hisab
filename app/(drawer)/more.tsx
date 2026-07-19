@@ -39,22 +39,23 @@ export default function MoreScreen() {
           ...cardSurface(colors, isDark),
           flexDirection: 'row',
           alignItems: 'center',
-          padding: spacing.md,
-          minHeight: 68,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
+          minHeight: 56,
           marginBottom: spacing.sm,
-          gap: spacing.md,
+          gap: spacing.sm,
         },
         iconWrap: {
-          width: 40,
-          height: 40,
-          borderRadius: radius.md,
-          backgroundColor: colors.navActive,
+          width: 36,
+          height: 36,
+          borderRadius: radius.full,
+          backgroundColor: colors.primaryContainer,
           alignItems: 'center',
           justifyContent: 'center',
         },
-        cardBody: { flex: 1 },
-        cardTitle: { fontSize: 16, fontWeight: '600', color: colors.text },
-        cardSub: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
+        cardBody: { flex: 1, minWidth: 0 },
+        cardTitle: { fontSize: 14, fontWeight: '600', color: colors.text },
+        cardSub: { fontSize: 12, color: colors.textSecondary, marginTop: 1, lineHeight: 16 },
       }),
     [colors, isDark]
   );
@@ -75,7 +76,7 @@ export default function MoreScreen() {
           accessibilityLabel={item.title}
         >
           <View style={localStyles.iconWrap}>
-            <Ionicons name={item.icon} size={20} color={colors.primary} />
+            <Ionicons name={item.icon} size={18} color={colors.onPrimaryContainer} />
           </View>
           <View style={localStyles.cardBody}>
             <Text style={localStyles.cardTitle}>{item.title}</Text>

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,7 @@ import {
   Alert,
   TouchableOpacity,
 } from 'react-native';
-import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
+import { useLocalSearchParams, useFocusEffect, useRouter, useNavigation } from 'expo-router';
 import { getSaleById, getSaleItems, getSalePayments, addSalePayment, removeSalePayment, deleteSale } from '../../../src/services/sales';
 import { calculateSaleCogs, calculateSaleGrossProfit } from '../../../src/services/financials';
 import { formatSqliteError } from '../../../src/db/database';
@@ -15,6 +15,7 @@ import { getSelectableAccounts } from '../../../src/services/banking';
 import { StatusBadge } from '../../../src/components/StatusBadge';
 import { StatCard } from '../../../src/components/StatCard';
 import { AccountPicker } from '../../../src/components/AccountPicker';
+import { OverflowMenu } from '../../../src/components/OverflowMenu';
 import {
   FormInput,
   FormScreen,
@@ -28,13 +29,14 @@ import { roundMoney } from '../../../src/utils/money';
 import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
-import { todayISO, isValidISODate } from '../../../src/utils/date';
+import { todayISO, isValidISODate, formatDisplayDate } from '../../../src/utils/date';
 import { radius, spacing } from '../../../src/constants/theme';
 import type { Account, Sale, SaleItem, SalePayment } from '../../../src/types';
 
 export default function SaleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const navigation = useNavigation();
   const { refresh } = useDatabase();
   const styles = useScreenStyles();
   const { colors } = useTheme();
@@ -223,7 +225,7 @@ export default function SaleDetailScreen() {
     );
   };
 
-  const handleDelete = () => {
+  const handleDelete = useCallback(() => {
     if (!sale) return;
     Alert.alert('Delete Sale', `Delete ${sale.invoice_no}? Stock and payments will be reversed.`, [
       { text: 'Cancel', style: 'cancel' },
@@ -241,7 +243,58 @@ export default function SaleDetailScreen() {
         },
       },
     ]);
-  };
+  }, [sale, refresh, router]);
+
+  const handlePreviewPdf = useCallback(async () => {
+    if (!sale) return;
+    try {
+      const { previewSaleInvoicePdf } = await import('../../../src/services/saleInvoicePdf');
+      await previewSaleInvoicePdf(sale.id);
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
+  }, [sale]);
+
+  const handleSharePdf = useCallback(async () => {
+    if (!sale) return;
+    try {
+      const { shareSaleInvoicePdf } = await import('../../../src/services/saleInvoicePdf');
+      await shareSaleInvoicePdf(sale.id);
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
+  }, [sale]);
+
+  const handleWhatsApp = useCallback(async () => {
+    if (!sale) return;
+    try {
+      const { shareSaleInvoiceWhatsApp } = await import('../../../src/services/saleInvoicePdf');
+      await shareSaleInvoiceWhatsApp(sale.id);
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
+  }, [sale]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: sale
+        ? () => (
+            <OverflowMenu
+              actions={[
+                { label: 'Preview / Print', onPress: handlePreviewPdf },
+                { label: 'Share PDF', onPress: handleSharePdf },
+                { label: 'Share on WhatsApp', onPress: handleWhatsApp },
+                {
+                  label: 'Delete Sale',
+                  destructive: true,
+                  onPress: handleDelete,
+                },
+              ]}
+            />
+          )
+        : undefined,
+    });
+  }, [navigation, sale, handleDelete, handlePreviewPdf, handleSharePdf, handleWhatsApp]);
 
   if (loading) {
     return (
@@ -284,17 +337,26 @@ export default function SaleDetailScreen() {
       </View>
       <View style={[localStyles.typeBadge, isBos && localStyles.typeBadgeBos]}>
         <Text style={[localStyles.typeBadgeText, isBos && localStyles.typeBadgeTextBos]}>
-          {isBos ? 'Bill of Supply' : 'Invoice'}
+          {isBos ? 'Bill of Supply' : 'Tax Invoice'}
         </Text>
       </View>
       <Text style={localStyles.party}>{sale.party_name}</Text>
-      <Text style={localStyles.date}>{sale.date}</Text>
+      <Text style={localStyles.date}>{formatDisplayDate(sale.date)}</Text>
 
       {hasDiscount || hasServiceCharges ? (
         <Text style={localStyles.discountNote}>
           Subtotal {formatCurrency(sale.subtotal)}
           {hasDiscount ? ` · Discount ${formatCurrency(sale.discount_amount)}` : ''}
           {hasServiceCharges ? ` · Service ${formatCurrency(sale.service_charges)}` : ''}
+        </Text>
+      ) : null}
+
+      {(sale.cgst_amount ?? 0) + (sale.sgst_amount ?? 0) + (sale.igst_amount ?? 0) > 0.009 ? (
+        <Text style={localStyles.discountNote}>
+          Taxable {formatCurrency(sale.taxable_amount ?? 0)}
+          {(sale.igst_amount ?? 0) > 0.009
+            ? ` · IGST ${formatCurrency(sale.igst_amount)}`
+            : ` · CGST ${formatCurrency(sale.cgst_amount ?? 0)} · SGST ${formatCurrency(sale.sgst_amount ?? 0)}`}
         </Text>
       ) : null}
 
@@ -320,7 +382,8 @@ export default function SaleDetailScreen() {
           <View style={{ flex: 1 }}>
             <Text style={localStyles.itemName}>{item.product_name}</Text>
             <Text style={localStyles.itemMeta}>
-              {item.qty} × {formatCurrency(item.unit_price)}
+              {item.qty} × {formatCurrency(item.unit_price)} · Cost{' '}
+              {formatCurrency(item.unit_cost)}
             </Text>
           </View>
           <Text style={localStyles.itemTotal}>{formatCurrency(item.total)}</Text>
@@ -335,7 +398,7 @@ export default function SaleDetailScreen() {
           <View key={p.id} style={localStyles.itemRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.value}>{p.account_name}</Text>
-              <Text style={localStyles.itemMeta}>{p.date}</Text>
+              <Text style={localStyles.itemMeta}>{formatDisplayDate(p.date)}</Text>
             </View>
             <Text style={styles.amount}>{formatCurrency(p.amount)}</Text>
             <TouchableOpacity
@@ -384,10 +447,6 @@ export default function SaleDetailScreen() {
           <Text style={localStyles.muted}>{sale.notes}</Text>
         </>
       ) : null}
-
-      <View style={{ marginTop: spacing.lg }}>
-        <PrimaryButton title="Delete Sale" onPress={handleDelete} variant="danger" />
-      </View>
     </FormScreen>
   );
 }

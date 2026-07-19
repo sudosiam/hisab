@@ -8,9 +8,9 @@ import {
   StyleSheet,
   RefreshControl,
 } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { getProducts, getProductSellPrice } from '../../../src/services/inventory';
-import { ErrorState, SearchField, useScreenStyles } from '../../../src/components/ui';
+import { ErrorState, Fab, SearchField, useScreenStyles } from '../../../src/components/ui';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 import { CategoryPicker } from '../../../src/components/CategoryPicker';
 import { formatCurrency, formatQty } from '../../../src/utils/format';
@@ -35,10 +35,25 @@ export default function InventoryListScreen() {
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        qty: { fontSize: 14, color: colors.primary, fontWeight: '600' },
-        value: { fontSize: 13, marginTop: 4, fontWeight: '500', color: colors.text },
-        opening: { fontSize: 11, color: colors.textSecondary, marginTop: 4 },
         filters: { paddingHorizontal: spacing.md, marginBottom: spacing.xs },
+        row: {
+          paddingVertical: spacing.sm,
+          paddingHorizontal: spacing.md,
+          marginBottom: spacing.xs,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: colors.borderLight,
+          backgroundColor: colors.surface,
+        },
+        name: { fontSize: 15, fontWeight: '600', color: colors.text },
+        meta: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: spacing.sm,
+          marginTop: 4,
+        },
+        qty: { fontSize: 13, color: colors.primary, fontWeight: '600', flexShrink: 0 },
+        prices: { fontSize: 12, color: colors.textSecondary, flexShrink: 1, textAlign: 'right' },
       }),
     [colors]
   );
@@ -95,7 +110,7 @@ export default function InventoryListScreen() {
         <FlatList
           data={filteredProducts}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingHorizontal: 0, paddingTop: 0 }]}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -111,38 +126,26 @@ export default function InventoryListScreen() {
           ListEmptyComponent={<Text style={styles.empty}>{emptyMessage}</Text>}
           renderItem={({ item }) => (
             <TouchableOpacity
-              style={styles.card}
+              style={localStyles.row}
               onPress={() => router.push(`/(drawer)/inventory/${item.id}`)}
+              activeOpacity={0.7}
             >
-              <Text style={styles.cardTitle} numberOfLines={1}>
+              <Text style={localStyles.name} numberOfLines={1}>
                 {item.name}
               </Text>
-              {item.category ? (
-                <Text style={styles.cardSub}>{item.category}</Text>
-              ) : null}
-              {item.sku ? <Text style={styles.cardSub}>SKU: {item.sku}</Text> : null}
-              <View style={[styles.row, { marginTop: spacing.sm }]}>
-                <Text style={localStyles.qty}>Stock: {formatQty(item.current_qty, item.unit)}</Text>
-                <Text style={styles.cardSub}>Cost: {formatCurrency(item.avg_cost)}</Text>
+              <View style={localStyles.meta}>
+                <Text style={localStyles.qty}>{formatQty(item.current_qty, item.unit)}</Text>
+                <Text style={localStyles.prices} numberOfLines={1}>
+                  Sell {formatCurrency(getProductSellPrice(item))} · Cost{' '}
+                  {formatCurrency(item.avg_cost)}
+                </Text>
               </View>
-              <Text style={localStyles.value}>
-                Sell: {formatCurrency(getProductSellPrice(item))}
-              </Text>
-              <Text style={localStyles.opening}>
-                Stock value: {formatCurrency(item.current_qty * item.avg_cost)}
-                {' · '}
-                Opening: {formatQty(item.opening_qty, item.unit)} @ {formatCurrency(item.opening_cost)}
-              </Text>
             </TouchableOpacity>
           )}
         />
       )}
 
-      <Link href="/(drawer)/inventory/new" asChild>
-        <TouchableOpacity style={styles.fab}>
-          <Text style={styles.fabText}>+ Add Product</Text>
-        </TouchableOpacity>
-      </Link>
+      <Fab label="+ Add Product" onPress={() => router.push('/(drawer)/inventory/new' as never)} />
     </View>
   );
 }

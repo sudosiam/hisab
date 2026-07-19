@@ -9,7 +9,7 @@ interface Props {
 }
 
 export function DraftBanner({ visible, onDiscard }: Props) {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -17,27 +17,27 @@ export function DraftBanner({ visible, onDiscard }: Props) {
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
-          backgroundColor: isDark ? colors.navActive : colors.chip,
-          borderRadius: radius.md,
+          backgroundColor: colors.primaryContainer,
+          borderRadius: radius.full,
           paddingVertical: spacing.sm,
           paddingHorizontal: spacing.md,
           marginBottom: spacing.md,
-          borderWidth: 1,
-          borderColor: colors.borderLight,
+          minHeight: 40,
         },
         text: {
           flex: 1,
-          fontSize: 13,
-          color: colors.textSecondary,
+          fontSize: 12,
+          color: colors.onPrimaryContainer,
           marginRight: spacing.sm,
+          fontWeight: '500',
         },
         discard: {
-          fontSize: 13,
+          fontSize: 12,
           fontWeight: '700',
           color: colors.danger,
         },
       }),
-    [colors, isDark]
+    [colors]
   );
 
   if (!visible) return null;

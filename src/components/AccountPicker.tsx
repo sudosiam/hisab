@@ -11,7 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { spacing, radius } from '../constants/theme';
-import { cardSurface } from '../constants/shadows';
+import { elevatedSurface } from '../constants/shadows';
 import type { Account } from '../types';
 
 interface Props {
@@ -38,6 +38,7 @@ export function AccountPicker({ label = 'Account', accounts, value, onChange }: 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.handle} />
             <Text style={styles.sheetTitle}>{label}</Text>
             <FlatList
               data={accounts}
@@ -54,7 +55,7 @@ export function AccountPicker({ label = 'Account', accounts, value, onChange }: 
                     {item.name}
                   </Text>
                   {item.id === value ? (
-                    <Ionicons name="checkmark" size={18} color={colors.primary} />
+                    <Ionicons name="checkmark" size={18} color={colors.onPrimaryContainer} />
                   ) : null}
                 </TouchableOpacity>
               )}
@@ -69,29 +70,40 @@ export function AccountPicker({ label = 'Account', accounts, value, onChange }: 
 function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boolean) {
   return StyleSheet.create({
     wrap: { marginBottom: spacing.sm },
-    label: { fontSize: 13, fontWeight: '600', color: colors.textSecondary, marginBottom: 6 },
+    label: { fontSize: 12, fontWeight: '500', color: colors.textSecondary, marginBottom: 4 },
     trigger: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      borderWidth: 1,
-      borderColor: colors.border,
       borderRadius: radius.md,
       paddingHorizontal: spacing.md,
-      paddingVertical: 13,
+      paddingVertical: 11,
+      minHeight: 44,
       backgroundColor: colors.inputBg,
     },
-    triggerText: { fontSize: 15, color: colors.text, fontWeight: '500' },
+    triggerText: { fontSize: 14, color: colors.text, fontWeight: '500' },
     backdrop: {
       flex: 1,
       backgroundColor: 'rgba(0,0,0,0.45)',
-      justifyContent: 'center',
-      padding: spacing.lg,
+      justifyContent: 'flex-end',
     },
     sheet: {
-      ...cardSurface(colors, isDark),
+      ...elevatedSurface(colors, isDark),
+      borderBottomLeftRadius: 0,
+      borderBottomRightRadius: 0,
+      borderTopLeftRadius: radius.xl,
+      borderTopRightRadius: radius.xl,
       maxHeight: '60%',
       padding: spacing.md,
+      paddingBottom: spacing.lg,
+    },
+    handle: {
+      alignSelf: 'center',
+      width: 36,
+      height: 4,
+      borderRadius: radius.full,
+      backgroundColor: colors.border,
+      marginBottom: spacing.sm,
     },
     sheetTitle: { fontSize: 16, fontWeight: '700', color: colors.text, marginBottom: spacing.sm },
     option: {
@@ -100,10 +112,11 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       justifyContent: 'space-between',
       paddingVertical: 12,
       paddingHorizontal: spacing.sm,
-      borderRadius: radius.sm,
+      borderRadius: radius.full,
+      minHeight: 44,
     },
-    optionActive: { backgroundColor: colors.navActive },
-    optionText: { fontSize: 15, color: colors.text },
-    optionTextActive: { color: colors.primary, fontWeight: '600' },
+    optionActive: { backgroundColor: colors.primaryContainer },
+    optionText: { fontSize: 14, color: colors.text },
+    optionTextActive: { color: colors.onPrimaryContainer, fontWeight: '600' },
   });
 }

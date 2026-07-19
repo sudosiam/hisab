@@ -1,5 +1,12 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  RefreshControl,
+  ActivityIndicator,
+} from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { DatePickerField, ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { LedgerTable } from '../../../src/components/LedgerTable';
@@ -24,6 +31,7 @@ export default function GeneralLedgerReportScreen() {
   const [error, setError] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [booting, setBooting] = useState(true);
 
   const localStyles = useMemo(
     () =>
@@ -42,12 +50,14 @@ export default function GeneralLedgerReportScreen() {
       setRows([]);
       setHint('Choose valid from and to dates.');
       setError(null);
+      setBooting(false);
       return;
     }
     if (fromDate > toDate) {
       setRows([]);
       setHint('From date must be on or before the to date.');
       setError(null);
+      setBooting(false);
       return;
     }
     setHint(null);
@@ -56,6 +66,8 @@ export default function GeneralLedgerReportScreen() {
       setError(null);
     } catch (e) {
       setError(formatSqliteError(e));
+    } finally {
+      setBooting(false);
     }
   }, [fromDate, toDate, refreshKey]);
 
@@ -69,7 +81,7 @@ export default function GeneralLedgerReportScreen() {
         description: `${row.accountName} — ${row.description}`,
         debit: row.debit,
         credit: row.credit,
-        balance: 0,
+        balance: row.balance,
       })),
     [rows]
   );
@@ -92,6 +104,14 @@ export default function GeneralLedgerReportScreen() {
 
   if (error) {
     return <ErrorState message={error} onRetry={load} />;
+  }
+
+  if (booting) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
   }
 
   return (
@@ -122,9 +142,14 @@ export default function GeneralLedgerReportScreen() {
 
       {hint ? <Text style={localStyles.hint}>{hint}</Text> : null}
 
+      <Text style={localStyles.hint}>
+        Balance is the running total per account (debit − credit), including
+        opening activity before the from date.
+      </Text>
+
       <LedgerTable
         rows={ledgerRows}
-        showBalance={false}
+        showBalance
         emptyText="No general ledger entries in this date range."
       />
     </ScrollView>

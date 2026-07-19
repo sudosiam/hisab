@@ -20,6 +20,11 @@ export default function ReportsLayout() {
       <Stack.Screen name="customer-statement" options={{ title: 'Customer Statement' }} />
       <Stack.Screen name="vendor-statement" options={{ title: 'Vendor Statement' }} />
       <Stack.Screen name="expense-categories" options={{ title: 'Expenses by Category' }} />
+      <Stack.Screen name="gst-summary" options={{ title: 'GST Summary' }} />
+      <Stack.Screen name="gst-outward" options={{ title: 'Outward Supplies' }} />
+      <Stack.Screen name="gst-state-wise" options={{ title: 'Customers by State' }} />
+      <Stack.Screen name="gst-hsn" options={{ title: 'HSN Summary' }} />
+      <Stack.Screen name="vendor-account-purchases" options={{ title: 'Vendor × Account' }} />
     </Stack>
   );
 }

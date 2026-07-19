@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { getPayablesReport } from '../../../src/services/reports';
 import { ReportRow } from '../../../src/components/ReportRow';
@@ -10,34 +10,36 @@ import { useTheme } from '../../../src/context/ThemeContext';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { sharePayablesPdf } from '../../../src/services/reportPdf';
 import { roundMoney } from '../../../src/utils/money';
+import { formatDisplayDate } from '../../../src/utils/date';
 import { formatSqliteError } from '../../../src/db/database';
-import { radius, spacing } from '../../../src/constants/theme';
+import { spacing } from '../../../src/constants/theme';
+import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 
 export default function PayablesReportScreen() {
   const styles = useScreenStyles();
   const { refreshKey } = useDatabase();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
         totalWrap: { alignItems: 'center', padding: spacing.md },
         row: {
-          backgroundColor: colors.surface,
-          padding: spacing.md,
-          borderRadius: radius.sm,
+          ...cardSurface(colors, isDark),
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
           marginBottom: spacing.xs,
-          borderWidth: 1,
-          borderColor: colors.border,
         },
         invoice: { fontWeight: '600', color: colors.text },
         party: { fontSize: 13, color: colors.textSecondary },
+        date: { fontSize: 11, color: colors.textSecondary },
       }),
-    [colors]
+    [colors, isDark]
   );
   const [rows, setRows] = useState<Awaited<ReturnType<typeof getPayablesReport>>>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [booting, setBooting] = useState(true);
 
   const load = useCallback(async () => {
     void refreshKey;
@@ -46,6 +48,8 @@ export default function PayablesReportScreen() {
       setError(null);
     } catch (e) {
       setError(formatSqliteError(e));
+    } finally {
+      setBooting(false);
     }
   }, [refreshKey]);
 
@@ -65,6 +69,14 @@ export default function PayablesReportScreen() {
 
   if (error) {
     return <ErrorState message={error} onRetry={load} />;
+  }
+
+  if (booting) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
   }
 
   return (
@@ -90,6 +102,7 @@ export default function PayablesReportScreen() {
             <Text style={localStyles.party} numberOfLines={1}>
               {item.supplier_name}
             </Text>
+            <Text style={localStyles.date}>{formatDisplayDate(item.date)}</Text>
           </ReportRow>
         )}
       />

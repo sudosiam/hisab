@@ -38,23 +38,24 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
   return StyleSheet.create({
     card: {
       ...cardSurface(colors, isDark),
-      padding: spacing.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm + 2,
       flex: 1,
       minWidth: '45%',
       minHeight: 0,
     },
     label: {
-      fontSize: 11,
+      fontSize: 10,
       color: colors.textSecondary,
-      marginBottom: 6,
-      fontWeight: '500',
-      letterSpacing: 0.3,
+      marginBottom: 4,
+      fontWeight: '600',
+      letterSpacing: 0.4,
       textTransform: 'uppercase',
     },
     subtitle: {
       fontSize: 11,
       color: colors.textMuted,
-      marginTop: spacing.xs,
+      marginTop: 2,
     },
   });
 }

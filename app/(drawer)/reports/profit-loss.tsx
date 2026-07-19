@@ -24,21 +24,20 @@ import { ErrorState, SectionHeader, useScreenStyles } from '../../../src/compone
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { shareProfitLossPdf } from '../../../src/services/reportPdf';
-import { radius, spacing } from '../../../src/constants/theme';
+import { spacing } from '../../../src/constants/theme';
+import { cardSurface } from '../../../src/constants/shadows';
 
 export default function ProfitLossReportScreen() {
   const { refreshKey } = useDatabase();
   const styles = useScreenStyles();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
         card: {
-          backgroundColor: colors.surface,
-          borderRadius: radius.md,
-          padding: spacing.md,
-          borderWidth: 1,
-          borderColor: colors.border,
+          ...cardSurface(colors, isDark),
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
         },
         line: { ...moneyRowStyles.row, paddingVertical: spacing.sm },
         lineLabel: { fontSize: 14, color: colors.text, flex: 1, minWidth: 0, paddingRight: spacing.sm },
@@ -56,7 +55,7 @@ export default function ProfitLossReportScreen() {
         compareUp: { color: colors.success },
         compareDown: { color: colors.danger },
       }),
-    [colors]
+    [colors, isDark]
   );
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [data, setData] = useState<Awaited<ReturnType<typeof getProfitLossReport>> | null>(null);

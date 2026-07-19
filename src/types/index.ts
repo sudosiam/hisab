@@ -35,6 +35,8 @@ export interface Product {
   sell_price: number;
   current_qty: number;
   is_hidden?: number;
+  hsn_sac?: string | null;
+  gst_rate?: number;
   created_at: string;
 }
 
@@ -61,6 +63,12 @@ export interface Sale {
   subtotal: number;
   discount_amount: number;
   service_charges: number;
+  taxable_amount: number;
+  cgst_amount: number;
+  sgst_amount: number;
+  igst_amount: number;
+  is_inter_state: number;
+  place_of_supply: string | null;
   total_amount: number;
   paid_amount: number;
   status: PaymentStatus;
@@ -76,6 +84,12 @@ export interface SaleItem {
   unit_price: number;
   unit_cost: number;
   total: number;
+  hsn_sac?: string | null;
+  gst_rate?: number;
+  taxable_amount?: number;
+  cgst_amount?: number;
+  sgst_amount?: number;
+  igst_amount?: number;
   product_name?: string;
 }
 
@@ -98,6 +112,12 @@ export interface Purchase {
   date: string;
   subtotal: number;
   discount_amount: number;
+  taxable_amount: number;
+  cgst_amount: number;
+  sgst_amount: number;
+  igst_amount: number;
+  is_inter_state: number;
+  place_of_supply: string | null;
   total_amount: number;
   paid_amount: number;
   status: PaymentStatus;
@@ -112,6 +132,12 @@ export interface PurchaseItem {
   qty: number;
   unit_cost: number;
   total: number;
+  hsn_sac?: string | null;
+  gst_rate?: number;
+  taxable_amount?: number;
+  cgst_amount?: number;
+  sgst_amount?: number;
+  igst_amount?: number;
   product_name?: string;
 }
 
@@ -177,18 +203,30 @@ export interface DashboardStats {
   netWorth: number;
 }
 
+export interface BalanceSheetLine {
+  key: string;
+  label: string;
+  amount: number;
+}
+
 export interface BalanceSheet {
   assets: {
     cashAndBank: number;
     inventory: number;
     receivables: number;
+    inputTaxCredit: number;
     fixedAssets: number;
     total: number;
+    currentAssets: BalanceSheetLine[];
+    nonCurrentAssets: BalanceSheetLine[];
   };
   liabilities: {
     payables: number;
+    outputTax: number;
     loans: number;
     total: number;
+    currentLiabilities: BalanceSheetLine[];
+    nonCurrentLiabilities: BalanceSheetLine[];
   };
   equity: number;
 }
@@ -220,6 +258,9 @@ export interface Party {
   type: PartyType;
   phone: string | null;
   notes: string | null;
+  gstin?: string | null;
+  state?: string | null;
+  address?: string | null;
   created_at: string;
 }
 
@@ -277,11 +318,24 @@ export interface SaleItemInput {
   product_id: number;
   qty: number;
   unit_price: number;
+  hsn_sac?: string | null;
+  gst_rate?: number | null;
 }
 
 export interface PurchaseItemInput {
   product_id: number;
   qty: number;
   unit_cost: number;
+  hsn_sac?: string | null;
+  gst_rate?: number | null;
+}
+
+export interface BusinessProfile {
+  business_name: string;
+  business_address: string;
+  business_gstin: string;
+  business_state: string;
+  gst_enabled: boolean;
+  whatsapp_message_template: string;
 }
 

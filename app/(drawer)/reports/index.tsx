@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, TouchableOpacity, ScrollView, View } from 'react-native';
+import { Text, TouchableOpacity, ScrollView, View, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenTitle, SectionHeader, useScreenStyles } from '../../../src/components/ui';
@@ -76,6 +76,29 @@ const DUES: ReportItem[] = [
   },
 ];
 
+const GST_REPORTS: ReportItem[] = [
+  {
+    title: 'GST Summary',
+    route: '/(drawer)/reports/gst-summary',
+    desc: 'GSTR-3B style output vs input tax',
+  },
+  {
+    title: 'Outward Supplies',
+    route: '/(drawer)/reports/gst-outward',
+    desc: 'GSTR-1 style B2B / B2C list',
+  },
+  {
+    title: 'Customers by State',
+    route: '/(drawer)/reports/gst-state-wise',
+    desc: 'GST sales grouped by customer state',
+  },
+  {
+    title: 'HSN Summary',
+    route: '/(drawer)/reports/gst-hsn',
+    desc: 'Taxable value and tax by HSN',
+  },
+];
+
 const OPERATIONAL: ReportItem[] = [
   {
     title: 'Sales Report',
@@ -86,6 +109,11 @@ const OPERATIONAL: ReportItem[] = [
     title: 'Purchase Report',
     route: '/(drawer)/reports/purchases',
     desc: 'Monthly purchase summary',
+  },
+  {
+    title: 'Vendor × Account',
+    route: '/(drawer)/reports/vendor-account-purchases',
+    desc: 'Purchases by vendor with payment accounts',
   },
   {
     title: 'Inventory Report',
@@ -117,9 +145,10 @@ function ReportSection({
           style={{
             flexDirection: 'row',
             alignItems: 'center',
-            paddingVertical: spacing.sm + 4,
+            paddingVertical: spacing.sm + 2,
             paddingHorizontal: spacing.md,
-            borderBottomWidth: index < items.length - 1 ? 1 : 0,
+            minHeight: 52,
+            borderBottomWidth: index < items.length - 1 ? StyleSheet.hairlineWidth : 0,
             borderBottomColor: colors.borderLight,
           }}
           onPress={() => onPress(r.route)}
@@ -144,7 +173,7 @@ export default function ReportsIndexScreen() {
   const navigate = (route: string) => router.push(route as never);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xxl }]}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <ScreenTitle title="Reports" subtitle="Statements, ledgers, and summaries." />
       <SectionHeader title="Financial Statements" />
       <ReportSection items={FINANCIAL_STATEMENTS} onPress={navigate} />
@@ -154,6 +183,8 @@ export default function ReportsIndexScreen() {
       <ReportSection items={DUES} onPress={navigate} />
       <SectionHeader title="Operational" />
       <ReportSection items={OPERATIONAL} onPress={navigate} />
+      <SectionHeader title="GST" />
+      <ReportSection items={GST_REPORTS} onPress={navigate} />
     </ScrollView>
   );
 }

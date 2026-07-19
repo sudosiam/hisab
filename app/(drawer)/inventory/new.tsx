@@ -18,6 +18,8 @@ export default function NewProductScreen() {
   const [openingQty, setOpeningQty] = useState('0');
   const [openingCost, setOpeningCost] = useState('0');
   const [sellPrice, setSellPrice] = useState('');
+  const [hsnSac, setHsnSac] = useState('');
+  const [gstRate, setGstRate] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSave = async () => {
@@ -33,6 +35,7 @@ export default function NewProductScreen() {
     const qty = openingQty.trim() ? parseAmountInput(openingQty) : 0;
     const cost = openingCost.trim() ? parseAmountInput(openingCost) : 0;
     const price = sellPrice.trim() ? parseAmountInput(sellPrice) : undefined;
+    const rate = gstRate.trim() ? parseAmountInput(gstRate) : 0;
     if (!Number.isFinite(qty) || qty < 0) {
       Alert.alert('Error', 'Opening stock quantity cannot be negative');
       return;
@@ -45,6 +48,10 @@ export default function NewProductScreen() {
       Alert.alert('Error', 'Enter a valid sell price');
       return;
     }
+    if (!Number.isFinite(rate) || rate < 0) {
+      Alert.alert('Error', 'Enter a valid GST rate');
+      return;
+    }
     setLoading(true);
     try {
       const id = await createProduct({
@@ -55,6 +62,8 @@ export default function NewProductScreen() {
         opening_qty: qty,
         opening_cost: cost,
         sell_price: price,
+        hsn_sac: hsnSac.trim() || undefined,
+        gst_rate: rate,
       });
       refresh();
       router.replace(`/(drawer)/inventory/${id}`);
@@ -79,6 +88,21 @@ export default function NewProductScreen() {
         onChangeText={setSellPrice}
         money
         placeholder="Leave blank for cost + 20%"
+      />
+      <FormInput
+        label="HSN/SAC (optional)"
+        value={hsnSac}
+        onChangeText={setHsnSac}
+        placeholder="e.g. 8471"
+        keyboardType="number-pad"
+      />
+      <FormInput
+        label="GST rate (%)"
+        value={gstRate}
+        onChangeText={setGstRate}
+        money
+        placeholder="0, 5, 12, 18, 28"
+        helperText="Tax-exclusive sell price when GST is enabled"
       />
       <PrimaryButton title="Save Product" onPress={handleSave} loading={loading} />
     </FormScreen>

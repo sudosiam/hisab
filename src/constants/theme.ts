@@ -3,10 +3,14 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 export interface ThemeColors {
   primary: string;
   primaryLight: string;
+  primaryContainer: string;
+  onPrimaryContainer: string;
   accent: string;
   background: string;
   surface: string;
   surfaceElevated: string;
+  surfaceContainer: string;
+  surfaceContainerHigh: string;
   header: string;
   headerText: string;
   drawer: string;
@@ -33,22 +37,26 @@ export interface ThemeColors {
   inputBg: string;
 }
 
-/** Classic ledger palette — navy primary, neutral surfaces, restrained accents. */
+/** Material 3 Android palette — navy brand primary, tonal surfaces, compact density. */
 export const lightColors: ThemeColors = {
   primary: '#1E3A5F',
   primaryLight: '#2C5282',
+  primaryContainer: '#D6E3F5',
+  onPrimaryContainer: '#0F243D',
   accent: '#1E3A5F',
-  background: '#F5F6F8',
+  background: '#F0F2F5',
   surface: '#FFFFFF',
   surfaceElevated: '#FFFFFF',
+  surfaceContainer: '#E8EBEF',
+  surfaceContainerHigh: '#E0E4EA',
   header: '#FFFFFF',
   headerText: '#1C1C1E',
   drawer: '#FFFFFF',
   text: '#1C1C1E',
   textSecondary: '#5C6570',
   textMuted: '#8A939E',
-  border: '#E2E5EA',
-  borderLight: '#ECEEF1',
+  border: '#D8DCE3',
+  borderLight: '#E6E9EE',
   success: '#1B7F4B',
   warning: '#B45309',
   danger: '#C53030',
@@ -56,24 +64,28 @@ export const lightColors: ThemeColors = {
   partial: '#B45309',
   unpaid: '#C53030',
   onPrimary: '#FFFFFF',
-  navActive: '#EEF2F7',
-  navActiveText: '#1E3A5F',
-  chip: '#FFFFFF',
-  chipActive: '#1E3A5F',
+  navActive: '#D6E3F5',
+  navActiveText: '#0F243D',
+  chip: '#E8EBEF',
+  chipActive: '#D6E3F5',
   chipText: '#5C6570',
-  chipTextActive: '#FFFFFF',
-  overlay: 'rgba(28, 28, 30, 0.03)',
+  chipTextActive: '#0F243D',
+  overlay: 'rgba(28, 28, 30, 0.04)',
   shadow: '#1C1C1E',
-  inputBg: '#FFFFFF',
+  inputBg: '#E8EBEF',
 };
 
 export const darkColors: ThemeColors = {
-  primary: '#7EB3E8',
-  primaryLight: '#9EC5EF',
-  accent: '#7EB3E8',
+  primary: '#9EC5EF',
+  primaryLight: '#B8D4F4',
+  primaryContainer: '#2A3F5C',
+  onPrimaryContainer: '#D6E3F5',
+  accent: '#9EC5EF',
   background: '#0E1014',
   surface: '#171B22',
   surfaceElevated: '#1E242C',
+  surfaceContainer: '#1A1F27',
+  surfaceContainerHigh: '#232933',
   header: '#171B22',
   headerText: '#F3F4F6',
   drawer: '#12161C',
@@ -88,45 +100,46 @@ export const darkColors: ThemeColors = {
   paid: '#4ADE80',
   partial: '#FBBF24',
   unpaid: '#F87171',
-  onPrimary: '#FFFFFF',
-  navActive: '#1E2A3A',
-  navActiveText: '#9EC5EF',
+  onPrimary: '#0F243D',
+  navActive: '#2A3F5C',
+  navActiveText: '#D6E3F5',
   chip: '#1E242C',
-  chipActive: '#2C5282',
+  chipActive: '#2A3F5C',
   chipText: '#D1D5DB',
-  chipTextActive: '#FFFFFF',
-  overlay: 'rgba(255, 255, 255, 0.04)',
+  chipTextActive: '#D6E3F5',
+  overlay: 'rgba(255, 255, 255, 0.05)',
   shadow: '#000000',
-  inputBg: '#141820',
+  inputBg: '#1A1F27',
 };
 
 /** @deprecated Use useTheme() instead */
 export const colors = lightColors;
 
+/** Compact Material density — keep touch targets >= 44px via component minHeights. */
 export const spacing = {
   xs: 4,
   sm: 8,
-  md: 16,
-  lg: 24,
-  xl: 32,
-  xxl: 40,
+  md: 12,
+  lg: 20,
+  xl: 28,
+  xxl: 36,
 };
 
 export const radius = {
-  sm: 6,
-  md: 8,
-  lg: 10,
-  xl: 12,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
   full: 999,
 };
 
 export const typography = {
-  display: { fontSize: 21, fontWeight: '600' as const, letterSpacing: -0.2 },
-  title: { fontSize: 17, fontWeight: '600' as const, letterSpacing: -0.1 },
-  section: { fontSize: 11, fontWeight: '600' as const, letterSpacing: 0.4 },
-  body: { fontSize: 15, fontWeight: '400' as const },
-  bodyMedium: { fontSize: 15, fontWeight: '500' as const },
-  caption: { fontSize: 12, fontWeight: '400' as const },
-  label: { fontSize: 13, fontWeight: '500' as const },
-  metric: { fontSize: 19, fontWeight: '600' as const, letterSpacing: -0.3 },
+  display: { fontSize: 20, fontWeight: '600' as const, letterSpacing: -0.2, lineHeight: 26 },
+  title: { fontSize: 16, fontWeight: '600' as const, letterSpacing: -0.1, lineHeight: 22 },
+  section: { fontSize: 11, fontWeight: '600' as const, letterSpacing: 0.5, lineHeight: 14 },
+  body: { fontSize: 14, fontWeight: '400' as const, lineHeight: 20 },
+  bodyMedium: { fontSize: 14, fontWeight: '500' as const, lineHeight: 20 },
+  caption: { fontSize: 12, fontWeight: '400' as const, lineHeight: 16 },
+  label: { fontSize: 12, fontWeight: '500' as const, lineHeight: 16 },
+  metric: { fontSize: 18, fontWeight: '600' as const, letterSpacing: -0.3, lineHeight: 24 },
 };

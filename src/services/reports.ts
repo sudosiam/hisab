@@ -446,8 +446,10 @@ export async function getTrialBalanceReport(): Promise<{
     { account: 'Cash & Bank', debit: sheet.assets.cashAndBank, credit: 0 },
     { account: 'Receivables', debit: sheet.assets.receivables, credit: 0 },
     { account: 'Inventory', debit: sheet.assets.inventory, credit: 0 },
+    { account: 'Input Tax Credit', debit: sheet.assets.inputTaxCredit, credit: 0 },
     { account: 'Fixed Assets', debit: sheet.assets.fixedAssets, credit: 0 },
     { account: 'Payables', debit: 0, credit: sheet.liabilities.payables },
+    { account: 'Output Tax', debit: 0, credit: sheet.liabilities.outputTax },
     { account: 'Loans', debit: 0, credit: sheet.liabilities.loans },
     { account: 'Owner\'s Equity', debit: 0, credit: Math.max(0, sheet.equity) },
   ].filter((row) => row.debit > 0.009 || row.credit > 0.009);

@@ -26,7 +26,14 @@ export interface SaleFormDraft {
   notes: string;
   discount: string;
   serviceCharges: string;
-  items: { key: string; product_id: number; qty: string; unit_price: string }[];
+  items: {
+    key: string;
+    product_id: number;
+    qty: string;
+    unit_price: string;
+    gst_rate?: string;
+    hsn_sac?: string;
+  }[];
   payments: DraftPaymentRow[];
 }
 
@@ -37,7 +44,14 @@ export interface PurchaseFormDraft {
   vendorInvoiceNo: string;
   notes: string;
   discount: string;
-  items: { key: string; product_id: number; qty: string; unit_cost: string }[];
+  items: {
+    key: string;
+    product_id: number;
+    qty: string;
+    unit_cost: string;
+    gst_rate?: string;
+    hsn_sac?: string;
+  }[];
   payments: DraftPaymentRow[];
 }
 

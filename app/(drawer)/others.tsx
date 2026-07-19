@@ -52,7 +52,8 @@ export default function OthersScreen() {
       StyleSheet.create({
         hero: {
           ...cardSurface(colors, isDark),
-          padding: spacing.lg,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.md,
           marginBottom: spacing.lg,
           alignItems: 'center',
         },

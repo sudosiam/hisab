@@ -14,6 +14,7 @@ import { formatSqliteError } from '../../src/db/database';
 import { formatAmountInput, formatCurrency, parseAmountInput } from '../../src/utils/format';
 import { useDatabase } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useUnsavedChangesGuard } from '../../src/hooks/useUnsavedChangesGuard';
 import { spacing, typography } from '../../src/constants/theme';
 import { cardSurface } from '../../src/constants/shadows';
 import type { InvestmentInfo } from '../../src/services/investments';
@@ -27,7 +28,8 @@ export default function InvestmentsScreen() {
       StyleSheet.create({
         hero: {
           ...cardSurface(colors, isDark),
-          padding: spacing.lg,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.md,
           marginBottom: spacing.md,
           alignItems: 'center',
         },
@@ -54,8 +56,11 @@ export default function InvestmentsScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
   const hasLoadedRef = React.useRef(false);
   const dirtyRef = React.useRef(false);
+
+  useUnsavedChangesGuard(dirty);
 
   const load = useCallback(async () => {
     if (!hasLoadedRef.current) setLoading(true);
@@ -79,6 +84,7 @@ export default function InvestmentsScreen() {
 
   const handleAmountChange = (value: string) => {
     dirtyRef.current = true;
+    setDirty(true);
     setAmount(value);
   };
 
@@ -93,6 +99,7 @@ export default function InvestmentsScreen() {
     try {
       await setOwnerInvestment(parsed);
       dirtyRef.current = false;
+      setDirty(false);
       refresh();
       await load();
       Alert.alert('Saved', 'Your investment amount has been updated.');

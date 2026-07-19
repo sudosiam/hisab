@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,7 @@ import {
   Alert,
   TouchableOpacity,
 } from 'react-native';
-import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
+import { useLocalSearchParams, useFocusEffect, useRouter, useNavigation } from 'expo-router';
 import {
   adjustStock,
   deleteProduct,
@@ -25,6 +25,7 @@ import {
 } from '../../../src/components/ui';
 import { StatCard } from '../../../src/components/StatCard';
 import { CategoryPicker } from '../../../src/components/CategoryPicker';
+import { OverflowMenu } from '../../../src/components/OverflowMenu';
 import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { parseRouteId } from '../../../src/utils/route';
 import { formatAmountInput, formatCurrency, formatQty, parseAmountInput } from '../../../src/utils/format';
@@ -38,6 +39,7 @@ import type { InventoryMovement, Product } from '../../../src/types';
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const navigation = useNavigation();
   const { refresh } = useDatabase();
   const styles = useScreenStyles();
   const { colors } = useTheme();
@@ -78,6 +80,8 @@ export default function ProductDetailScreen() {
   const [sku, setSku] = useState('');
   const [unit, setUnit] = useState('');
   const [sellPrice, setSellPrice] = useState('');
+  const [hsnSac, setHsnSac] = useState('');
+  const [gstRate, setGstRate] = useState('');
   const [adjustQty, setAdjustQty] = useState('');
   const [adjustNotes, setAdjustNotes] = useState('');
   const [saving, setSaving] = useState(false);
@@ -100,6 +104,8 @@ export default function ProductDetailScreen() {
         setSku(p.sku ?? '');
         setUnit(p.unit);
         setSellPrice(p.sell_price > 0 ? formatAmountInput(p.sell_price) : '');
+        setHsnSac(p.hsn_sac ?? '');
+        setGstRate(formatAmountInput(p.gst_rate ?? 0));
       }
       setError(p ? null : 'Product not found');
     } catch (e) {
@@ -132,10 +138,12 @@ export default function ProductDetailScreen() {
         (category.trim() || '') !== (product.category ?? '') ||
         (sku.trim() || '') !== (product.sku ?? '') ||
         (unit.trim() || 'pcs') !== (product.unit || 'pcs') ||
-        price !== (product.sell_price > 0 ? product.sell_price : 0));
+        price !== (product.sell_price > 0 ? product.sell_price : 0) ||
+        (hsnSac.trim() || '') !== (product.hsn_sac ?? '') ||
+        (parseAmountInput(gstRate) || 0) !== (product.gst_rate ?? 0));
     const adjustingDirty = adjustQty.trim().length > 0 || adjustNotes.trim().length > 0;
     return editingDirty || adjustingDirty;
-  }, [product, editing, name, category, sku, unit, sellPrice, adjustQty, adjustNotes]);
+  }, [product, editing, name, category, sku, unit, sellPrice, hsnSac, gstRate, adjustQty, adjustNotes]);
   useUnsavedChangesGuard(isEditDirty);
 
   const handleSaveEdit = async () => {
@@ -149,6 +157,11 @@ export default function ProductDetailScreen() {
       Alert.alert('Error', 'Enter a valid sell price');
       return;
     }
+    const rate = gstRate.trim() ? parseAmountInput(gstRate) : 0;
+    if (!Number.isFinite(rate) || rate < 0) {
+      Alert.alert('Error', 'Enter a valid GST rate');
+      return;
+    }
     setSaving(true);
     try {
       await updateProduct(product.id, {
@@ -157,6 +170,8 @@ export default function ProductDetailScreen() {
         sku: sku.trim() || undefined,
         unit: unit.trim() || 'pcs',
         sell_price: price,
+        hsn_sac: hsnSac.trim() || null,
+        gst_rate: rate,
       });
       refresh();
       setEditing(false);
@@ -190,7 +205,7 @@ export default function ProductDetailScreen() {
     }
   };
 
-  const handleDelete = () => {
+  const handleDelete = useCallback(() => {
     if (!product) return;
     if (roundMoney(product.current_qty) > 0) {
       Alert.alert(
@@ -218,7 +233,25 @@ export default function ProductDetailScreen() {
         },
       },
     ]);
-  };
+  }, [product, refresh, router]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: product
+        ? () => (
+            <OverflowMenu
+              actions={[
+                {
+                  label: 'Delete Product',
+                  destructive: true,
+                  onPress: handleDelete,
+                },
+              ]}
+            />
+          )
+        : undefined,
+    });
+  }, [navigation, product, handleDelete]);
 
   if (loading) {
     return (
@@ -253,6 +286,10 @@ export default function ProductDetailScreen() {
             <Text style={localStyles.meta}>{product.category}</Text>
           ) : null}
           {product.sku ? <Text style={localStyles.meta}>SKU: {product.sku}</Text> : null}
+          {product.hsn_sac ? <Text style={localStyles.meta}>HSN/SAC: {product.hsn_sac}</Text> : null}
+          {(product.gst_rate ?? 0) > 0 ? (
+            <Text style={localStyles.meta}>GST: {product.gst_rate}%</Text>
+          ) : null}
         </>
       ) : (
         <>
@@ -261,6 +298,20 @@ export default function ProductDetailScreen() {
           <FormInput label="SKU" value={sku} onChangeText={setSku} />
           <FormInput label="Unit" value={unit} onChangeText={setUnit} />
           <FormInput label="Sell Price (₹)" value={sellPrice} onChangeText={setSellPrice} money />
+          <FormInput
+            label="HSN/SAC (optional)"
+            value={hsnSac}
+            onChangeText={setHsnSac}
+            placeholder="e.g. 8471"
+            keyboardType="number-pad"
+          />
+          <FormInput
+            label="GST rate (%)"
+            value={gstRate}
+            onChangeText={setGstRate}
+            money
+            placeholder="0, 5, 12, 18, 28"
+          />
           <PrimaryButton title="Save Changes" onPress={handleSaveEdit} loading={saving} />
         </>
       )}
@@ -329,12 +380,13 @@ export default function ProductDetailScreen() {
               setSku(product.sku ?? '');
               setUnit(product.unit);
               setSellPrice(product.sell_price > 0 ? formatAmountInput(product.sell_price) : '');
+              setHsnSac(product.hsn_sac ?? '');
+              setGstRate(formatAmountInput(product.gst_rate ?? 0));
             }
             setEditing(!editing);
           }}
           variant="secondary"
         />
-        <PrimaryButton title="Delete Product" onPress={handleDelete} variant="danger" />
       </View>
     </FormScreen>
   );

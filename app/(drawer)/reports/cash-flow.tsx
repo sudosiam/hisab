@@ -32,7 +32,8 @@ export default function CashFlowReportScreen() {
       StyleSheet.create({
         hero: {
           ...cardSurface(colors, isDark),
-          padding: spacing.lg,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.md,
           marginBottom: spacing.md,
           alignItems: 'center',
         },

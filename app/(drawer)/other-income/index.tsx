@@ -10,16 +10,16 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
-import { ErrorState, SearchField, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import { ErrorState, Fab, SearchField, SectionHeader, useScreenStyles } from '../../../src/components/ui';
 import { getOtherIncome } from '../../../src/services/otherIncome';
 import { formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
-import { getPeriodTotalLabel } from '../../../src/utils/date';
+import { getPeriodTotalLabel, formatDisplayDate } from '../../../src/utils/date';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
-import { spacing, radius } from '../../../src/constants/theme';
+import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 import type { OtherIncome } from '../../../src/types';
@@ -32,19 +32,10 @@ export default function OtherIncomeListScreen() {
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        fab: {
-          position: 'absolute',
-          bottom: spacing.lg,
-          right: spacing.lg,
-          backgroundColor: colors.success,
-          paddingHorizontal: spacing.lg,
-          paddingVertical: 14,
-          borderRadius: radius.xl,
-        },
-        fabText: { color: colors.onPrimary, fontWeight: '700' },
         row: {
           ...cardSurface(colors, isDark),
-          padding: spacing.md,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
           marginBottom: spacing.sm,
         },
       }),
@@ -91,7 +82,7 @@ export default function OtherIncomeListScreen() {
           {item.description}
         </Text>
         <Text style={styles.cardSub}>
-          {item.date} · {item.account_name}
+          {formatDisplayDate(item.date)} · {item.account_name}
         </Text>
       </TouchableOpacity>
     ),
@@ -153,13 +144,7 @@ export default function OtherIncomeListScreen() {
         }
       />
 
-      <TouchableOpacity
-        style={localStyles.fab}
-        onPress={() => router.push('/(drawer)/other-income/new' as never)}
-        accessibilityLabel="Add income"
-      >
-        <Text style={localStyles.fabText}>+ Add Income</Text>
-      </TouchableOpacity>
+      <Fab label="+ Add Income" onPress={() => router.push('/(drawer)/other-income/new' as never)} />
     </View>
   );
 }

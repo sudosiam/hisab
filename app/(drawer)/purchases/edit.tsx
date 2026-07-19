@@ -20,6 +20,9 @@ import { CustomerAutocomplete } from '../../../src/components/CustomerAutocomple
 import { ProductPicker } from '../../../src/components/ProductPicker';
 import { getProducts } from '../../../src/services/inventory';
 import { getPurchaseById, getPurchaseItems, updatePurchase } from '../../../src/services/purchases';
+import { getPartyByName } from '../../../src/services/parties';
+import { getBusinessState, isGstEnabled, isTaxInclusivePricing } from '../../../src/services/appSettings';
+import { computeGstDocument } from '../../../src/services/gst';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
@@ -36,6 +39,8 @@ interface LineItem {
   product_id: number;
   qty: string;
   unit_cost: string;
+  gst_rate: string;
+  hsn_sac: string;
 }
 
 let lineItemCounter = 0;
@@ -46,6 +51,8 @@ function createEmptyLineItem(): LineItem {
     product_id: 0,
     qty: '1',
     unit_cost: '',
+    gst_rate: '',
+    hsn_sac: '',
   };
 }
 
@@ -60,7 +67,8 @@ export default function EditPurchaseScreen() {
       StyleSheet.create({
         itemCard: {
           ...cardSurface(colors, isDark),
-          padding: spacing.md,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
           marginBottom: spacing.sm,
         },
         itemRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm },
@@ -70,7 +78,8 @@ export default function EditPurchaseScreen() {
         removeText: { color: colors.danger, fontSize: 18 },
         totals: {
           ...cardSurface(colors, isDark),
-          padding: spacing.md,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm + 2,
           marginVertical: spacing.sm,
           gap: spacing.xs,
         },
@@ -106,6 +115,12 @@ export default function EditPurchaseScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const savedSnapshotRef = useRef<string | null>(null);
+  const productsRef = useRef<Product[]>([]);
+  productsRef.current = products;
+  const [businessState, setBusinessState] = useState('');
+  const [gstEnabled, setGstEnabled] = useState(true);
+  const [taxInclusive, setTaxInclusive] = useState(false);
+  const [partyState, setPartyState] = useState<string | null>(null);
 
   const purchaseId = React.useMemo(() => {
     const raw = Array.isArray(id) ? id[0] : id;
@@ -126,8 +141,11 @@ export default function EditPurchaseScreen() {
         getProducts(),
       ]);
       if (p) {
-        const preDiscountFactor =
-          p.total_amount > 0 ? p.subtotal / p.total_amount : 1;
+        // Reverse discount on taxable (ex-GST) amounts — never divide by tax-inclusive totals.
+        const discountAmt = p.discount_amount ?? 0;
+        const taxableBase = Math.max(0, p.subtotal - discountAmt);
+        const grossFactor = taxableBase > 0.009 ? p.subtotal / taxableBase : 1;
+        const inclusiveNow = await isTaxInclusivePricing();
         setPurchase(p);
         setSupplierName(p.supplier_name);
         setInvoiceNo(p.invoice_no);
@@ -135,32 +153,46 @@ export default function EditPurchaseScreen() {
         setDate(p.date);
         setNotes(p.notes ?? '');
         setProducts(productList);
-        setItems(
+        productsRef.current = productList;
+        const mappedItems =
           purchaseItems.length > 0
-            ? purchaseItems.map((item) => ({
-                key: `purchase-item-${item.id}`,
-                product_id: item.product_id,
-                qty: formatQtyInput(item.qty),
-                unit_cost: formatAmountInput(item.unit_cost * preDiscountFactor),
-              }))
+            ? purchaseItems.map((item) => {
+                const taxable = item.taxable_amount ?? item.total;
+                const rate = item.gst_rate ?? 0;
+                const preDiscountEx = taxable * grossFactor;
+                let enteredUnit = item.qty > 0 ? preDiscountEx / item.qty : item.unit_cost;
+                if (inclusiveNow && rate > 0) {
+                  enteredUnit = enteredUnit * (1 + rate / 100);
+                }
+                return {
+                  key: `purchase-item-${item.id}`,
+                  product_id: item.product_id,
+                  qty: formatQtyInput(item.qty),
+                  unit_cost: formatAmountInput(enteredUnit),
+                  gst_rate: rate > 0 ? formatAmountInput(rate) : '',
+                  hsn_sac: item.hsn_sac ?? '',
+                };
+              })
             : productList.length > 0
               ? [createEmptyLineItem()]
-              : []
-        );
+              : [];
+        setItems(mappedItems);
+        getPartyByName(p.supplier_name, 'vendor')
+          .then((party) => setPartyState(party?.state ?? null))
+          .catch(() => {});
         savedSnapshotRef.current = JSON.stringify({
           supplierName: p.supplier_name,
           invoiceNo: p.invoice_no,
           vendorInvoiceNo: p.vendor_invoice_no ?? '',
           date: p.date,
           notes: p.notes ?? '',
-          items:
-            purchaseItems.length > 0
-              ? purchaseItems.map((item) => ({
-                  product_id: item.product_id,
-                  qty: formatQtyInput(item.qty),
-                  unit_cost: formatAmountInput(item.unit_cost * preDiscountFactor),
-                }))
-              : [],
+          items: mappedItems.map((item) => ({
+            product_id: item.product_id,
+            qty: item.qty,
+            unit_cost: item.unit_cost,
+            gst_rate: item.gst_rate,
+            hsn_sac: item.hsn_sac,
+          })),
         });
         setError(null);
       } else {
@@ -173,30 +205,87 @@ export default function EditPurchaseScreen() {
     }
   }, [purchaseId]);
 
+  const reloadProducts = useCallback(async () => {
+    try {
+      const p = await getProducts();
+      productsRef.current = p;
+      setProducts(p);
+      return p;
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+      return productsRef.current;
+    }
+  }, []);
+
   const loadedForRef = useRef<number | null>(null);
   useFocusEffect(
     useCallback(() => {
-      if (loadedForRef.current === purchaseId) return;
-      loadedForRef.current = purchaseId;
-      load();
-    }, [load, purchaseId])
+      if (loadedForRef.current !== purchaseId) {
+        loadedForRef.current = purchaseId;
+        load();
+        return;
+      }
+      void reloadProducts();
+    }, [load, purchaseId, reloadProducts])
   );
 
-  const reloadProducts = useCallback(async () => {
-    try {
-      setProducts(await getProducts());
-      refresh();
-    } catch (e) {
-      Alert.alert('Error', formatSqliteError(e));
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.all([getBusinessState(), isGstEnabled(), isTaxInclusivePricing()])
+      .then(([state, enabled, inclusive]) => {
+        if (!cancelled) {
+          setBusinessState(state);
+          setGstEnabled(enabled);
+          setTaxInclusive(inclusive);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const name = supplierName.trim();
+    if (!name) {
+      setPartyState(null);
+      return;
     }
-  }, [refresh]);
+    getPartyByName(name, 'vendor')
+      .then((party) => {
+        if (!cancelled) setPartyState(party?.state ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [supplierName]);
 
   const discountAmount = purchase?.discount_amount ?? 0;
-  const subtotal = items.reduce(
-    (sum, item) => sum + (parseAmountInput(item.qty) || 0) * (parseAmountInput(item.unit_cost) || 0),
-    0
-  );
-  const total = Math.max(0, subtotal - discountAmount);
+
+  const gstDoc = useMemo(() => {
+    try {
+      return computeGstDocument({
+        lines: items.map((item) => ({
+          qty: parseAmountInput(item.qty) || 0,
+          unit_price: parseAmountInput(item.unit_cost) || 0,
+          gst_rate: parseAmountInput(item.gst_rate) || 0,
+          hsn_sac: item.hsn_sac.trim() || null,
+        })),
+        discount_amount: discountAmount,
+        business_state: businessState || null,
+        party_state: partyState,
+        gst_enabled: gstEnabled,
+        tax_inclusive: taxInclusive,
+      });
+    } catch {
+      return null;
+    }
+  }, [items, discountAmount, businessState, partyState, gstEnabled, taxInclusive]);
+
+  const subtotal = gstDoc?.subtotal ?? 0;
+  const total = gstDoc?.total_amount ?? 0;
 
   const formSnapshot = useMemo(
     () =>
@@ -210,6 +299,8 @@ export default function EditPurchaseScreen() {
           product_id: item.product_id,
           qty: item.qty,
           unit_cost: item.unit_cost,
+          gst_rate: item.gst_rate,
+          hsn_sac: item.hsn_sac,
         })),
       }),
     [supplierName, invoiceNo, vendorInvoiceNo, date, notes, items]
@@ -219,13 +310,25 @@ export default function EditPurchaseScreen() {
   useUnsavedChangesGuard(isDirty);
 
   const addItem = () => {
-    if (products.length === 0) return;
     setItems([...items, createEmptyLineItem()]);
   };
 
-  const updateItem = (index: number, field: 'product_id' | 'qty' | 'unit_cost', value: string | number) => {
+  const updateItem = (
+    index: number,
+    field: 'product_id' | 'qty' | 'unit_cost' | 'gst_rate' | 'hsn_sac',
+    value: string | number
+  ) => {
     const updated = [...items];
     updated[index] = { ...updated[index], [field]: value };
+    if (field === 'product_id') {
+      const product = productsRef.current.find((p) => p.id === value);
+      if (product) {
+        updated[index].unit_cost = formatAmountInput(product.avg_cost);
+        updated[index].gst_rate =
+          (product.gst_rate ?? 0) > 0 ? formatAmountInput(product.gst_rate ?? 0) : '';
+        updated[index].hsn_sac = product.hsn_sac ?? '';
+      }
+    }
     setItems(updated);
   };
 
@@ -300,6 +403,8 @@ export default function EditPurchaseScreen() {
               product_id: item.product_id,
               qty: parseAmountInput(item.qty) || 0,
               unit_cost: parseAmountInput(item.unit_cost) || 0,
+              gst_rate: parseAmountInput(item.gst_rate) || 0,
+              hsn_sac: item.hsn_sac.trim() || null,
             })),
           });
           refresh();
@@ -370,10 +475,7 @@ export default function EditPurchaseScreen() {
           </TouchableOpacity>
         </View>
 
-        {products.length === 0 ? (
-          <Text style={localStyles.hint}>Add products in Inventory first.</Text>
-        ) : (
-          items.map((item, index) => (
+        {items.map((item, index) => (
             <View key={item.key} style={localStyles.itemCard}>
               <ProductPicker
                 products={products}
@@ -381,6 +483,9 @@ export default function EditPurchaseScreen() {
                 onChange={(productId) => updateItem(index, 'product_id', productId)}
                 variant="purchase"
                 onCategoryDeleted={reloadProducts}
+                onProductCreated={async () => {
+                  await reloadProducts();
+                }}
               />
               <View style={localStyles.itemRow}>
                 <View style={localStyles.qtyField}>
@@ -409,11 +514,35 @@ export default function EditPurchaseScreen() {
                   <Text style={localStyles.removeText}>✕</Text>
                 </TouchableOpacity>
               </View>
+              <View style={localStyles.itemRow}>
+                <View style={localStyles.qtyField}>
+                  <FormInput
+                    label="HSN/SAC"
+                    value={item.hsn_sac}
+                    onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
+                    placeholder="Optional"
+                    keyboardType="number-pad"
+                  />
+                </View>
+                <View style={localStyles.costField}>
+                  <FormInput
+                    label="GST %"
+                    value={item.gst_rate}
+                    onChangeText={(v) => updateItem(index, 'gst_rate', v)}
+                    money
+                    placeholder="0"
+                  />
+                </View>
+              </View>
             </View>
-          ))
-        )}
+          ))}
 
         <View style={localStyles.totals}>
+          {gstEnabled ? (
+            <Text style={[localStyles.totalLabel, localStyles.hint, { marginBottom: spacing.xs }]}>
+              {taxInclusive ? 'Prices are tax-inclusive' : 'Prices are tax-exclusive'}
+            </Text>
+          ) : null}
           <View style={localStyles.totalRow}>
             <Text style={localStyles.totalLabel}>Subtotal</Text>
             <Text style={localStyles.totalValue}>{formatCurrency(subtotal)}</Text>
@@ -425,6 +554,31 @@ export default function EditPurchaseScreen() {
           <Text style={styles.cardSub}>
             Discount is built into inventory costs and stays unchanged when editing items.
           </Text>
+          {gstEnabled && gstDoc && gstDoc.tax_amount > 0.009 ? (
+            <>
+              <View style={localStyles.totalRow}>
+                <Text style={localStyles.totalLabel}>Taxable</Text>
+                <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.taxable_amount)}</Text>
+              </View>
+              {gstDoc.is_inter_state ? (
+                <View style={localStyles.totalRow}>
+                  <Text style={localStyles.totalLabel}>IGST</Text>
+                  <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.igst_amount)}</Text>
+                </View>
+              ) : (
+                <>
+                  <View style={localStyles.totalRow}>
+                    <Text style={localStyles.totalLabel}>CGST</Text>
+                    <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.cgst_amount)}</Text>
+                  </View>
+                  <View style={localStyles.totalRow}>
+                    <Text style={localStyles.totalLabel}>SGST</Text>
+                    <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.sgst_amount)}</Text>
+                  </View>
+                </>
+              )}
+            </>
+          ) : null}
           <View style={[localStyles.totalRow, { marginTop: spacing.sm }]}>
             <Text style={localStyles.totalLabel}>Grand Total</Text>
             <Text style={localStyles.grandTotal}>{formatCurrency(total)}</Text>
