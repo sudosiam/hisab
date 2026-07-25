@@ -1,8 +1,9 @@
-/** FlatList tuning for smooth scrolling with large datasets. */
+/** FlatList tuning for 60fps scrolling with large datasets. */
 export const FLATLIST_PERF = {
-  initialNumToRender: 12,
-  maxToRenderPerBatch: 10,
-  windowSize: 7,
+  initialNumToRender: 10,
+  maxToRenderPerBatch: 8,
+  updateCellsBatchingPeriod: 50,
+  windowSize: 5,
   removeClippedSubviews: true,
 } as const;
 

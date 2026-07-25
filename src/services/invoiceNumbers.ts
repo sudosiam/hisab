@@ -83,19 +83,35 @@ async function getMaxInvoiceSequence(
   invoiceType?: SaleInvoiceType
 ): Promise<number> {
   const db = await getDatabase();
-  const rows =
-    table === 'sales' && invoiceType
-      ? await db.getAllAsync<{ invoice_no: string }>(
-          `SELECT invoice_no FROM sales WHERE invoice_type = ?`,
-          [invoiceType]
-        )
-      : await db.getAllAsync<{ invoice_no: string }>(`SELECT invoice_no FROM ${table}`);
-  let max = 0;
-  for (const row of rows) {
-    const seq = parseInvoiceSequence(row.invoice_no, stem);
-    if (seq !== null && seq > max) max = seq;
+  const stemUpper = stem.trim().toUpperCase();
+  if (!stemUpper) return 0;
+
+  // Compute max suffix in SQL for this stem only (avoids loading every invoice row).
+  const prefixLen = stemUpper.length;
+  const dashPos = prefixLen + 1;
+  const numStart = prefixLen + 2;
+  const params: (string | number)[] = [
+    numStart,
+    prefixLen,
+    stemUpper,
+    dashPos,
+    numStart,
+    numStart,
+  ];
+  let sql = `SELECT MAX(CAST(SUBSTR(invoice_no, ?) AS INTEGER)) AS max_seq
+    FROM ${table}
+    WHERE UPPER(SUBSTR(invoice_no, 1, ?)) = ?
+      AND SUBSTR(invoice_no, ?, 1) = '-'
+      AND SUBSTR(invoice_no, ?) GLOB '[0-9]*'
+      AND LENGTH(invoice_no) >= ?`;
+  if (table === 'sales' && invoiceType) {
+    sql += ` AND invoice_type = ?`;
+    params.push(invoiceType);
   }
-  return max;
+
+  const row = await db.getFirstAsync<{ max_seq: number | null }>(sql, params);
+  const max = row?.max_seq;
+  return typeof max === 'number' && Number.isFinite(max) ? max : 0;
 }
 
 function resolveNextSequence(

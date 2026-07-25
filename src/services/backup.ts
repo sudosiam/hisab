@@ -11,6 +11,7 @@ import {
   getDatabase,
   invalidateDatabase,
 } from '../db/database';
+import { deferDeleteCacheFile } from '../utils/tempShareFiles';
 import { withDatabaseBackup, withDatabaseRestore } from './dbMaintenance';
 
 export interface PickedBackupFile {
@@ -541,7 +542,7 @@ export async function exportDatabase(): Promise<{ success: boolean; message: str
         mimeType: 'application/octet-stream',
         dialogTitle: 'Export Hisab database',
       });
-      await FileSystem.deleteAsync(exportPath, { idempotent: true });
+      deferDeleteCacheFile(exportPath);
       return { success: true, message: 'Database exported.' };
     });
   } catch (error) {

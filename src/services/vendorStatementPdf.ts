@@ -11,7 +11,7 @@ export interface VendorStatementPdfInput {
   lines: PartyStatementLine[];
 }
 
-export function buildVendorStatementHtml(input: VendorStatementPdfInput): string {
+export async function buildVendorStatementHtml(input: VendorStatementPdfInput): Promise<string> {
   return buildPartyStatementHtml({
     partyType: 'vendor',
     partyName: input.vendorName,

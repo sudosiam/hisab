@@ -303,23 +303,40 @@ export async function getPurchasesByVendorAccount(
     [start, end]
   );
 
-  const result: VendorAccountPurchaseRow[] = [];
-  for (const vendor of vendors) {
-    const accounts = await db.getAllAsync<{ account_name: string; paid: number }>(
-      `SELECT a.name as account_name, COALESCE(SUM(pp.amount), 0) as paid
-       FROM purchase_payments pp
-       JOIN purchases p ON p.id = pp.purchase_id
-       JOIN accounts a ON a.id = pp.account_id
-       WHERE p.date >= ? AND p.date <= ?
-         AND p.supplier_name = ? COLLATE NOCASE
-       GROUP BY a.id, a.name
-       HAVING paid > 0
-       ORDER BY paid DESC`,
-      [start, end, vendor.vendor_name]
-    );
+  const accountRows = await db.getAllAsync<{
+    vendor_name: string;
+    account_name: string;
+    paid: number;
+  }>(
+    `SELECT
+       p.supplier_name as vendor_name,
+       a.name as account_name,
+       COALESCE(SUM(pp.amount), 0) as paid
+     FROM purchase_payments pp
+     JOIN purchases p ON p.id = pp.purchase_id
+     JOIN accounts a ON a.id = pp.account_id
+     WHERE p.date >= ? AND p.date <= ?
+       AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = p.id)
+     GROUP BY p.supplier_name COLLATE NOCASE, a.id, a.name
+     HAVING paid > 0
+     ORDER BY paid DESC`,
+    [start, end]
+  );
 
+  const accountsByVendor = new Map<string, { account_name: string; paid: number }[]>();
+  for (const row of accountRows) {
+    const key = row.vendor_name.toLowerCase();
+    const list = accountsByVendor.get(key) ?? [];
+    list.push({
+      account_name: row.account_name,
+      paid: roundMoney(row.paid),
+    });
+    accountsByVendor.set(key, list);
+  }
+
+  return vendors.map((vendor) => {
     const inputTax = addMoney(vendor.cgst, vendor.sgst, vendor.igst);
-    result.push({
+    return {
       vendor_name: vendor.vendor_name,
       party_id: vendor.party_id,
       bill_count: vendor.bill_count,
@@ -328,11 +345,7 @@ export async function getPurchasesByVendorAccount(
       total_amount: roundMoney(vendor.total),
       paid_amount: roundMoney(vendor.paid),
       due_amount: roundMoney(vendor.total - vendor.paid),
-      accounts: accounts.map((a) => ({
-        account_name: a.account_name,
-        paid: roundMoney(a.paid),
-      })),
-    });
-  }
-  return result;
+      accounts: accountsByVendor.get(vendor.vendor_name.toLowerCase()) ?? [],
+    };
+  });
 }

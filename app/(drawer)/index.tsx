@@ -12,7 +12,7 @@ import {
   FinanceHero,
   SectionHeader,
 } from '../../src/components/ui';
-import { getRecentActivities } from '../../src/services/activity';
+import { getRecentActivitiesGrouped } from '../../src/services/activity';
 import { getDashboardStats } from '../../src/services/dashboard';
 import { getPeriodSectionTitle } from '../../src/utils/date';
 import { useDatabase } from '../../src/context/DatabaseContext';
@@ -20,7 +20,7 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
 import { useSyncedPeriodKey } from '../../src/hooks/useSyncedPeriodKey';
 import { spacing } from '../../src/constants/theme';
-import type { ActivityItem } from '../../src/services/activity';
+import type { GroupedRecentActivity } from '../../src/services/activity';
 import type { DashboardStats } from '../../src/types';
 
 export default function DashboardScreen() {
@@ -30,13 +30,17 @@ export default function DashboardScreen() {
   const styles = useScreenStyles();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [activities, setActivities] = useState<GroupedRecentActivity>({
+    sales: [],
+    purchases: [],
+    expenses: [],
+  });
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     const [data, recent] = await Promise.all([
       getDashboardStats(monthKey),
-      getRecentActivities(10),
+      getRecentActivitiesGrouped(5),
     ]);
     setStats(data);
     setActivities(recent);
@@ -118,8 +122,8 @@ export default function DashboardScreen() {
 
       <DashboardShortcuts />
 
-      <SectionHeader title="Recent" />
-      <RecentActivityList items={activities} />
+      <SectionHeader title="Recent activity" />
+      <RecentActivityList grouped={activities} />
     </ScrollView>
   );
 }

@@ -10,18 +10,47 @@ export interface ActivityItem {
   refId: number;
 }
 
-export async function getRecentActivities(limit = 10): Promise<ActivityItem[]> {
-  const db = await getDatabase();
-  type ActivityRow = {
-    act_type: string;
-    id: number;
-    ref: string;
-    party: string;
-    amount: number;
-    date: string;
-    created_at: string;
-    invoice_type?: string | null;
+export interface GroupedRecentActivity {
+  sales: ActivityItem[];
+  purchases: ActivityItem[];
+  expenses: ActivityItem[];
+}
+
+type ActivityRow = {
+  act_type: string;
+  id: number;
+  ref: string;
+  party: string;
+  amount: number;
+  date: string;
+  created_at: string;
+  invoice_type?: string | null;
+};
+
+function mapRow(r: ActivityRow): ActivityItem {
+  const typeLabel =
+    r.act_type === 'sale'
+      ? r.invoice_type === 'bos'
+        ? 'BOS'
+        : 'Sale'
+      : r.act_type === 'purchase'
+        ? 'Purchase'
+        : 'Expense';
+  return {
+    id: `${r.act_type}-${r.id}`,
+    type: r.act_type as ActivityItem['type'],
+    title: r.ref,
+    subtitle: `${typeLabel} · ${r.party}`,
+    amount: r.amount,
+    date: r.date,
+    refId: r.id,
   };
+}
+
+async function queryRecentByType(
+  limit: number
+): Promise<{ sales: ActivityRow[]; purchases: ActivityRow[]; expenses: ActivityRow[] }> {
+  const db = await getDatabase();
   const [sales, purchases, expenses] = await Promise.all([
     db.getAllAsync<ActivityRow>(
       `SELECT 'sale' as act_type, id, invoice_no as ref, party_name as party,
@@ -50,32 +79,27 @@ export async function getRecentActivities(limit = 10): Promise<ActivityItem[]> {
       [limit]
     ),
   ]);
+  return { sales, purchases, expenses };
+}
 
-  const rows = [...sales, ...purchases, ...expenses]
+export async function getRecentActivities(limit = 10): Promise<ActivityItem[]> {
+  const { sales, purchases, expenses } = await queryRecentByType(limit);
+  return [...sales, ...purchases, ...expenses]
     .sort((a, b) => {
       const dateOrder = b.date.localeCompare(a.date);
       if (dateOrder !== 0) return dateOrder;
       return b.created_at.localeCompare(a.created_at);
     })
-    .slice(0, limit);
+    .slice(0, limit)
+    .map(mapRow);
+}
 
-  return rows.map((r) => {
-    const typeLabel =
-      r.act_type === 'sale'
-        ? r.invoice_type === 'bos'
-          ? 'BOS'
-          : 'Sale'
-        : r.act_type === 'purchase'
-          ? 'Purchase'
-          : 'Expense';
-    return {
-      id: `${r.act_type}-${r.id}`,
-      type: r.act_type as ActivityItem['type'],
-      title: r.ref,
-      subtitle: `${typeLabel} · ${r.party}`,
-      amount: r.amount,
-      date: r.date,
-      refId: r.id,
-    };
-  });
+/** Recent items grouped by category for the dashboard. */
+export async function getRecentActivitiesGrouped(perCategory = 5): Promise<GroupedRecentActivity> {
+  const { sales, purchases, expenses } = await queryRecentByType(perCategory);
+  return {
+    sales: sales.map(mapRow),
+    purchases: purchases.map(mapRow),
+    expenses: expenses.map(mapRow),
+  };
 }

@@ -30,6 +30,10 @@ const CLOUD_LAST_ERROR_KEY = '@hisab_cloud_backup_last_error';
 const CLOUD_RECONCILE_ATTEMPTED_KEY = '@hisab_cloud_reconcile_attempted';
 
 export const CLOUD_RETENTION_DAYS = 7;
+/** Existing accounts may still use shorter passwords; sign-in stays lenient. */
+export const CLOUD_PASSWORD_MIN_SIGN_IN = 6;
+/** New accounts require a stronger password (financial backup access). */
+export const CLOUD_PASSWORD_MIN_SIGN_UP = 8;
 
 const cloudBackupInFlight: { current: Promise<{ success: boolean; message: string }> | null } = {
   current: null,
@@ -137,8 +141,11 @@ export async function signInWithEmailPassword(
   if (!trimmed || !trimmed.includes('@')) {
     return { success: false, message: 'Enter a valid email address.' };
   }
-  if (!password || password.length < 6) {
-    return { success: false, message: 'Password must be at least 6 characters.' };
+  if (!password || password.length < CLOUD_PASSWORD_MIN_SIGN_IN) {
+    return {
+      success: false,
+      message: `Password must be at least ${CLOUD_PASSWORD_MIN_SIGN_IN} characters.`,
+    };
   }
   const { error } = await supabase.auth.signInWithPassword({
     email: trimmed,
@@ -146,6 +153,10 @@ export async function signInWithEmailPassword(
   });
   if (error) return { success: false, message: error.message };
   return { success: true, message: 'Signed in.' };
+}
+
+function isEmailConfirmed(session: Session): boolean {
+  return Boolean(session.user.email_confirmed_at);
 }
 
 export async function signUpWithEmailPassword(
@@ -160,8 +171,11 @@ export async function signUpWithEmailPassword(
   if (!trimmed || !trimmed.includes('@')) {
     return { success: false, message: 'Enter a valid email address.' };
   }
-  if (!password || password.length < 6) {
-    return { success: false, message: 'Password must be at least 6 characters.' };
+  if (!password || password.length < CLOUD_PASSWORD_MIN_SIGN_UP) {
+    return {
+      success: false,
+      message: `Password must be at least ${CLOUD_PASSWORD_MIN_SIGN_UP} characters.`,
+    };
   }
   const { data, error } = await supabase.auth.signUp({
     email: trimmed,
@@ -172,7 +186,15 @@ export async function signUpWithEmailPassword(
     return {
       success: false,
       message:
-        'Account created. If email confirmation is required, confirm it in your inbox, then sign in.',
+        'Account created. Confirm the email we sent, then sign in before enabling cloud backup.',
+    };
+  }
+  if (!isEmailConfirmed(data.session)) {
+    await supabase.auth.signOut();
+    return {
+      success: false,
+      message:
+        'Account created. Confirm the email we sent, then sign in before enabling cloud backup.',
     };
   }
   return { success: true, message: 'Account created and signed in.' };
@@ -301,6 +323,12 @@ async function uploadCloudBackupLocked(): Promise<{ success: boolean; message: s
   }
   if (!session?.user?.id) {
     return { success: false, message: 'Sign in to back up to the cloud.' };
+  }
+  if (!isEmailConfirmed(session)) {
+    return {
+      success: false,
+      message: 'Confirm your email before uploading a cloud backup, then sign in again.',
+    };
   }
 
   const guard = await getBackupSafetyGuard();

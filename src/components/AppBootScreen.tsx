@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, Animated, Easing, Image } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
-import { spacing, typography } from '../constants/theme';
+import { spacing, typography, radius } from '../constants/theme';
 
 export function AppBootScreen() {
   const { colors } = useTheme();
@@ -38,6 +38,12 @@ export function AppBootScreen() {
           backgroundColor: colors.background,
           paddingHorizontal: spacing.xl,
         },
+        logo: {
+          width: 88,
+          height: 88,
+          borderRadius: radius.lg,
+          marginBottom: spacing.md,
+        },
         brand: {
           ...typography.display,
           fontSize: 26,
@@ -64,6 +70,7 @@ export function AppBootScreen() {
 
   return (
     <View style={styles.root}>
+      <Image source={require('../../assets/logo.png')} style={styles.logo} />
       <Text style={styles.brand}>Hisab</Text>
       <Text style={styles.tagline}>Business accounts</Text>
       <Animated.View style={[styles.indicator, { opacity: pulse }]} />

@@ -82,7 +82,7 @@ export async function shareProfitLossPdf(
     );
   }
 
-  const html = wrapReportHtml({ title: 'Profit & Loss', period }, body);
+  const html = await wrapReportHtml({ title: 'Profit & Loss', period }, body);
   return exportPdf(html, `Profit-Loss-${safeFilePart(period)}.pdf`, 'Download Profit & Loss PDF');
 }
 
@@ -114,7 +114,7 @@ export async function shareCashFlowPdf(periodKey: string, data: CashFlowReport) 
       { label: 'Net Financing', value: pdfMoney(data.financing.net), bold: true },
     ]);
 
-  const html = wrapReportHtml({ title: 'Cash Flow Statement', period }, body);
+  const html = await wrapReportHtml({ title: 'Cash Flow Statement', period }, body);
   return exportPdf(html, `Cash-Flow-${safeFilePart(period)}.pdf`, 'Download Cash Flow PDF');
 }
 
@@ -142,7 +142,7 @@ export async function shareTrialBalancePdf(data: {
         : `Difference: ${pdfMoney(Math.abs(data.totalDebit - data.totalCredit))}`
     }</p>`;
 
-  const html = wrapReportHtml(
+  const html = await wrapReportHtml(
     { title: 'Trial Balance', subtitle: 'Double-entry snapshot as of today' },
     body
   );
@@ -161,7 +161,7 @@ export async function shareDayBookPdf(
     showBalance: true,
     footer: { label: 'Total', debit: totalDebit, credit: totalCredit },
   });
-  const html = wrapReportHtml({ title: 'Day Book', period }, body);
+  const html = await wrapReportHtml({ title: 'Day Book', period }, body);
   return exportPdf(
     html,
     `Day-Book-${fromDate}-to-${toDate}.pdf`,
@@ -192,7 +192,7 @@ export async function shareGeneralLedgerPdf(
     })),
     { showDate: true, showBalance: true }
   );
-  const html = wrapReportHtml({ title: 'General Ledger', period }, body);
+  const html = await wrapReportHtml({ title: 'General Ledger', period }, body);
   return exportPdf(
     html,
     `General-Ledger-${fromDate}-to-${toDate}.pdf`,
@@ -232,7 +232,7 @@ export async function shareSalesReportPdf(
     })),
     { invoice: 'Total', type: '', party: '', date: '', status: '', amount: pdfMoney(total) }
   );
-  const html = wrapReportHtml({ title: 'Sales Report', period }, body);
+  const html = await wrapReportHtml({ title: 'Sales Report', period }, body);
   return exportPdf(html, `Sales-${safeFilePart(period)}.pdf`, 'Download Sales Report PDF');
 }
 
@@ -259,7 +259,7 @@ export async function sharePurchaseReportPdf(
     })),
     { invoice: 'Total', party: '', date: '', status: '', amount: pdfMoney(total) }
   );
-  const html = wrapReportHtml({ title: 'Purchase Report', period }, body);
+  const html = await wrapReportHtml({ title: 'Purchase Report', period }, body);
   return exportPdf(html, `Purchases-${safeFilePart(period)}.pdf`, 'Download Purchase Report PDF');
 }
 
@@ -284,7 +284,7 @@ export async function shareInventoryReportPdf(
     })),
     { name: 'Total', qty: '', cost: '', sell: '', value: pdfMoney(totalValue) }
   );
-  const html = wrapReportHtml(
+  const html = await wrapReportHtml(
     { title: 'Inventory Report', subtitle: 'Current stock valuation' },
     body
   );
@@ -318,7 +318,7 @@ export async function shareReceivablesPdf(
     })),
     { invoice: 'Total Receivable', type: '', party: '', date: '', due: pdfMoney(total) }
   );
-  const html = wrapReportHtml(
+  const html = await wrapReportHtml(
     { title: 'Receivables', subtitle: 'Outstanding customer dues as of today' },
     body
   );
@@ -344,7 +344,7 @@ export async function sharePayablesPdf(
     })),
     { invoice: 'Total Payable', party: '', date: '', due: pdfMoney(total) }
   );
-  const html = wrapReportHtml(
+  const html = await wrapReportHtml(
     { title: 'Payables', subtitle: 'Outstanding vendor dues as of today' },
     body
   );
@@ -370,7 +370,7 @@ export async function shareExpenseCategoriesPdf(
     })),
     { category: 'Total Expenses', count: '', total: pdfMoney(total) }
   );
-  const html = wrapReportHtml({ title: 'Expenses by Category', period }, body);
+  const html = await wrapReportHtml({ title: 'Expenses by Category', period }, body);
   return exportPdf(
     html,
     `Expenses-${safeFilePart(period)}.pdf`,
@@ -415,7 +415,7 @@ export async function shareBalanceSheetPdf(data: BalanceSheet) {
     '<div class="section-title">Liabilities — Non-current</div>' +
     buildLinesSection(liabilityNonCurrent);
 
-  const html = wrapReportHtml(
+  const html = await wrapReportHtml(
     { title: 'Balance Sheet', subtitle: 'As of today' },
     body
   );
@@ -452,7 +452,7 @@ export async function shareGrowthReportPdf(data: GrowthReport) {
     }))
   );
 
-  const html = wrapReportHtml(
+  const html = await wrapReportHtml(
     {
       title: 'Growth Report',
       period: data.financialYearRangeLabel,
@@ -485,7 +485,7 @@ export async function shareGstSummaryPdf(
       { label: 'Input tax', value: pdfMoney(data.inwardTax), bold: true },
       { label: 'Net payable / (credit)', value: pdfMoney(data.netPayable), bold: true },
     ]);
-  const html = wrapReportHtml({ title: 'GST Summary', period, subtitle: 'GSTR-3B style' }, body);
+  const html = await wrapReportHtml({ title: 'GST Summary', period, subtitle: 'GSTR-3B style' }, body);
   return exportPdf(html, `GST-Summary-${safeFilePart(period)}.pdf`, 'Download GST Summary PDF');
 }
 
@@ -514,7 +514,7 @@ export async function shareGstOutwardPdf(
       total: pdfMoney(row.total_amount),
     }))
   );
-  const html = wrapReportHtml(
+  const html = await wrapReportHtml(
     { title: 'Outward Supplies', period, subtitle: 'GSTR-1 style' },
     body
   );
@@ -537,7 +537,7 @@ export async function shareGstHsnPdf(periodKey: string, rows: import('./gstRepor
       tax: pdfMoney(row.tax_amount),
     }))
   );
-  const html = wrapReportHtml({ title: 'HSN Summary', period }, body);
+  const html = await wrapReportHtml({ title: 'HSN Summary', period }, body);
   return exportPdf(html, `GST-HSN-${safeFilePart(period)}.pdf`, 'Download HSN Summary PDF');
 }
 
@@ -562,7 +562,7 @@ export async function shareGstStateWisePdf(
       total: pdfMoney(row.total_amount),
     }))
   );
-  const html = wrapReportHtml(
+  const html = await wrapReportHtml(
     { title: 'GST Customers by State', period },
     body
   );
@@ -591,7 +591,7 @@ export async function shareVendorAccountPurchasesPdf(
         row.accounts.map((a) => `${a.account_name} ${pdfMoney(a.paid)}`).join(', ') || '—',
     }))
   );
-  const html = wrapReportHtml(
+  const html = await wrapReportHtml(
     { title: 'Purchases by Vendor × Account', period },
     body
   );

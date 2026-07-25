@@ -34,7 +34,7 @@ function AmountCell({
 }) {
   if (amount <= 0.009) {
     return (
-      <Text style={[style, bold && styles.boldCell]} numberOfLines={1}>
+      <Text style={[style, bold && staticStyles.boldCell]} numberOfLines={1}>
         —
       </Text>
     );
@@ -43,68 +43,10 @@ function AmountCell({
     <MoneyText
       amount={amount}
       size="sm"
-      style={[style, bold && styles.boldCell]}
-      minimumFontScale={0.55}
+      style={[style, bold && staticStyles.boldCell]}
+      lines={1}
+      minimumFontScale={0.5}
     />
-  );
-}
-
-function AmountHeaders({
-  showBalance,
-  styles: s,
-}: {
-  showBalance: boolean;
-  styles: ReturnType<typeof createStyles>;
-}) {
-  return (
-    <View style={s.amountRow}>
-      <Text style={[s.headerCell, s.amtHeader, s.amtCol]}>Dr</Text>
-      <Text style={[s.headerCell, s.amtHeader, s.amtCol]}>Cr</Text>
-      {showBalance ? (
-        <Text style={[s.headerCell, s.amtHeader, s.amtCol]}>Bal</Text>
-      ) : null}
-    </View>
-  );
-}
-
-function AmountValues({
-  debit,
-  credit,
-  balance,
-  showBalance,
-  bold,
-  styles: s,
-}: {
-  debit: number;
-  credit: number;
-  balance?: number;
-  showBalance: boolean;
-  bold?: boolean;
-  styles: ReturnType<typeof createStyles>;
-}) {
-  return (
-    <View style={s.amountRow}>
-      <View style={s.amtCol}>
-        <AmountCell amount={debit} style={s.debit} bold={bold} />
-      </View>
-      <View style={s.amtCol}>
-        <AmountCell amount={credit} style={s.credit} bold={bold} />
-      </View>
-      {showBalance ? (
-        <View style={s.amtCol}>
-          {balance != null ? (
-            <MoneyText
-              amount={balance}
-              size="sm"
-              style={[s.balance, bold && styles.boldCell]}
-              minimumFontScale={0.55}
-            />
-          ) : (
-            <Text style={[s.balance, bold && styles.boldCell]}>—</Text>
-          )}
-        </View>
-      ) : null}
-    </View>
   );
 }
 
@@ -129,27 +71,45 @@ export function LedgerTable({
     );
   }
 
+  const renderAmountCells = (debit: number, credit: number, balance?: number, bold?: boolean) => (
+    <>
+      <View style={styles.amtCol}>
+        <AmountCell amount={debit} style={styles.debit} bold={bold} />
+      </View>
+      <View style={styles.amtCol}>
+        <AmountCell amount={credit} style={styles.credit} bold={bold} />
+      </View>
+      {showBalance ? (
+        <View style={styles.amtCol}>
+          {balance != null ? (
+            <MoneyText
+              amount={balance}
+              size="sm"
+              style={[styles.balance, bold && staticStyles.boldCell]}
+              lines={1}
+              minimumFontScale={0.5}
+            />
+          ) : (
+            <Text style={[styles.balance, bold && staticStyles.boldCell]}>—</Text>
+          )}
+        </View>
+      ) : null}
+    </>
+  );
+
   const renderRow = (row: LedgerRow, isLast: boolean, key: string) => {
     const content = (
-      <>
-        <View style={styles.line1}>
-          {showDate ? (
-            <Text style={styles.dateText} numberOfLines={1}>
-              {formatDisplayDate(row.date)}
-            </Text>
-          ) : null}
-          <Text style={styles.descText} numberOfLines={3}>
-            {row.description}
+      <View style={styles.line}>
+        {showDate ? (
+          <Text style={styles.dateText} numberOfLines={1}>
+            {formatDisplayDate(row.date)}
           </Text>
-        </View>
-        <AmountValues
-          debit={row.debit}
-          credit={row.credit}
-          balance={row.balance}
-          showBalance={showBalance}
-          styles={styles}
-        />
-      </>
+        ) : null}
+        <Text style={styles.descText} numberOfLines={1}>
+          {row.description}
+        </Text>
+        {renderAmountCells(row.debit, row.credit, row.balance)}
+      </View>
     );
 
     if (onRowLongPress || onRowPress) {
@@ -181,10 +141,11 @@ export function LedgerTable({
   return (
     <View style={styles.table}>
       <View style={styles.headerRow}>
-        <Text style={[styles.headerCell, styles.particularsHeader]}>
-          {showDate ? 'Date / Particulars' : 'Particulars'}
-        </Text>
-        <AmountHeaders showBalance={showBalance} styles={styles} />
+        {showDate ? <Text style={[styles.headerCell, styles.dateHeader]}>Date</Text> : null}
+        <Text style={[styles.headerCell, styles.particularsHeader]}>Particulars</Text>
+        <Text style={[styles.headerCell, styles.amtHeader]}>Dr</Text>
+        <Text style={[styles.headerCell, styles.amtHeader]}>Cr</Text>
+        {showBalance ? <Text style={[styles.headerCell, styles.amtHeader]}>Bal</Text> : null}
       </View>
       {rows.map((row, index) =>
         renderRow(row, index === rows.length - 1 && !footerRows?.length, String(row.id))
@@ -198,26 +159,20 @@ export function LedgerTable({
             index === footerRows.length - 1 && styles.dataRowLast,
           ]}
         >
-          <View style={styles.line1}>
-            <Text style={[styles.descText, styles.footerLabel]} numberOfLines={2}>
+          <View style={styles.line}>
+            {showDate ? <View style={styles.dateSpacer} /> : null}
+            <Text style={[styles.descText, styles.footerLabel]} numberOfLines={1}>
               {row.label}
             </Text>
+            {renderAmountCells(row.debit, row.credit, row.balance, true)}
           </View>
-          <AmountValues
-            debit={row.debit}
-            credit={row.credit}
-            balance={row.balance}
-            showBalance={showBalance}
-            bold
-            styles={styles}
-          />
         </View>
       ))}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const staticStyles = StyleSheet.create({
   boldCell: { fontWeight: '600' },
 });
 
@@ -225,68 +180,63 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
     table: {
       width: '100%',
-      borderRadius: 12,
+      borderRadius: 10,
       overflow: 'hidden',
       backgroundColor: colors.surface,
     },
     headerRow: {
-      paddingHorizontal: spacing.md,
-      paddingTop: spacing.sm,
-      paddingBottom: spacing.xs,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 5,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
       backgroundColor: colors.surfaceContainer,
       gap: 4,
     },
     headerCell: {
-      fontSize: 10,
+      fontSize: 9,
       fontWeight: '700',
       color: colors.textMuted,
       textTransform: 'uppercase',
-      letterSpacing: 0.4,
+      letterSpacing: 0.3,
     },
-    particularsHeader: { marginBottom: 2 },
+    dateHeader: { width: 64, flexShrink: 0 },
+    particularsHeader: { flex: 1, minWidth: 0 },
+    amtHeader: { width: 68, textAlign: 'right', flexShrink: 0 },
     dataRow: {
-      paddingHorizontal: spacing.md,
-      paddingVertical: 7,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 4,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.borderLight,
-      gap: 2,
-      minHeight: 44,
+      minHeight: 32,
       justifyContent: 'center',
     },
     dataRowLast: { borderBottomWidth: 0 },
-    line1: {
+    line: {
       flexDirection: 'row',
-      flexWrap: 'wrap',
-      alignItems: 'flex-start',
-      gap: 6,
+      alignItems: 'center',
+      gap: 4,
     },
     dateText: {
+      width: 64,
       fontSize: 11,
       color: colors.textSecondary,
       fontVariant: ['tabular-nums'],
       flexShrink: 0,
     },
+    dateSpacer: { width: 64, flexShrink: 0 },
     descText: {
-      flexGrow: 1,
-      flexShrink: 1,
-      flexBasis: '60%',
-      fontSize: 13,
-      color: colors.text,
-      lineHeight: 17,
-    },
-    amountRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-    },
-    amtCol: {
       flex: 1,
       minWidth: 0,
+      fontSize: 12,
+      color: colors.text,
+    },
+    amtCol: {
+      width: 68,
+      flexShrink: 0,
       alignItems: 'flex-end',
     },
-    amtHeader: { textAlign: 'right', width: '100%' },
     debit: { color: colors.text, fontWeight: '500', textAlign: 'right' },
     credit: { color: colors.textSecondary, fontWeight: '500', textAlign: 'right' },
     balance: { color: colors.text, fontWeight: '600', textAlign: 'right' },

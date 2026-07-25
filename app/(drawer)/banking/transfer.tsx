@@ -13,7 +13,7 @@ import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
-import { parsePositiveAmount } from '../../../src/utils/format';
+import { formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
 import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { radius, spacing } from '../../../src/constants/theme';
 import type { Account } from '../../../src/types';
@@ -27,16 +27,28 @@ export default function TransferScreen() {
     () =>
       StyleSheet.create({
         chip: {
-          padding: spacing.sm,
+          paddingVertical: spacing.sm,
+          paddingHorizontal: spacing.md,
           backgroundColor: colors.surface,
           borderRadius: radius.sm,
           marginBottom: spacing.xs,
           borderWidth: 1,
           borderColor: colors.border,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: spacing.sm,
         },
         chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-        chipText: { color: colors.text, fontSize: 14 },
+        chipText: { color: colors.text, fontSize: 14, flex: 1, minWidth: 0 },
         chipTextActive: { color: colors.onPrimary, fontWeight: '600' },
+        chipBal: {
+          color: colors.textSecondary,
+          fontSize: 12,
+          fontVariant: ['tabular-nums'],
+          flexShrink: 0,
+        },
+        chipBalActive: { color: colors.onPrimary, opacity: 0.9 },
       }),
     [colors]
   );
@@ -130,26 +142,42 @@ export default function TransferScreen() {
       ) : null}
 
       <Text style={styles.label}>From Account</Text>
-      {accounts.map((a) => (
-        <TouchableOpacity
-          key={`from-${a.id}`}
-          style={[localStyles.chip, fromId === a.id && localStyles.chipActive]}
-          onPress={() => setFromId(a.id)}
-        >
-          <Text style={fromId === a.id ? localStyles.chipTextActive : localStyles.chipText}>{a.name}</Text>
-        </TouchableOpacity>
-      ))}
+      {accounts.map((a) => {
+        const active = fromId === a.id;
+        return (
+          <TouchableOpacity
+            key={`from-${a.id}`}
+            style={[localStyles.chip, active && localStyles.chipActive]}
+            onPress={() => setFromId(a.id)}
+          >
+            <Text style={active ? localStyles.chipTextActive : localStyles.chipText} numberOfLines={1}>
+              {a.name}
+            </Text>
+            <Text style={[localStyles.chipBal, active && localStyles.chipBalActive]} numberOfLines={1}>
+              {formatCurrency(a.current_balance)}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
 
       <Text style={styles.label}>To Account</Text>
-      {accounts.map((a) => (
-        <TouchableOpacity
-          key={`to-${a.id}`}
-          style={[localStyles.chip, toId === a.id && localStyles.chipActive]}
-          onPress={() => setToId(a.id)}
-        >
-          <Text style={toId === a.id ? localStyles.chipTextActive : localStyles.chipText}>{a.name}</Text>
-        </TouchableOpacity>
-      ))}
+      {accounts.map((a) => {
+        const active = toId === a.id;
+        return (
+          <TouchableOpacity
+            key={`to-${a.id}`}
+            style={[localStyles.chip, active && localStyles.chipActive]}
+            onPress={() => setToId(a.id)}
+          >
+            <Text style={active ? localStyles.chipTextActive : localStyles.chipText} numberOfLines={1}>
+              {a.name}
+            </Text>
+            <Text style={[localStyles.chipBal, active && localStyles.chipBalActive]} numberOfLines={1}>
+              {formatCurrency(a.current_balance)}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
 
       <FormInput label="Amount" value={amount} onChangeText={setAmount} money />
       <DatePickerField label="Date" value={date} onChange={setDate} />

@@ -2,30 +2,32 @@
   "expo": {
     "name": "Hisab",
     "slug": "hisab",
-    "version": "10.1.0",
+    "version": "10.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "hisab",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#F3F5F9"
+      "backgroundColor": "#0B1731"
     },
-    "backgroundColor": "#F3F5F9",
+    "backgroundColor": "#0B1731",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hisab.app",
-      "buildNumber": "31"
+      "buildNumber": "32"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#F3F5F9",
-        "foregroundImage": "./assets/android-icon-foreground.png"
+        "backgroundColor": "#0B1731",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png",
+        "backgroundImage": "./assets/android-icon-background.png"
       },
       "package": "com.hisab.app",
-      "versionCode": 31,
+      "versionCode": 32,
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -38,12 +40,12 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#F3F5F9",
+          "backgroundColor": "#0B1731",
           "image": "./assets/splash-icon.png",
-          "imageWidth": 200,
+          "imageWidth": 220,
           "resizeMode": "contain",
           "dark": {
-            "backgroundColor": "#0B0D10",
+            "backgroundColor": "#0B1731",
             "image": "./assets/splash-icon.png"
           }
         }
@@ -74,7 +76,10 @@
     "updates": {
       "url": "https://u.expo.dev/75b78ed4-f0be-44a0-97a9-35d194b78a34",
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 0
+      "fallbackToCacheTimeout": 0,
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
     }
   }
 }

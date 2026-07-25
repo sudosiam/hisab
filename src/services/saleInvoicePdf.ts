@@ -148,253 +148,217 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/>
 <style>
-  @page { margin: 18mm 14mm; }
+  @page { margin: 12mm 10mm; size: A4 portrait; }
   * { box-sizing: border-box; }
   body {
-    font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    font-size: 11.5px;
-    color: #15202b;
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 9.5pt;
+    color: #000;
     margin: 0;
     padding: 0;
-    line-height: 1.45;
+    line-height: 1.3;
     background: #fff;
   }
-  .shell { border: 1px solid #e6ebf0; border-radius: 10px; overflow: hidden; }
-  .accent { height: 6px; background: linear-gradient(90deg, #0f3d2e, #1f7a5c 55%, #c9a227); }
-  .pad { padding: 22px 22px 18px; }
-  .top {
+  .company {
+    text-align: center;
+    font-size: 14pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin: 0 0 2px;
+  }
+  .company-meta { text-align: center; font-size: 8.5pt; margin-bottom: 2px; }
+  .doc-title {
+    text-align: center;
+    font-size: 12pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin: 8px 0 2px;
+    border-top: 1px solid #000;
+    border-bottom: 1px solid #000;
+    padding: 4px 0;
+  }
+  .meta-row {
     display: flex;
     justify-content: space-between;
-    gap: 20px;
-    align-items: flex-start;
-    margin-bottom: 18px;
+    gap: 12px;
+    margin: 8px 0;
+    font-size: 9pt;
   }
-  .brand-name {
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    color: #0f3d2e;
-    margin: 0 0 6px;
-  }
-  .muted { color: #5b6b7c; font-size: 11px; }
-  .pill {
-    display: inline-block;
-    padding: 3px 9px;
-    border-radius: 999px;
-    background: #eef7f2;
-    color: #0f3d2e;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-  .pill.bos { background: #fff6e8; color: #8a5a00; }
-  .doc-title { font-size: 18px; font-weight: 700; margin: 8px 0 4px; color: #15202b; }
-  .doc-no { font-size: 13px; font-weight: 600; }
-  .grid-2 {
-    display: flex;
-    gap: 16px;
-    margin: 8px 0 18px;
-  }
-  .card {
+  .box {
     flex: 1;
-    background: #f7f9fb;
-    border: 1px solid #eef1f4;
-    border-radius: 8px;
-    padding: 12px 14px;
+    border: 1px solid #000;
+    padding: 6px 8px;
+    min-height: 72px;
   }
-  .card h3 {
-    margin: 0 0 6px;
-    font-size: 10px;
+  .box h3 {
+    margin: 0 0 4px;
+    font-size: 8pt;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: #7a8898;
+    border-bottom: 1px solid #000;
+    padding-bottom: 2px;
   }
-  .card .name { font-weight: 700; font-size: 13px; margin-bottom: 2px; }
-  table {
+  .name { font-weight: 700; font-size: 10pt; margin-bottom: 2px; }
+  .muted { font-size: 8.5pt; }
+  table.items {
     width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    margin-top: 4px;
-    overflow: hidden;
-    border: 1px solid #e6ebf0;
-    border-radius: 8px;
+    border-collapse: collapse;
+    margin-top: 8px;
+    table-layout: fixed;
   }
-  th {
-    background: #0f3d2e;
-    color: #fff;
-    text-align: left;
-    font-size: 10px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    padding: 9px 8px;
-    font-weight: 600;
+  table.items th, table.items td {
+    border: 1px solid #000;
+    padding: 4px 5px;
+    vertical-align: top;
   }
-  td { padding: 9px 8px; border-top: 1px solid #eef1f4; vertical-align: top; }
-  tr:nth-child(even) td { background: #fbfcfd; }
-  td.c { text-align: center; color: #7a8898; width: 28px; }
-  td.num, th.num { text-align: right; white-space: nowrap; }
-  .item-name { font-weight: 600; }
-  .hsn { color: #7a8898; font-size: 10px; margin-top: 2px; }
+  table.items th {
+    background: #f0f0f0;
+    font-size: 8pt;
+    font-weight: 700;
+    text-align: center;
+  }
+  td.c, th.c { text-align: center; }
+  td.num, th.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .item-name { font-weight: 700; }
+  .hsn { font-size: 8pt; margin-top: 1px; }
   .strong { font-weight: 700; }
   .bottom {
     display: flex;
     justify-content: space-between;
-    gap: 18px;
-    margin-top: 18px;
+    gap: 12px;
+    margin-top: 10px;
     align-items: flex-start;
   }
   .pay-box {
-    width: 168px;
+    width: 150px;
     text-align: center;
-    border: 1px dashed #cfd8e0;
-    border-radius: 10px;
-    padding: 12px 10px;
-    background: #fcfdfd;
+    border: 1px solid #000;
+    padding: 8px;
   }
-  .pay-box img { width: 120px; height: 120px; }
-  .pay-box .label {
-    margin-top: 8px;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #0f3d2e;
-  }
+  .pay-box img { width: 110px; height: 110px; }
+  .pay-box .label { margin-top: 6px; font-size: 8pt; font-weight: 700; text-transform: uppercase; }
   .totals {
     width: 260px;
     margin-left: auto;
-    border: 1px solid #e6ebf0;
-    border-radius: 10px;
-    padding: 10px 14px;
-    background: #fff;
+    border: 1px solid #000;
   }
   .totals .row {
     display: flex;
     justify-content: space-between;
-    padding: 4px 0;
-    color: #3b4a58;
+    padding: 3px 8px;
+    border-bottom: 1px solid #ccc;
   }
+  .totals .row:last-child { border-bottom: none; }
   .totals .row.grand {
-    margin-top: 6px;
-    padding-top: 8px;
-    border-top: 2px solid #0f3d2e;
-    font-size: 14px;
+    font-size: 11pt;
     font-weight: 700;
-    color: #0f3d2e;
+    border-top: 2px solid #000;
+    background: #f5f5f5;
+    padding: 6px 8px;
   }
-  .notes {
-    margin-top: 16px;
-    padding: 10px 12px;
-    background: #f7f9fb;
-    border-radius: 8px;
-    color: #5b6b7c;
+  .words {
+    margin-top: 10px;
+    border: 1px solid #000;
+    padding: 6px 8px;
+    font-size: 9pt;
   }
   .footer {
-    margin-top: 18px;
-    padding-top: 10px;
-    border-top: 1px solid #eef1f4;
+    margin-top: 16px;
     display: flex;
     justify-content: space-between;
-    color: #9aa6b2;
-    font-size: 10px;
+    font-size: 8pt;
+    border-top: 1px solid #999;
+    padding-top: 8px;
   }
+  .sign { text-align: right; min-width: 180px; }
 </style></head><body>
-  <div class="shell">
-    <div class="accent"></div>
-    <div class="pad">
-      <div class="top">
-        <div>
-          <div class="brand-name">${escapeHtml(businessName)}</div>
-          ${profile.business_address ? `<div class="muted">${escapeHtml(profile.business_address)}</div>` : ''}
-          ${profile.business_gstin ? `<div class="muted">GSTIN · ${escapeHtml(profile.business_gstin)}</div>` : ''}
-          ${profile.business_state ? `<div class="muted">${escapeHtml(stateName(profile.business_state) || profile.business_state)} (${escapeHtml(profile.business_state)})</div>` : ''}
-        </div>
-        <div style="text-align:right">
-          <span class="pill${isBos ? ' bos' : ''}">${escapeHtml(docLabel)}</span>
-          <div class="doc-title">${escapeHtml(sale.invoice_no)}</div>
-          <div class="muted">Date · ${escapeHtml(formatDisplayDate(sale.date))}</div>
-          ${sale.is_inter_state ? `<div class="muted">Place of supply · ${escapeHtml(placeOfSupplyLabel)}</div>` : `<div class="muted">Place of supply · ${escapeHtml(placeOfSupplyLabel)}</div>`}
-          <div class="muted">Reverse charge · No</div>
-          ${taxInclusive && showTax ? `<div class="muted">Prices are tax-inclusive</div>` : ''}
-        </div>
-      </div>
+  <div class="company">${escapeHtml(businessName)}</div>
+  ${profile.business_address ? `<div class="company-meta">${escapeHtml(profile.business_address)}</div>` : ''}
+  ${profile.business_gstin ? `<div class="company-meta"><strong>GSTIN:</strong> ${escapeHtml(profile.business_gstin)}</div>` : ''}
+  ${profile.business_state ? `<div class="company-meta">State: ${escapeHtml(stateName(profile.business_state) || profile.business_state)} (${escapeHtml(profile.business_state)})</div>` : ''}
 
-      <div class="grid-2">
-        <div class="card">
-          <h3>Bill to</h3>
-          <div class="name">${escapeHtml(sale.party_name)}</div>
-          ${party?.address ? `<div class="muted">${escapeHtml(party.address)}</div>` : ''}
-          ${party?.gstin ? `<div class="muted">GSTIN · ${escapeHtml(party.gstin)}</div>` : ''}
-          ${partyStateLabel ? `<div class="muted">State · ${escapeHtml(partyStateLabel)}</div>` : ''}
-          ${party?.phone ? `<div class="muted">Phone · ${escapeHtml(party.phone)}</div>` : ''}
-        </div>
-        <div class="card">
-          <h3>Summary</h3>
-          <div class="muted">Taxable · <strong style="color:#15202b">${money(sale.taxable_amount ?? sale.subtotal)}</strong></div>
-          ${showTax ? `<div class="muted">Tax · <strong style="color:#15202b">${money(taxTotal)}</strong></div>` : ''}
-          <div class="muted" style="margin-top:6px">Grand total · <strong style="color:#0f3d2e;font-size:14px">${money(sale.total_amount)}</strong></div>
-          ${due > 0.009 ? `<div class="muted">Amount due · <strong style="color:#a33">${money(due)}</strong></div>` : `<div class="muted">Status · <strong style="color:#1f7a5c">Paid</strong></div>`}
-        </div>
-      </div>
+  <div class="doc-title">${escapeHtml(docLabel)}</div>
 
-      <table>
-        <thead>
-          <tr>
-            <th class="c">#</th>
-            <th>Item</th>
-            <th class="num">Qty</th>
-            <th class="num">${taxInclusive ? 'Rate (incl.)' : 'Rate'}</th>
-            <th class="num">GST</th>
-            <th class="num">Taxable</th>
-            ${showTax ? '<th class="num">Tax</th>' : ''}
-            <th class="num">Amount</th>
-          </tr>
-        </thead>
-        <tbody>${itemRows}</tbody>
-      </table>
+  <div class="meta-row">
+    <div>
+      <div><strong>No.:</strong> ${escapeHtml(sale.invoice_no)}</div>
+      <div><strong>Date:</strong> ${escapeHtml(formatDisplayDate(sale.date))}</div>
+      <div><strong>Place of supply:</strong> ${escapeHtml(placeOfSupplyLabel)}</div>
+      <div><strong>Reverse charge:</strong> No</div>
+      ${taxInclusive && showTax ? `<div><strong>Pricing:</strong> Tax-inclusive</div>` : ''}
+    </div>
+    <div style="text-align:right">
+      <div><strong>Taxable:</strong> ${money(sale.taxable_amount ?? sale.subtotal)}</div>
+      ${showTax ? `<div><strong>Tax:</strong> ${money(taxTotal)}</div>` : ''}
+      <div><strong>Grand total:</strong> ${money(sale.total_amount)}</div>
+      ${due > 0.009 ? `<div><strong>Balance due:</strong> ${money(due)}</div>` : `<div><strong>Status:</strong> Paid</div>`}
+    </div>
+  </div>
 
-      <div class="bottom">
-        ${
-          qr?.qrDataUri
-            ? `<div class="pay-box">
-                <img src="${qr.qrDataUri}" alt="UPI QR" width="120" height="120"/>
-                <div class="label">Scan to pay</div>
-                <div class="muted" style="margin-top:4px">${escapeHtml(profile.business_upi_id)}</div>
-                ${due > 0.009 ? `<div class="muted">Due ${money(due)}</div>` : ''}
-              </div>`
-            : qr
-              ? `<div class="pay-box">
-                  <div class="label">Pay via UPI</div>
-                  <div class="muted" style="margin-top:6px;word-break:break-all">${escapeHtml(profile.business_upi_id)}</div>
-                  ${due > 0.009 ? `<div class="muted">Due ${money(due)}</div>` : ''}
-                </div>`
-              : `<div style="flex:1"></div>`
-        }
-        <div class="totals">
-          <div class="row"><span>Subtotal</span><span>${money(sale.subtotal)}</span></div>
-          ${sale.discount_amount > 0 ? `<div class="row"><span>Discount</span><span>− ${money(sale.discount_amount)}</span></div>` : ''}
-          <div class="row"><span>Taxable value</span><span>${money(sale.taxable_amount ?? sale.subtotal)}</span></div>
-          ${showTax && (sale.cgst_amount ?? 0) > 0 ? `<div class="row"><span>CGST</span><span>${money(sale.cgst_amount)}</span></div>` : ''}
-          ${showTax && (sale.sgst_amount ?? 0) > 0 ? `<div class="row"><span>SGST</span><span>${money(sale.sgst_amount)}</span></div>` : ''}
-          ${showTax && (sale.igst_amount ?? 0) > 0 ? `<div class="row"><span>IGST</span><span>${money(sale.igst_amount)}</span></div>` : ''}
-          ${(sale.service_charges ?? 0) > 0 ? `<div class="row"><span>Service charges</span><span>${money(sale.service_charges)}</span></div>` : ''}
-          <div class="row grand"><span>Grand Total</span><span>${money(sale.total_amount)}</span></div>
-        </div>
-      </div>
+  <div class="meta-row">
+    <div class="box">
+      <h3>Party (Bill to)</h3>
+      <div class="name">${escapeHtml(sale.party_name)}</div>
+      ${party?.address ? `<div class="muted">${escapeHtml(party.address)}</div>` : ''}
+      ${party?.gstin ? `<div class="muted">GSTIN: ${escapeHtml(party.gstin)}</div>` : ''}
+      ${partyStateLabel ? `<div class="muted">State: ${escapeHtml(partyStateLabel)}</div>` : ''}
+      ${party?.phone ? `<div class="muted">Phone: ${escapeHtml(party.phone)}</div>` : ''}
+    </div>
+  </div>
 
-      <div class="notes"><strong style="color:#15202b">Amount in words</strong><br/>${escapeHtml(words)}</div>
+  <table class="items">
+    <thead>
+      <tr>
+        <th class="c" style="width:28px">#</th>
+        <th>Particulars</th>
+        <th class="num" style="width:48px">Qty</th>
+        <th class="num" style="width:70px">${taxInclusive ? 'Rate (incl.)' : 'Rate'}</th>
+        <th class="num" style="width:44px">GST%</th>
+        <th class="num" style="width:72px">Taxable</th>
+        ${showTax ? '<th class="num" style="width:64px">Tax</th>' : ''}
+        <th class="num" style="width:78px">Amount</th>
+      </tr>
+    </thead>
+    <tbody>${itemRows}</tbody>
+  </table>
 
-      ${
-        sale.notes
-          ? `<div class="notes"><strong style="color:#15202b">Notes</strong><br/>${escapeHtml(sale.notes)}</div>`
-          : ''
-      }
+  <div class="bottom">
+    ${
+      qr?.qrDataUri
+        ? `<div class="pay-box">
+            <img src="${qr.qrDataUri}" alt="UPI QR" width="110" height="110"/>
+            <div class="label">Scan to pay</div>
+            <div class="muted">${escapeHtml(profile.business_upi_id)}</div>
+            ${due > 0.009 ? `<div class="muted">Due ${money(due)}</div>` : ''}
+          </div>`
+        : qr
+          ? `<div class="pay-box">
+              <div class="label">Pay via UPI</div>
+              <div class="muted" style="margin-top:6px;word-break:break-all">${escapeHtml(profile.business_upi_id)}</div>
+              ${due > 0.009 ? `<div class="muted">Due ${money(due)}</div>` : ''}
+            </div>`
+          : `<div style="flex:1"></div>`
+    }
+    <div class="totals">
+      <div class="row"><span>Subtotal</span><span>${money(sale.subtotal)}</span></div>
+      ${sale.discount_amount > 0 ? `<div class="row"><span>Discount</span><span>− ${money(sale.discount_amount)}</span></div>` : ''}
+      <div class="row"><span>Taxable value</span><span>${money(sale.taxable_amount ?? sale.subtotal)}</span></div>
+      ${showTax && (sale.cgst_amount ?? 0) > 0 ? `<div class="row"><span>CGST</span><span>${money(sale.cgst_amount)}</span></div>` : ''}
+      ${showTax && (sale.sgst_amount ?? 0) > 0 ? `<div class="row"><span>SGST</span><span>${money(sale.sgst_amount)}</span></div>` : ''}
+      ${showTax && (sale.igst_amount ?? 0) > 0 ? `<div class="row"><span>IGST</span><span>${money(sale.igst_amount)}</span></div>` : ''}
+      ${(sale.service_charges ?? 0) > 0 ? `<div class="row"><span>Service charges</span><span>${money(sale.service_charges)}</span></div>` : ''}
+      <div class="row grand"><span>Grand Total</span><span>${money(sale.total_amount)}</span></div>
+    </div>
+  </div>
 
-      <div class="footer">
-        <span>For ${escapeHtml(businessName)}<br/><span class="muted">Authorised signatory</span></span>
-        <span>Hisab v${APP_VERSION}</span>
-      </div>
+  <div class="words"><strong>Amount in words:</strong> ${escapeHtml(words)}</div>
+  ${sale.notes ? `<div class="words"><strong>Notes:</strong> ${escapeHtml(sale.notes)}</div>` : ''}
+
+  <div class="footer">
+    <span>Hisab v${APP_VERSION}</span>
+    <div class="sign">
+      <div>For ${escapeHtml(businessName)}</div>
+      <div style="margin-top:28px">Authorised Signatory</div>
     </div>
   </div>
 </body></html>`;

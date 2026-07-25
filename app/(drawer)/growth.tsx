@@ -42,7 +42,7 @@ export default function GrowthScreen() {
           alignItems: 'center',
         },
         heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
-        heroValue: { marginTop: spacing.sm, textAlign: 'center' },
+        heroValue: { marginTop: spacing.sm, textAlign: 'center', width: '100%' },
         heroSub: { fontSize: 11, color: colors.textSecondary, marginTop: spacing.xs, textAlign: 'center' },
         card: {
           ...cardSurface(colors, isDark),
@@ -79,7 +79,15 @@ export default function GrowthScreen() {
           paddingVertical: 4,
         },
         detailLabel: { fontSize: 13, color: colors.textSecondary, flex: 1, minWidth: 0 },
-        detailValue: { maxWidth: '62%', flexShrink: 1, minWidth: 80, width: '100%', textAlign: 'right' },
+        detailValue: {
+          maxWidth: '62%',
+          flexShrink: 1,
+          minWidth: 80,
+          width: '100%',
+          textAlign: 'right',
+          color: colors.text,
+          fontVariant: ['tabular-nums'],
+        },
         cumulative: {
           borderTopWidth: 1,
           borderTopColor: colors.borderLight,

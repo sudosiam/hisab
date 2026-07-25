@@ -4,6 +4,8 @@ import * as Sharing from 'expo-sharing';
 import { format } from 'date-fns';
 import { APP_VERSION } from '../constants/appVersion';
 import { formatCurrency, formatIndianMoney, formatSignedCurrency } from '../utils/format';
+import { deferDeleteCacheFile } from '../utils/tempShareFiles';
+import { getBusinessName } from './appSettings';
 
 export function escapeHtml(text: string): string {
   return text
@@ -32,6 +34,7 @@ export interface ReportPdfMeta {
   title: string;
   subtitle?: string;
   period?: string;
+  companyName?: string;
 }
 
 export interface PdfLineItem {
@@ -47,80 +50,126 @@ export interface PdfTableColumn {
   width?: string;
 }
 
+/** Classic Tally-style report chrome (Times, black rules, centered headers). */
 const BASE_CSS = `
+  @page { margin: 12mm 10mm; size: A4 portrait; }
   * { box-sizing: border-box; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-    font-size: 11px;
-    color: #1a1a1a;
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 9.5pt;
+    color: #000;
     margin: 0;
-    padding: 24px 28px 32px;
-    line-height: 1.4;
+    padding: 0;
+    line-height: 1.3;
   }
-  h1 {
-    font-size: 18px;
+  .company {
+    text-align: center;
+    font-size: 14pt;
     font-weight: 700;
-    margin: 0 0 4px;
-    color: #0f2744;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    margin: 0 0 2px;
   }
-  .meta { color: #555; font-size: 11px; margin-bottom: 16px; }
-  .meta span { display: block; }
+  .report-title {
+    text-align: center;
+    font-size: 11pt;
+    font-weight: 700;
+    margin: 0 0 2px;
+    text-transform: uppercase;
+  }
+  .period {
+    text-align: center;
+    font-size: 9pt;
+    margin: 0 0 8px;
+  }
+  .subtitle {
+    text-align: center;
+    font-size: 8.5pt;
+    margin: 0 0 8px;
+    color: #222;
+  }
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 8pt;
+    margin-bottom: 8px;
+    border-top: 1px solid #000;
+    border-bottom: 1px solid #000;
+    padding: 4px 0;
+  }
   table {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
+    table-layout: fixed;
   }
   th, td {
-    border: 1px solid #ccc;
-    padding: 5px 7px;
+    border: 1px solid #000;
+    padding: 4px 5px;
     vertical-align: top;
+    word-wrap: break-word;
   }
   th {
-    background: #eef2f7;
+    background: #f0f0f0;
     font-weight: 700;
-    text-align: left;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
+    text-align: center;
+    font-size: 8pt;
   }
-  td.r, th.r { text-align: right; }
+  td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   td.c, th.c { text-align: center; }
+  td.l, th.l { text-align: left; }
   tr.total td {
     font-weight: 700;
-    background: #f5f7fa;
+    background: #f5f5f5;
+    border-top: 2px solid #000;
   }
   tr.bold td { font-weight: 700; }
-  .lines { margin-bottom: 14px; }
+  .lines {
+    width: 100%;
+    border: 1px solid #000;
+    margin-bottom: 12px;
+  }
   .line {
     display: flex;
     justify-content: space-between;
-    padding: 4px 0;
-    border-bottom: 1px solid #eee;
+    padding: 4px 8px;
+    border-bottom: 1px solid #ccc;
+    font-size: 9.5pt;
   }
+  .line:last-child { border-bottom: none; }
   .line.bold { font-weight: 700; }
-  .line.highlight { font-size: 13px; font-weight: 700; color: #0f2744; }
+  .line.highlight {
+    font-size: 10.5pt;
+    font-weight: 700;
+    background: #f5f5f5;
+    border-top: 2px solid #000;
+  }
   .section-title {
-    font-size: 12px;
+    font-size: 9.5pt;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.4px;
-    color: #444;
-    margin: 14px 0 6px;
+    letter-spacing: 0.3px;
+    margin: 12px 0 4px;
+    border-bottom: 1px solid #000;
+    padding-bottom: 2px;
   }
-  .empty { color: #777; font-style: italic; padding: 8px 0; }
+  .empty { color: #333; font-style: italic; padding: 8px 0; text-align: center; }
   .footer {
-    margin-top: 20px;
-    padding-top: 10px;
-    border-top: 1px solid #ddd;
+    margin-top: 14px;
+    padding-top: 6px;
+    border-top: 1px solid #999;
     display: flex;
     justify-content: space-between;
-    font-size: 9px;
-    color: #888;
+    font-size: 7.5pt;
+    color: #333;
   }
 `;
 
-export function wrapReportHtml(meta: ReportPdfMeta, bodyContent: string): string {
-  const generatedAt = format(new Date(), 'd MMM yyyy, h:mm a');
+export async function wrapReportHtml(meta: ReportPdfMeta, bodyContent: string): Promise<string> {
+  const generatedAt = format(new Date(), 'd-MMM-yyyy h:mm a');
+  const company =
+    (meta.companyName ?? (await getBusinessName()).trim()) || 'Hisab';
+
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -128,10 +177,13 @@ export function wrapReportHtml(meta: ReportPdfMeta, bodyContent: string): string
   <style>${BASE_CSS}</style>
 </head>
 <body>
-  <h1>${escapeHtml(meta.title)}</h1>
-  <div class="meta">
-    ${meta.period ? `<span><strong>Period:</strong> ${escapeHtml(meta.period)}</span>` : ''}
-    ${meta.subtitle ? `<span>${escapeHtml(meta.subtitle)}</span>` : ''}
+  <div class="company">${escapeHtml(company)}</div>
+  <div class="report-title">${escapeHtml(meta.title)}</div>
+  ${meta.period ? `<div class="period">${escapeHtml(meta.period)}</div>` : ''}
+  ${meta.subtitle ? `<div class="subtitle">${escapeHtml(meta.subtitle)}</div>` : ''}
+  <div class="meta-row">
+    <span><strong>Report:</strong> ${escapeHtml(meta.title)}</span>
+    <span><strong>Page:</strong> 1</span>
   </div>
   ${bodyContent}
   <div class="footer">
@@ -166,7 +218,7 @@ export function buildTableHtml(
   const head = columns
     .map(
       (col) =>
-        `<th class="${col.align === 'right' ? 'r' : col.align === 'center' ? 'c' : ''}"${
+        `<th class="${col.align === 'right' ? 'r' : col.align === 'center' ? 'c' : 'l'}"${
           col.width ? ` style="width:${col.width}"` : ''
         }>${escapeHtml(col.label)}</th>`
     )
@@ -177,7 +229,7 @@ export function buildTableHtml(
       (row) =>
         `<tr>${columns
           .map((col) => {
-            const align = col.align === 'right' ? 'r' : col.align === 'center' ? 'c' : '';
+            const align = col.align === 'right' ? 'r' : col.align === 'center' ? 'c' : 'l';
             return `<td class="${align}">${escapeHtml(row[col.key] ?? '')}</td>`;
           })
           .join('')}</tr>`
@@ -187,7 +239,7 @@ export function buildTableHtml(
   const footer = footerRow
     ? `<tr class="total">${columns
         .map((col) => {
-          const align = col.align === 'right' ? 'r' : col.align === 'center' ? 'c' : '';
+          const align = col.align === 'right' ? 'r' : col.align === 'center' ? 'c' : 'l';
           return `<td class="${align}">${escapeHtml(footerRow[col.key] ?? '')}</td>`;
         })
         .join('')}</tr>`
@@ -225,8 +277,8 @@ export function buildLedgerTableHtml(
     .map(
       (row) =>
         `<tr>
-          ${showDate ? `<td>${escapeHtml(row.date ?? '')}</td>` : ''}
-          <td>${escapeHtml(row.description)}</td>
+          ${showDate ? `<td class="c">${escapeHtml(row.date ?? '')}</td>` : ''}
+          <td class="l">${escapeHtml(row.description)}</td>
           <td class="r">${escapeHtml(pdfPlainAmount(row.debit))}</td>
           <td class="r">${escapeHtml(pdfPlainAmount(row.credit))}</td>
           ${
@@ -241,7 +293,7 @@ export function buildLedgerTableHtml(
   const footer = options?.footer
     ? `<tr class="total">
         ${showDate ? '<td></td>' : ''}
-        <td>${escapeHtml(options.footer.label)}</td>
+        <td class="l">${escapeHtml(options.footer.label)}</td>
         <td class="r">${escapeHtml(pdfPlainAmount(options.footer.debit))}</td>
         <td class="r">${escapeHtml(pdfPlainAmount(options.footer.credit))}</td>
         ${showBalance ? '<td class="r"></td>' : ''}
@@ -277,7 +329,7 @@ export async function shareReportPdf(options: {
       dialogTitle: options.dialogTitle,
       UTI: 'com.adobe.pdf',
     });
-    await FileSystem.deleteAsync(dest, { idempotent: true });
+    deferDeleteCacheFile(dest);
     return { success: true, message: 'PDF ready to save or share.' };
   } catch (error) {
     return {

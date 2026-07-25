@@ -7,7 +7,7 @@ const hidden = { drawerItemStyle: { display: 'none' as const } };
 const stackGroup = { ...hidden, headerShown: false as const };
 
 export default function DrawerLayout() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const drawerOptions = useDrawerScreenOptions();
 
   return (
@@ -19,11 +19,15 @@ export default function DrawerLayout() {
         headerShown: true,
         lazy: true,
         freezeOnBlur: true,
+        drawerType: 'front',
+        swipeEnabled: true,
+        overlayColor: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(15,23,42,0.35)',
         drawerStyle: {
           width: 254,
           backgroundColor: colors.drawer,
         },
-        swipeEdgeWidth: 60,
+        sceneStyle: { backgroundColor: colors.background },
+        swipeEdgeWidth: 48,
       }}
     >
       <Drawer.Screen name="index" options={{ title: 'Dashboard', ...hidden }} />

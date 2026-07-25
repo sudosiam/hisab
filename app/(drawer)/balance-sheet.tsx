@@ -42,7 +42,13 @@ export default function BalanceSheetScreen() {
           alignItems: 'center',
         },
         heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
-        heroValue: { ...typography.display, color: colors.text, marginTop: spacing.sm },
+        heroValue: {
+          ...typography.display,
+          color: colors.text,
+          marginTop: spacing.sm,
+          textAlign: 'center',
+          width: '100%',
+        },
         section: {
           ...cardSurface(colors, isDark),
           padding: spacing.md,
@@ -143,7 +149,11 @@ export default function BalanceSheetScreen() {
     >
       <View style={localStyles.hero}>
         <Text style={localStyles.heroLabel}>Owner{"'"}s Equity</Text>
-        <MoneyText amount={data.equity} size="hero" style={[localStyles.heroValue, { width: '100%' }]} />
+        <MoneyText
+          amount={data.equity}
+          size="hero"
+          style={[localStyles.heroValue, { width: '100%', textAlign: 'center' }]}
+        />
         <Text
           style={{ color: colors.textSecondary, marginTop: spacing.sm, fontSize: 12, textAlign: 'center' }}
           numberOfLines={3}

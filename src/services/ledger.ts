@@ -3,6 +3,11 @@ import { getDatabase } from '../db/database';
 import { roundMoney } from '../utils/money';
 import type { PartyStatementLine, PartyStatementResult, PartyType } from '../types';
 
+/** Defer heavy work one tick so save/navigation animations stay smooth. */
+function runAfterIdle(fn: () => void): void {
+  setTimeout(fn, 0);
+}
+
 export type LedgerAccountType = 'asset' | 'liability' | 'equity' | 'income' | 'expense';
 
 export interface LedgerAccount {
@@ -177,15 +182,17 @@ const LEDGER_CODE_VERSION = '6';
 let rebuildInFlight: Promise<void> | null = null;
 let ledgerRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Coalesce ledger rebuilds so rapid saves do not block the UI thread repeatedly. */
+/** Coalesce ledger rebuilds so rapid saves stay snappy; run after transitions settle. */
 export function scheduleGeneralLedgerRefresh(): void {
   if (ledgerRefreshTimer) clearTimeout(ledgerRefreshTimer);
   ledgerRefreshTimer = setTimeout(() => {
     ledgerRefreshTimer = null;
-    void rebuildGeneralLedger().catch((err) => {
-      console.warn('[ledger] rebuild failed', err);
+    runAfterIdle(() => {
+      void rebuildGeneralLedger().catch((err) => {
+        console.warn('[ledger] rebuild failed', err);
+      });
     });
-  }, 400);
+  }, 750);
   if (ledgerRefreshTimer && typeof ledgerRefreshTimer === 'object' && 'unref' in ledgerRefreshTimer) {
     (ledgerRefreshTimer as NodeJS.Timeout).unref();
   }

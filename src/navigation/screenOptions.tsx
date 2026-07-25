@@ -56,6 +56,13 @@ export function useHeaderScreenOptions() {
     headerLeftContainerStyle: { paddingLeft: 4 },
     headerBackTitleVisible: false,
     headerShadowVisible: false,
+    // Native-stack transitions (GPU) — snappy without JS-driven animation jank.
+    animation: 'slide_from_right' as const,
+    animationDuration: 260,
+    gestureEnabled: true,
+    fullScreenGestureEnabled: true,
+    freezeOnBlur: true,
+    contentStyle: { backgroundColor: colors.background },
   } as const;
 }
 
@@ -128,6 +135,7 @@ function DrawerMenuButton({ tintColor }: { tintColor: string }) {
       onPress={openDrawer}
       style={{ marginLeft: Platform.OS === 'ios' ? 0 : 4, padding: 8 }}
       hitSlop={8}
+      android_ripple={{ borderless: true, radius: 20 }}
       accessibilityRole="button"
       accessibilityLabel="Open menu"
     >

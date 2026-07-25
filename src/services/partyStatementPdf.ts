@@ -6,6 +6,8 @@ import { APP_VERSION } from '../constants/appVersion';
 import { formatIndianMoney } from '../utils/format';
 import { isValidISODate, parseISODate } from '../utils/date';
 import { roundMoney } from '../utils/money';
+import { deferDeleteCacheFile } from '../utils/tempShareFiles';
+import { getBusinessName } from './appSettings';
 import type { PartyStatementLine, PartyType } from '../types';
 
 export interface PartyStatementPdfInput {
@@ -104,12 +106,13 @@ function ledgerGroupLabel(partyType: PartyType, partyName: string): string {
   return `Sundry Creditors — ${partyName}`;
 }
 
-export function buildPartyStatementHtml(input: PartyStatementPdfInput): string {
+export async function buildPartyStatementHtml(input: PartyStatementPdfInput): Promise<string> {
   const totalDebit = roundMoney(input.lines.reduce((sum, line) => sum + line.debit, 0));
   const totalCredit = roundMoney(input.lines.reduce((sum, line) => sum + line.credit, 0));
   const generatedAt = format(new Date(), 'd-MMM-yyyy h:mm a');
   const periodLabel = `${tallyDate(input.fromDate)} to ${tallyDate(input.toDate)}`;
   const openingCells = openingBalanceCells(input.partyType, input.openingBalance);
+  const company = (await getBusinessName()).trim() || 'Hisab';
 
   const rows = input.lines
     .map((line) => {
@@ -238,7 +241,7 @@ export function buildPartyStatementHtml(input: PartyStatementPdfInput): string {
   </style>
 </head>
 <body>
-  <div class="company">Hisab</div>
+  <div class="company">${escapeHtml(company)}</div>
   <div class="report-title">Ledger Account</div>
   <div class="ledger-name">${escapeHtml(input.partyName)}</div>
   <div class="period">${escapeHtml(periodLabel)}</div>
@@ -313,7 +316,7 @@ export async function sharePartyStatementPdf(
   input: PartyStatementPdfInput
 ): Promise<{ success: boolean; message: string }> {
   try {
-    const html = buildPartyStatementHtml(input);
+    const html = await buildPartyStatementHtml(input);
     const { uri } = await Print.printToFileAsync({
       html,
       width: 595,
@@ -334,7 +337,7 @@ export async function sharePartyStatementPdf(
       dialogTitle: `Download ${input.partyType === 'customer' ? 'Customer' : 'Vendor'} Ledger PDF`,
       UTI: 'com.adobe.pdf',
     });
-    await FileSystem.deleteAsync(dest, { idempotent: true });
+    deferDeleteCacheFile(dest);
     return { success: true, message: 'PDF ready to save or share.' };
   } catch (error) {
     return {

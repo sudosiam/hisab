@@ -37,6 +37,8 @@ import {
   getCloudUserEmail,
   getLastCloudBackupAt,
   isCloudBackupEnabled,
+  CLOUD_PASSWORD_MIN_SIGN_IN,
+  CLOUD_PASSWORD_MIN_SIGN_UP,
   restoreDatabaseFromCloud,
   setCloudBackupEnabled,
   signInWithEmailPassword,
@@ -762,7 +764,7 @@ export default function BackupSettingsScreen() {
               label="Password"
               value={cloudAuthPassword}
               onChangeText={setCloudAuthPassword}
-              placeholder="At least 6 characters"
+              placeholder={`At least ${CLOUD_PASSWORD_MIN_SIGN_UP} characters (new accounts)`}
               autoCapitalize="none"
               secureTextEntry
               editable={!cloudAuthBusy}
@@ -780,13 +782,19 @@ export default function BackupSettingsScreen() {
                   title="Sign in"
                   onPress={handleCloudSignIn}
                   loading={cloudAuthBusy}
-                  disabled={!cloudAuthEmail.trim() || cloudAuthPassword.length < 6}
+                  disabled={
+                    !cloudAuthEmail.trim() ||
+                    cloudAuthPassword.length < CLOUD_PASSWORD_MIN_SIGN_IN
+                  }
                 />
                 <PrimaryButton
                   title="Create account"
                   onPress={handleCloudSignUp}
                   loading={cloudAuthBusy}
-                  disabled={!cloudAuthEmail.trim() || cloudAuthPassword.length < 6}
+                  disabled={
+                    !cloudAuthEmail.trim() ||
+                    cloudAuthPassword.length < CLOUD_PASSWORD_MIN_SIGN_UP
+                  }
                   variant="secondary"
                 />
               </View>

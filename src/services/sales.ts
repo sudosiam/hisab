@@ -9,7 +9,7 @@ import {
 } from '../db/database';
 import { resolveSaleInvoiceNo, syncNextInvoiceSettingAfterUse } from './invoiceNumbers';
 import { upsertParty } from './parties';
-import { assertGstPlaceOfSupply, computeGstDocument, enforceInvoiceTypeForTax } from './gst';
+import { assertGstPlaceOfSupply, computeGstDocument } from './gst';
 import { getBusinessState, isGstEnabled, isTaxInclusivePricing } from './appSettings';
 import { formatCurrency } from '../utils/format';
 import { addMoney, roundMoney, subMoney } from '../utils/money';
@@ -92,16 +92,16 @@ async function buildSaleGst(
     business_state: businessState,
     party_state: partyState,
   });
-  // Honour explicit invoice_type from UI only when it remains valid with tax.
-  let invoiceType = params.invoice_type
-    ? normalizeInvoiceType(params.invoice_type)
-    : gst.suggested_invoice_type;
-  invoiceType = enforceInvoiceTypeForTax(invoiceType, gst.tax_amount);
+  // Reject explicit BOS + tax before choosing a type (suggested_invoice_type already
+  // maps tax>0 → Tax Invoice when the UI omits invoice_type).
   if (params.invoice_type === 'bos' && gst.tax_amount > 0.009) {
     throw new Error(
       'Bill of Supply cannot include GST. Clear tax rates or switch to Tax Invoice.'
     );
   }
+  const invoiceType = params.invoice_type
+    ? normalizeInvoiceType(params.invoice_type)
+    : gst.suggested_invoice_type;
   return { gst, invoiceType, partyState };
 }
 
