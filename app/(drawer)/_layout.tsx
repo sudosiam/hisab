@@ -37,6 +37,7 @@ export default function DrawerLayout() {
       <Drawer.Screen name="inventory" options={{ title: 'Inventory', ...stackGroup }} />
       <Drawer.Screen name="parties" options={{ title: 'Parties', ...stackGroup }} />
       <Drawer.Screen name="banking" options={{ title: 'Banking', ...stackGroup }} />
+      <Drawer.Screen name="payments" options={{ title: 'Payments', ...stackGroup }} />
       <Drawer.Screen name="expense" options={{ title: 'Expenses', ...stackGroup }} />
       <Drawer.Screen name="others" options={{ title: 'Fixed Assets', ...hidden }} />
       <Drawer.Screen name="balance-sheet" options={{ title: 'Balance Sheet', ...hidden }} />

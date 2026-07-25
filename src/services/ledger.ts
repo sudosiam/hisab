@@ -479,6 +479,66 @@ export async function rebuildGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<
     });
   }
 
+  // Unallocated Receipt/Payment voucher advances (cash already moved via party_receipt/party_payment).
+  const paymentVouchers = await database.getAllAsync<{
+    id: number;
+    voucher_type: string;
+    voucher_no: string;
+    date: string;
+    party_name: string;
+    party_id: number | null;
+    party_type: string;
+    account_id: number | null;
+    unallocated: number;
+  }>(
+    `SELECT v.id, v.voucher_type, v.voucher_no, v.date, v.party_name, v.party_id, v.party_type, v.account_id,
+            COALESCE((
+              SELECT SUM(a.amount) FROM payment_voucher_allocations a
+              WHERE a.voucher_id = v.id
+                AND a.bill_type IN ('advance', 'on_account', 'new_ref')
+                AND a.sale_payment_id IS NULL
+                AND a.purchase_payment_id IS NULL
+            ), 0) as unallocated
+     FROM payment_vouchers v
+     WHERE v.account_id IS NOT NULL`
+  );
+
+  for (const voucher of paymentVouchers) {
+    const unallocated = roundMoney(voucher.unallocated);
+    if (unallocated <= 0.009 || !voucher.account_id) continue;
+    const cashAccount = accounts.get(`cash:${voucher.account_id}`);
+    if (!cashAccount) continue;
+    const partyId = await resolvePartyId(
+      database,
+      voucher.party_name,
+      voucher.party_type === 'vendor' ? 'vendor' : 'customer',
+      voucher.party_id
+    );
+    if (voucher.voucher_type === 'receipt') {
+      await postJournalEntry(database, {
+        date: voucher.date,
+        description: `Receipt ${voucher.voucher_no} (on account)`,
+        referenceType: 'payment_voucher',
+        referenceId: voucher.id,
+        lines: [
+          { ledgerAccountId: cashAccount, debit: unallocated, credit: 0 },
+          { ledgerAccountId: arAccount, partyId, debit: 0, credit: unallocated },
+        ],
+      });
+    } else {
+      await postJournalEntry(database, {
+        date: voucher.date,
+        description: `Payment ${voucher.voucher_no} (on account)`,
+        referenceType: 'payment_voucher',
+        referenceId: voucher.id,
+        lines: [
+          { ledgerAccountId: apAccount, partyId, debit: unallocated, credit: 0 },
+          { ledgerAccountId: cashAccount, debit: 0, credit: unallocated },
+        ],
+      });
+    }
+  }
+
   const expenses = await database.getAllAsync<{
     id: number;
     category: string;

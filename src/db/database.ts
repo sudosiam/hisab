@@ -3,7 +3,7 @@ import { waitForDatabaseAccess } from '../services/dbMaintenance';
 import { roundMoney } from '../utils/money';
 
 export const DB_NAME = 'hisab.db';
-const SCHEMA_VERSION = 25;
+const SCHEMA_VERSION = 26;
 
 /** Removes the legacy attachment media folder left over from the removed attachments feature. */
 async function clearLegacyMediaFolder(): Promise<void> {
@@ -337,6 +337,7 @@ async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Pr
   await ensurePerformanceIndexes(db);
   await ensureLedgerTables(db);
   await ensureGstColumns(db);
+  await ensurePaymentVoucherTables(db);
 
   if (fromVersion < SCHEMA_VERSION) {
     await db.runAsync(
@@ -990,6 +991,60 @@ async function ensureGstColumns(db: SQLite.SQLiteDatabase): Promise<void> {
   `);
 }
 
+async function ensurePaymentVoucherTables(db: SQLite.SQLiteDatabase): Promise<void> {
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS payment_vouchers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      voucher_type TEXT NOT NULL CHECK(voucher_type IN ('receipt', 'payment')),
+      voucher_no TEXT NOT NULL,
+      date TEXT NOT NULL,
+      party_id INTEGER,
+      party_name TEXT NOT NULL,
+      party_type TEXT NOT NULL CHECK(party_type IN ('customer', 'vendor')),
+      account_id INTEGER,
+      amount REAL NOT NULL DEFAULT 0,
+      narration TEXT,
+      instrument_no TEXT,
+      instrument_bank TEXT,
+      payment_mode TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (party_id) REFERENCES parties(id),
+      FOREIGN KEY (account_id) REFERENCES accounts(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS payment_voucher_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      voucher_id INTEGER NOT NULL,
+      ledger_name TEXT NOT NULL,
+      is_party INTEGER NOT NULL DEFAULT 0,
+      is_bank_cash INTEGER NOT NULL DEFAULT 0,
+      amount REAL NOT NULL DEFAULT 0,
+      is_deemed_positive INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (voucher_id) REFERENCES payment_vouchers(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS payment_voucher_allocations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      voucher_id INTEGER NOT NULL,
+      bill_name TEXT NOT NULL,
+      bill_type TEXT NOT NULL CHECK(bill_type IN ('agst_ref', 'new_ref', 'advance', 'on_account')),
+      amount REAL NOT NULL DEFAULT 0,
+      sale_id INTEGER,
+      purchase_id INTEGER,
+      sale_payment_id INTEGER,
+      purchase_payment_id INTEGER,
+      FOREIGN KEY (voucher_id) REFERENCES payment_vouchers(id) ON DELETE CASCADE,
+      FOREIGN KEY (sale_id) REFERENCES sales(id),
+      FOREIGN KEY (purchase_id) REFERENCES purchases(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_payment_vouchers_date ON payment_vouchers(date);
+    CREATE INDEX IF NOT EXISTS idx_payment_vouchers_party ON payment_vouchers(party_name);
+    CREATE INDEX IF NOT EXISTS idx_payment_vouchers_type_no_date
+      ON payment_vouchers(voucher_type, voucher_no, date);
+  `);
+}
+
 async function ensureOtherIncomeTable(db: SQLite.SQLiteDatabase): Promise<void> {
   const table = await db.getFirstAsync<{ name: string }>(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='other_income'`
@@ -1370,6 +1425,15 @@ async function verifySchema(db: SQLite.SQLiteDatabase): Promise<boolean> {
     await db.getFirstAsync('SELECT name FROM expense_categories LIMIT 1');
     await db.getFirstAsync('SELECT name FROM other_income_categories LIMIT 1');
     await db.getFirstAsync('SELECT id FROM journal_entries LIMIT 1');
+    await db.getFirstAsync(
+      'SELECT voucher_type, voucher_no, party_name, amount, account_id FROM payment_vouchers LIMIT 1'
+    );
+    await db.getFirstAsync(
+      'SELECT voucher_id, ledger_name, amount, is_party FROM payment_voucher_lines LIMIT 1'
+    );
+    await db.getFirstAsync(
+      'SELECT voucher_id, bill_name, bill_type, amount FROM payment_voucher_allocations LIMIT 1'
+    );
     return true;
   } catch {
     return false;
@@ -1384,6 +1448,9 @@ async function rebuildSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     DROP TABLE IF EXISTS journal_entries;
     DROP TABLE IF EXISTS ledger_accounts;
     DROP TABLE IF EXISTS attachments;
+    DROP TABLE IF EXISTS payment_voucher_allocations;
+    DROP TABLE IF EXISTS payment_voucher_lines;
+    DROP TABLE IF EXISTS payment_vouchers;
     DROP TABLE IF EXISTS sale_payments;
     DROP TABLE IF EXISTS sale_items;
     DROP TABLE IF EXISTS sales;
@@ -1610,6 +1677,51 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       notes TEXT,
       FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE,
       FOREIGN KEY (account_id) REFERENCES accounts(id)
+    );
+
+    CREATE TABLE payment_vouchers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      voucher_type TEXT NOT NULL CHECK(voucher_type IN ('receipt', 'payment')),
+      voucher_no TEXT NOT NULL,
+      date TEXT NOT NULL,
+      party_id INTEGER,
+      party_name TEXT NOT NULL,
+      party_type TEXT NOT NULL CHECK(party_type IN ('customer', 'vendor')),
+      account_id INTEGER,
+      amount REAL NOT NULL DEFAULT 0,
+      narration TEXT,
+      instrument_no TEXT,
+      instrument_bank TEXT,
+      payment_mode TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (party_id) REFERENCES parties(id),
+      FOREIGN KEY (account_id) REFERENCES accounts(id)
+    );
+
+    CREATE TABLE payment_voucher_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      voucher_id INTEGER NOT NULL,
+      ledger_name TEXT NOT NULL,
+      is_party INTEGER NOT NULL DEFAULT 0,
+      is_bank_cash INTEGER NOT NULL DEFAULT 0,
+      amount REAL NOT NULL DEFAULT 0,
+      is_deemed_positive INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (voucher_id) REFERENCES payment_vouchers(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE payment_voucher_allocations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      voucher_id INTEGER NOT NULL,
+      bill_name TEXT NOT NULL,
+      bill_type TEXT NOT NULL CHECK(bill_type IN ('agst_ref', 'new_ref', 'advance', 'on_account')),
+      amount REAL NOT NULL DEFAULT 0,
+      sale_id INTEGER,
+      purchase_id INTEGER,
+      sale_payment_id INTEGER,
+      purchase_payment_id INTEGER,
+      FOREIGN KEY (voucher_id) REFERENCES payment_vouchers(id) ON DELETE CASCADE,
+      FOREIGN KEY (sale_id) REFERENCES sales(id),
+      FOREIGN KEY (purchase_id) REFERENCES purchases(id)
     );
 
     CREATE TABLE expenses (

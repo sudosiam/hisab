@@ -44,6 +44,13 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Finance',
     items: [
       { label: 'Banking', route: '/banking', icon: 'wallet-outline', activeIcon: 'wallet', match: ['/banking'] },
+      {
+        label: 'Payments',
+        route: '/payments',
+        icon: 'swap-horizontal-outline',
+        activeIcon: 'swap-horizontal',
+        match: ['/payments'],
+      },
       { label: 'Parties', route: '/parties', icon: 'people-outline', activeIcon: 'people', match: ['/parties'] },
       { label: 'Expenses', route: '/expense', icon: 'receipt-outline', activeIcon: 'receipt', match: ['/expense'] },
       {

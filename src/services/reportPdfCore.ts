@@ -309,6 +309,9 @@ export async function shareReportPdf(options: {
   html: string;
   fileName: string;
   dialogTitle: string;
+  /** When set, opens WhatsApp on this number with PDF + message. */
+  whatsappPhone?: string | null;
+  whatsappMessage?: string | null;
 }): Promise<{ success: boolean; message: string }> {
   try {
     const { uri } = await Print.printToFileAsync({
@@ -318,6 +321,18 @@ export async function shareReportPdf(options: {
     });
     const dest = `${FileSystem.cacheDirectory}${options.fileName}`;
     await FileSystem.copyAsync({ from: uri, to: dest });
+
+    if (options.whatsappPhone?.trim() && options.whatsappMessage?.trim()) {
+      const { sharePdfToWhatsApp } = await import('../utils/whatsappShare');
+      await sharePdfToWhatsApp({
+        fileUri: dest,
+        phone: options.whatsappPhone,
+        message: options.whatsappMessage,
+        title: options.dialogTitle,
+      });
+      deferDeleteCacheFile(dest);
+      return { success: true, message: 'Opened WhatsApp with PDF.' };
+    }
 
     if (!(await Sharing.isAvailableAsync())) {
       await FileSystem.deleteAsync(dest, { idempotent: true });

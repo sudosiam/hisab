@@ -1,7 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { Linking, Platform, Share } from 'react-native';
 import { getBusinessProfile } from './appSettings';
 import { getSaleById, getSaleItems } from './sales';
 import { getPartyById } from './parties';
@@ -10,6 +9,8 @@ import { formatDisplayDate } from '../utils/date';
 import { stateName } from './gst';
 import { APP_VERSION } from '../constants/appVersion';
 import { roundMoney } from '../utils/money';
+import { deferDeleteCacheFile } from '../utils/tempShareFiles';
+import { sharePdfToWhatsApp } from '../utils/whatsappShare';
 import { buildUpiQrDataUri } from '../utils/upiQr';
 
 function escapeHtml(text: string): string {
@@ -395,7 +396,18 @@ async function writeInvoicePdfFile(saleId: number): Promise<{
 }
 
 export async function shareSaleInvoicePdf(saleId: number): Promise<void> {
-  const { dest, docLabel } = await writeInvoicePdfFile(saleId);
+  const { dest, docLabel, message, partyPhone } = await writeInvoicePdfFile(saleId);
+  // When the customer has a phone, open WhatsApp with PDF + message on their chat.
+  if (partyPhone?.trim()) {
+    await sharePdfToWhatsApp({
+      fileUri: dest,
+      phone: partyPhone,
+      message,
+      title: `Share ${docLabel}`,
+    });
+    deferDeleteCacheFile(dest);
+    return;
+  }
   if (!(await Sharing.isAvailableAsync())) {
     throw new Error('Sharing is not available on this device');
   }
@@ -404,6 +416,7 @@ export async function shareSaleInvoicePdf(saleId: number): Promise<void> {
     dialogTitle: `Share ${docLabel}`,
     UTI: 'com.adobe.pdf',
   });
+  deferDeleteCacheFile(dest);
 }
 
 export async function previewSaleInvoicePdf(saleId: number): Promise<void> {
@@ -411,49 +424,16 @@ export async function previewSaleInvoicePdf(saleId: number): Promise<void> {
   await Print.printAsync({ html });
 }
 
-function normalizeWhatsAppPhone(phone: string): string | null {
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length < 10) return null;
-  if (digits.length === 10) return `91${digits}`;
-  return digits;
-}
-
 /**
- * Share invoice PDF with WhatsApp message.
- * Prefer PDF share sheet (attachment); include message as dialog title / Share payload.
+ * Open WhatsApp on the customer's number with invoice PDF attached and message filled.
  */
 export async function shareSaleInvoiceWhatsApp(saleId: number): Promise<void> {
   const { dest, docLabel, message, partyPhone } = await writeInvoicePdfFile(saleId);
-  const fileUrl = dest.startsWith('file://') ? dest : `file://${dest}`;
-
-  // iOS: message + file URL often arrives together in WhatsApp.
-  if (Platform.OS === 'ios') {
-    try {
-      const result = await Share.share({ message, url: fileUrl, title: docLabel });
-      if (result.action !== Share.dismissedAction) return;
-    } catch {
-      // Fall through.
-    }
-  }
-
-  // Android & fallback: share the PDF file (actual attachment). Message is in dialog title.
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(dest, {
-      mimeType: 'application/pdf',
-      dialogTitle: message.slice(0, 100) || `Share ${docLabel}`,
-      UTI: 'com.adobe.pdf',
-    });
-    return;
-  }
-
-  const waPhone = normalizeWhatsAppPhone(partyPhone);
-  if (waPhone) {
-    const url = `https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`;
-    if (await Linking.canOpenURL(url)) {
-      await Linking.openURL(url);
-      return;
-    }
-  }
-
-  throw new Error('Could not share invoice to WhatsApp');
+  await sharePdfToWhatsApp({
+    fileUri: dest,
+    phone: partyPhone,
+    message,
+    title: `Share ${docLabel}`,
+  });
+  deferDeleteCacheFile(dest);
 }

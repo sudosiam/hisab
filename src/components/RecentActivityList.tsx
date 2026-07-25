@@ -24,10 +24,12 @@ function ActivityRow({
   item,
   isLast,
   styles,
+  amountsHidden,
 }: {
   item: ActivityItem;
   isLast: boolean;
   styles: ReturnType<typeof createStyles>;
+  amountsHidden?: boolean;
 }) {
   const router = useRouter();
   return (
@@ -45,7 +47,13 @@ function ActivityRow({
         </Text>
       </View>
       <View style={styles.amountCol}>
-        <MoneyText amount={item.amount} size="md" style={{ width: '100%' }} lines={1} />
+        <MoneyText
+          amount={item.amount}
+          size="md"
+          style={{ width: '100%' }}
+          lines={1}
+          blurred={amountsHidden}
+        />
       </View>
     </TouchableOpacity>
   );
@@ -55,9 +63,12 @@ function ActivityRow({
 export function RecentActivityList({
   items,
   grouped,
+  amountsHidden = false,
 }: {
   items?: ActivityItem[];
   grouped?: GroupedRecentActivity;
+  /** Blur amounts for privacy (dashboard hide-amounts). */
+  amountsHidden?: boolean;
 }) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
@@ -83,6 +94,7 @@ export function RecentActivityList({
                   item={item}
                   isLast={index === sectionItems.length - 1}
                   styles={styles}
+                  amountsHidden={amountsHidden}
                 />
               ))}
             </View>
@@ -105,6 +117,7 @@ export function RecentActivityList({
           item={item}
           isLast={index === list.length - 1}
           styles={styles}
+          amountsHidden={amountsHidden}
         />
       ))}
     </View>

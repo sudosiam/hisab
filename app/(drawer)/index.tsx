@@ -1,5 +1,6 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, ScrollView, RefreshControl, ActivityIndicator, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { formatSqliteError } from '../../src/db/database';
 import { StatCard } from '../../src/components/StatCard';
@@ -23,6 +24,8 @@ import { spacing } from '../../src/constants/theme';
 import type { GroupedRecentActivity } from '../../src/services/activity';
 import type { DashboardStats } from '../../src/types';
 
+const AMOUNTS_HIDDEN_KEY = '@hisab/dashboard_amounts_hidden';
+
 export default function DashboardScreen() {
   const router = useRouter();
   const { refreshKey } = useDatabase();
@@ -36,6 +39,21 @@ export default function DashboardScreen() {
     expenses: [],
   });
   const [refreshing, setRefreshing] = useState(false);
+  const [amountsHidden, setAmountsHidden] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem(AMOUNTS_HIDDEN_KEY).then((stored) => {
+      if (stored === '1') setAmountsHidden(true);
+    });
+  }, []);
+
+  const toggleAmountsHidden = useCallback(() => {
+    setAmountsHidden((prev) => {
+      const next = !prev;
+      AsyncStorage.setItem(AMOUNTS_HIDDEN_KEY, next ? '1' : '0');
+      return next;
+    });
+  }, []);
 
   const load = useCallback(async () => {
     const [data, recent] = await Promise.all([
@@ -83,6 +101,8 @@ export default function DashboardScreen() {
       {stats ? (
         <FinanceHero
           stats={stats}
+          amountsHidden={amountsHidden}
+          onToggleAmountsHidden={toggleAmountsHidden}
           onNetWorthPress={() => router.push('/(drawer)/balance-sheet')}
           onCashPress={() => router.push('/(drawer)/banking' as never)}
           onReceivablePress={() => router.push('/(drawer)/reports/receivables' as never)}
@@ -99,31 +119,35 @@ export default function DashboardScreen() {
           value={stats?.sold ?? 0}
           color={colors.text}
           onPress={() => router.push('/(drawer)/sales' as never)}
+          blurred={amountsHidden}
         />
         <StatCard
           label="Purchased"
           value={stats?.purchased ?? 0}
           color={colors.warning}
           onPress={() => router.push('/(drawer)/purchases' as never)}
+          blurred={amountsHidden}
         />
         <StatCard
           label="Other Income"
           value={stats?.otherIncome ?? 0}
           color={colors.success}
           onPress={() => router.push('/(drawer)/other-income' as never)}
+          blurred={amountsHidden}
         />
         <StatCard
           label="Expenses"
           value={stats?.expense ?? 0}
           color={colors.danger}
           onPress={() => router.push('/(drawer)/expense' as never)}
+          blurred={amountsHidden}
         />
       </View>
 
       <DashboardShortcuts />
 
       <SectionHeader title="Recent activity" />
-      <RecentActivityList grouped={activities} />
+      <RecentActivityList grouped={activities} amountsHidden={amountsHidden} />
     </ScrollView>
   );
 }

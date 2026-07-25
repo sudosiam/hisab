@@ -268,6 +268,24 @@ export default function SaleDetailScreen() {
   const handleWhatsApp = useCallback(async () => {
     if (!sale) return;
     try {
+      if (sale.party_id) {
+        const { getPartyById } = await import('../../../src/services/parties');
+        const { normalizeWhatsAppPhone } = await import('../../../src/utils/whatsappShare');
+        const party = await getPartyById(sale.party_id);
+        if (!normalizeWhatsAppPhone(party?.phone)) {
+          const proceed = await new Promise<boolean>((resolve) => {
+            Alert.alert(
+              'No WhatsApp number',
+              'Add this customer\'s phone on Parties to open their chat automatically. Share to WhatsApp anyway?',
+              [
+                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Share', onPress: () => resolve(true) },
+              ]
+            );
+          });
+          if (!proceed) return;
+        }
+      }
       const { shareSaleInvoiceWhatsApp } = await import('../../../src/services/saleInvoicePdf');
       await shareSaleInvoiceWhatsApp(sale.id);
     } catch (e) {

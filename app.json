@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hisab",
     "slug": "hisab",
-    "version": "10.3.0",
+    "version": "10.4.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "hisab",
@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hisab.app",
-      "buildNumber": "33"
+      "buildNumber": "34"
     },
     "android": {
       "adaptiveIcon": {
@@ -27,7 +27,7 @@
         "backgroundImage": "./assets/android-icon-background.png"
       },
       "package": "com.hisab.app",
-      "versionCode": 33,
+      "versionCode": 34,
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -58,7 +58,22 @@
         }
       ],
       "expo-asset",
-      "expo-background-task"
+      "expo-background-task",
+      [
+        "react-native-share",
+        {
+          "ios": [
+            "whatsapp",
+            "whatsapp-business"
+          ],
+          "android": [
+            "com.whatsapp",
+            "com.whatsapp.w4b"
+          ],
+          "enableBase64ShareAndroid": false
+        }
+      ],
+      "expo-build-properties"
     ],
     "experiments": {
       "typedRoutes": true

@@ -39,7 +39,18 @@ export async function getPartiesWithSummary(): Promise<PartyWithSummary[]> {
   const customers = await db.getAllAsync<PartyWithSummary>(`
     SELECT p.*,
       COUNT(s.id) as invoice_count,
-      COALESCE(SUM(CASE WHEN s.total_amount - s.paid_amount > 0.01 THEN s.total_amount - s.paid_amount ELSE 0 END), 0) as balance_due,
+      MAX(0,
+        COALESCE(SUM(CASE WHEN s.total_amount - s.paid_amount > 0.01 THEN s.total_amount - s.paid_amount ELSE 0 END), 0)
+        - COALESCE((
+            SELECT SUM(a.amount) FROM payment_voucher_allocations a
+            JOIN payment_vouchers v ON v.id = a.voucher_id
+            WHERE v.party_name = p.name COLLATE NOCASE
+              AND v.party_type = 'customer'
+              AND v.voucher_type = 'receipt'
+              AND a.bill_type IN ('advance', 'on_account', 'new_ref')
+              AND a.sale_payment_id IS NULL
+          ), 0)
+      ) as balance_due,
       MAX(s.date) as last_activity
     FROM parties p
     LEFT JOIN sales s ON s.party_id = p.id OR (s.party_id IS NULL AND s.party_name = p.name COLLATE NOCASE)
@@ -49,7 +60,18 @@ export async function getPartiesWithSummary(): Promise<PartyWithSummary[]> {
   const vendors = await db.getAllAsync<PartyWithSummary>(`
     SELECT p.*,
       COUNT(pu.id) as invoice_count,
-      COALESCE(SUM(CASE WHEN pu.total_amount - pu.paid_amount > 0.01 THEN pu.total_amount - pu.paid_amount ELSE 0 END), 0) as balance_due,
+      MAX(0,
+        COALESCE(SUM(CASE WHEN pu.total_amount - pu.paid_amount > 0.01 THEN pu.total_amount - pu.paid_amount ELSE 0 END), 0)
+        - COALESCE((
+            SELECT SUM(a.amount) FROM payment_voucher_allocations a
+            JOIN payment_vouchers v ON v.id = a.voucher_id
+            WHERE v.party_name = p.name COLLATE NOCASE
+              AND v.party_type = 'vendor'
+              AND v.voucher_type = 'payment'
+              AND a.bill_type IN ('advance', 'on_account', 'new_ref')
+              AND a.purchase_payment_id IS NULL
+          ), 0)
+      ) as balance_due,
       MAX(pu.date) as last_activity
     FROM parties p
     LEFT JOIN purchases pu ON pu.party_id = p.id OR (pu.party_id IS NULL AND pu.supplier_name = p.name COLLATE NOCASE)
@@ -83,12 +105,15 @@ export async function getPartySummary(partyId: number): Promise<PartySummary | n
        FROM sales WHERE party_id = ? OR (party_id IS NULL AND party_name = ? COLLATE NOCASE)`,
       [party.id, party.name]
     );
+    const { getPartyUnallocatedPaymentCredit } = await import('./paymentVouchers');
+    const advance = await getPartyUnallocatedPaymentCredit(party.name, 'customer');
+    const due = Math.max(0, roundMoney((stats?.due ?? 0) - advance));
     return {
       party,
       invoiceCount: stats?.count ?? 0,
       totalBilled: stats?.billed ?? 0,
       totalPaid: stats?.paid ?? 0,
-      balanceDue: stats?.due ?? 0,
+      balanceDue: due,
       lastActivityDate: stats?.last_date ?? null,
     };
   }
@@ -108,12 +133,14 @@ export async function getPartySummary(partyId: number): Promise<PartySummary | n
      FROM purchases WHERE party_id = ? OR (party_id IS NULL AND supplier_name = ? COLLATE NOCASE)`,
     [party.id, party.name]
   );
+  const { getPartyUnallocatedPaymentCredit } = await import('./paymentVouchers');
+  const advance = await getPartyUnallocatedPaymentCredit(party.name, 'vendor');
   return {
     party,
     invoiceCount: stats?.count ?? 0,
     totalBilled: stats?.billed ?? 0,
     totalPaid: stats?.paid ?? 0,
-    balanceDue: stats?.due ?? 0,
+    balanceDue: Math.max(0, roundMoney((stats?.due ?? 0) - advance)),
     lastActivityDate: stats?.last_date ?? null,
   };
 }

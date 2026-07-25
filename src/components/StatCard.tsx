@@ -14,9 +14,20 @@ interface Props {
   subtitle?: string;
   onPress?: () => void;
   style?: import('react-native').ViewStyle;
+  /** Blur the value for privacy (dashboard hide-amounts). */
+  blurred?: boolean;
 }
 
-export function StatCard({ label, value, displayValue, color, subtitle, onPress, style }: Props) {
+export function StatCard({
+  label,
+  value,
+  displayValue,
+  color,
+  subtitle,
+  onPress,
+  style,
+  blurred = false,
+}: Props) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const accent = color ?? colors.primary;
@@ -33,6 +44,7 @@ export function StatCard({ label, value, displayValue, color, subtitle, onPress,
         color={accent}
         style={{ width: '100%', textAlign: 'left' }}
         lines={2}
+        blurred={blurred}
       />
       {subtitle ? (
         <Text style={styles.subtitle} numberOfLines={2}>

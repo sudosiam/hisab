@@ -13,6 +13,13 @@ const SIZE_STYLES: Record<MoneyTextSize, TextStyle> = {
   hero: { ...typography.display, fontSize: 20 },
 };
 
+const HIDDEN_MASK: Record<MoneyTextSize, string> = {
+  sm: '••••',
+  md: '••••••',
+  lg: '••••••',
+  hero: '••••••••',
+};
+
 const styles = StyleSheet.create({
   base: {
     fontVariant: ['tabular-nums'],
@@ -32,6 +39,8 @@ interface MoneyTextProps {
    */
   lines?: 1 | 2;
   minimumFontScale?: number;
+  /** When true, amount is replaced with a privacy mask. */
+  blurred?: boolean;
 }
 
 /**
@@ -46,21 +55,25 @@ export function MoneyText({
   style,
   lines = 2,
   minimumFontScale = 0.5,
+  blurred = false,
 }: MoneyTextProps) {
   const { colors } = useTheme();
-  const value = text ?? formatCurrency(amount);
+  const value = blurred ? HIDDEN_MASK[size] : (text ?? formatCurrency(amount));
+  const ink = color ?? colors.text;
 
   return (
     <Text
       style={[
         styles.base,
         SIZE_STYLES[size],
-        { color: color ?? colors.text, textAlign: 'right' },
+        { color: ink, textAlign: 'right' },
         style,
+        blurred ? { letterSpacing: 1.5, opacity: 0.45 } : null,
       ]}
       numberOfLines={lines}
-      adjustsFontSizeToFit
+      adjustsFontSizeToFit={!blurred}
       minimumFontScale={minimumFontScale}
+      accessibilityLabel={blurred ? 'Amount hidden' : undefined}
     >
       {value}
     </Text>

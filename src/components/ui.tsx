@@ -245,6 +245,8 @@ function createButtonStyles(colors: ThemeColors, _isDark: boolean) {
 
 export function FinanceHero({
   stats,
+  amountsHidden = false,
+  onToggleAmountsHidden,
   onNetWorthPress,
   onCashPress,
   onReceivablePress,
@@ -252,6 +254,8 @@ export function FinanceHero({
   onInventoryPress,
 }: {
   stats: DashboardStats;
+  amountsHidden?: boolean;
+  onToggleAmountsHidden?: () => void;
   onNetWorthPress?: () => void;
   onCashPress?: () => void;
   onReceivablePress?: () => void;
@@ -278,10 +282,21 @@ export function FinanceHero({
           borderBottomColor: colors.borderLight,
         },
         heroBlock: { flex: 1, minWidth: 0 },
+        heroLabelRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: spacing.xs,
+        },
         heroLabel: {
           ...typography.section,
           color: colors.textSecondary,
           textTransform: 'uppercase',
+          flexShrink: 1,
+        },
+        eyeBtn: {
+          padding: 2,
+          marginRight: -2,
         },
         heroValue: {
           marginTop: spacing.xs,
@@ -331,23 +346,52 @@ export function FinanceHero({
             size="hero"
             color={netProfitColor}
             style={[styles.heroValue, { width: '100%' }]}
+            blurred={amountsHidden}
           />
           <Text style={styles.heroSub} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
-            Gross {formatCurrency(stats.grossProfit)}
+            Gross{' '}
+            {amountsHidden ? (
+              <Text style={{ letterSpacing: 1.5, opacity: 0.45 }}>••••••</Text>
+            ) : (
+              formatCurrency(stats.grossProfit)
+            )}
           </Text>
         </View>
-        <TouchableOpacity
-          style={styles.heroBlock}
-          onPress={onNetWorthPress}
-          disabled={!onNetWorthPress}
-          activeOpacity={onNetWorthPress ? 0.75 : 1}
-          accessibilityRole={onNetWorthPress ? 'button' : undefined}
-          accessibilityLabel="View balance sheet"
-        >
-          <Text style={styles.heroLabel}>Net Worth</Text>
-          <MoneyText amount={stats.netWorth} size="hero" style={[styles.heroValue, { width: '100%' }]} />
-          <Text style={styles.heroSub}>Balance sheet</Text>
-        </TouchableOpacity>
+        <View style={styles.heroBlock}>
+          <View style={styles.heroLabelRow}>
+            <Text style={styles.heroLabel}>Net Worth</Text>
+            {onToggleAmountsHidden ? (
+              <TouchableOpacity
+                style={styles.eyeBtn}
+                onPress={onToggleAmountsHidden}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityRole="button"
+                accessibilityLabel={amountsHidden ? 'Show amounts' : 'Hide amounts'}
+              >
+                <Ionicons
+                  name={amountsHidden ? 'eye-off-outline' : 'eye-outline'}
+                  size={18}
+                  color={colors.textSecondary}
+                />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          <TouchableOpacity
+            onPress={onNetWorthPress}
+            disabled={!onNetWorthPress}
+            activeOpacity={onNetWorthPress ? 0.75 : 1}
+            accessibilityRole={onNetWorthPress ? 'button' : undefined}
+            accessibilityLabel="View balance sheet"
+          >
+            <MoneyText
+              amount={stats.netWorth}
+              size="hero"
+              style={[styles.heroValue, { width: '100%' }]}
+              blurred={amountsHidden}
+            />
+            <Text style={styles.heroSub}>Balance sheet</Text>
+          </TouchableOpacity>
+        </View>
       </View>
       <View style={styles.chipRow}>
         <TouchableOpacity
@@ -359,7 +403,12 @@ export function FinanceHero({
           accessibilityLabel="View banking"
         >
           <Text style={styles.chipLabel}>Cash & Bank</Text>
-          <MoneyText amount={stats.totalLiquid} size="md" style={[styles.chipValue, { width: '100%', textAlign: 'left' }]} />
+          <MoneyText
+            amount={stats.totalLiquid}
+            size="md"
+            style={[styles.chipValue, { width: '100%', textAlign: 'left' }]}
+            blurred={amountsHidden}
+          />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.chip}
@@ -375,6 +424,7 @@ export function FinanceHero({
             size="md"
             color={colors.danger}
             style={[styles.chipValue, { width: '100%', textAlign: 'left' }]}
+            blurred={amountsHidden}
           />
         </TouchableOpacity>
         <TouchableOpacity
@@ -391,6 +441,7 @@ export function FinanceHero({
             size="md"
             color={colors.warning}
             style={[styles.chipValue, { width: '100%', textAlign: 'left' }]}
+            blurred={amountsHidden}
           />
         </TouchableOpacity>
         <TouchableOpacity
@@ -406,6 +457,7 @@ export function FinanceHero({
             amount={stats.inventoryValue}
             size="md"
             style={[styles.chipValue, { width: '100%', textAlign: 'left' }]}
+            blurred={amountsHidden}
           />
         </TouchableOpacity>
       </View>
@@ -1028,8 +1080,8 @@ const FINANCE_SHORTCUTS: ShortcutItem[] = [
 const OPS_SHORTCUTS: ShortcutItem[] = [
   { label: 'New Sale', route: '/(drawer)/sales/new', icon: 'cart-outline' },
   { label: 'Purchase', route: '/(drawer)/purchases/new', icon: 'bag-handle-outline' },
+  { label: 'Payment', route: '/(drawer)/payments/new', icon: 'swap-horizontal-outline' },
   { label: 'Expense', route: '/(drawer)/expense/new', icon: 'receipt-outline' },
-  { label: 'Reports', route: '/(drawer)/reports', icon: 'bar-chart-outline' },
 ];
 
 function ShortcutRow({

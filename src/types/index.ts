@@ -1,6 +1,7 @@
 export type PaymentStatus = 'paid' | 'partial' | 'unpaid';
 export type SaleInvoiceType = 'invoice' | 'bos';
 export type AccountType = 'cash' | 'bank';
+export type PartyType = 'customer' | 'vendor';
 export type MovementType = 'opening' | 'purchase' | 'sale' | 'adjustment';
 export type TransactionType =
   | 'sale_payment'
@@ -11,7 +12,51 @@ export type TransactionType =
   | 'deposit'
   | 'withdrawal'
   | 'opening'
-  | 'adjustment';
+  | 'adjustment'
+  | 'party_receipt'
+  | 'party_payment';
+
+export type PaymentVoucherType = 'receipt' | 'payment';
+export type PaymentBillType = 'agst_ref' | 'new_ref' | 'advance' | 'on_account';
+
+export interface PaymentVoucher {
+  id: number;
+  voucher_type: PaymentVoucherType;
+  voucher_no: string;
+  date: string;
+  party_id: number | null;
+  party_name: string;
+  party_type: PartyType;
+  account_id: number | null;
+  amount: number;
+  narration: string | null;
+  instrument_no: string | null;
+  instrument_bank: string | null;
+  payment_mode: string | null;
+  created_at: string;
+}
+
+export interface PaymentVoucherLine {
+  id: number;
+  voucher_id: number;
+  ledger_name: string;
+  is_party: number;
+  is_bank_cash: number;
+  amount: number;
+  is_deemed_positive: number;
+}
+
+export interface PaymentVoucherAllocation {
+  id: number;
+  voucher_id: number;
+  bill_name: string;
+  bill_type: PaymentBillType;
+  amount: number;
+  sale_id: number | null;
+  purchase_id: number | null;
+  sale_payment_id: number | null;
+  purchase_payment_id: number | null;
+}
 
 export interface Account {
   id: number;
@@ -249,8 +294,6 @@ export interface Loan {
   notes: string | null;
   created_at: string;
 }
-
-export type PartyType = 'customer' | 'vendor';
 
 export interface Party {
   id: number;
