@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, ScrollView, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenTitle, ThemeOption, useScreenStyles } from '../../../src/components/ui';
@@ -8,6 +8,8 @@ import type { ThemeMode } from '../../../src/constants/theme';
 import { APP_VERSION } from '../../../src/constants/appVersion';
 import { SettingsNavCard, useSettingsStyles } from '../../../src/components/settings/settingsUi';
 import { checkDownloadAndReload } from '../../../src/services/appUpdates';
+import { isHapticsEnabled, setHapticsEnabled } from '../../../src/services/appSettings';
+import { setHapticsEnabledCache } from '../../../src/utils/haptics';
 
 const SETTINGS_ITEMS = [
   {
@@ -54,8 +56,25 @@ export default function SettingsIndexScreen() {
   const localStyles = useSettingsStyles();
   const { colors, themeMode, setThemeMode } = useTheme();
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [hapticsOn, setHapticsOn] = useState(true);
+
+  useEffect(() => {
+    void isHapticsEnabled().then((enabled) => {
+      setHapticsOn(enabled);
+      setHapticsEnabledCache(enabled);
+    });
+  }, []);
 
   const setMode = (mode: ThemeMode) => setThemeMode(mode);
+
+  const toggleHaptics = (enabled: boolean) => {
+    setHapticsOn(enabled);
+    setHapticsEnabledCache(enabled);
+    void setHapticsEnabled(enabled).catch(() => {
+      setHapticsOn(!enabled);
+      setHapticsEnabledCache(!enabled);
+    });
+  };
 
   const onCheckUpdate = async () => {
     if (checkingUpdate) return;
@@ -78,6 +97,26 @@ export default function SettingsIndexScreen() {
           <ThemeOption label="Light" selected={themeMode === 'light'} onPress={() => setMode('light')} />
           <ThemeOption label="Dark" selected={themeMode === 'dark'} onPress={() => setMode('dark')} />
           <ThemeOption label="System" selected={themeMode === 'system'} onPress={() => setMode('system')} />
+        </View>
+        <View
+          style={{
+            marginTop: 16,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={localStyles.rowLabel}>Haptic feedback</Text>
+            <Text style={localStyles.rowMeta}>Light vibration on saves and FABs</Text>
+          </View>
+          <Switch
+            value={hapticsOn}
+            onValueChange={toggleHaptics}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            thumbColor={colors.surface}
+          />
         </View>
       </View>
 

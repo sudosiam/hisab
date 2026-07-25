@@ -2,7 +2,13 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import { View, Text, StyleSheet, AppState, Alert, InteractionManager, Modal, Pressable, TouchableOpacity } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { AppBootScreen } from '../components/AppBootScreen';
-import { getDatabase, resetDatabase, invalidateDatabase, formatSqliteError } from '../db/database';
+import {
+  getDatabase,
+  resetDatabase,
+  invalidateDatabase,
+  formatSqliteError,
+  repairFinancialDataIntegrity,
+} from '../db/database';
 import { ensureLedgerUpToDate } from '../services/ledger';
 import {
   backupOnBackground,
@@ -162,6 +168,10 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
 
     const ledgerTask = InteractionManager.runAfterInteractions(() => {
       ensureLedgerUpToDate().catch(() => {});
+      // Heavy integrity repair after first paint — once per schema version.
+      void repairFinancialDataIntegrity(undefined, { force: false, rebuildLedger: false }).catch(
+        () => {}
+      );
     });
 
     const recurringTimer = setTimeout(() => {

@@ -136,7 +136,11 @@ export async function updateOpeningBalance(accountId: number, newOpening: number
       if (opening === 0) {
         await db.runAsync('DELETE FROM transactions WHERE id = ?', [tx.id]);
       } else {
-        await db.runAsync('UPDATE transactions SET amount = ? WHERE id = ?', [opening, tx.id]);
+        await db.runAsync('UPDATE transactions SET amount = ?, date = ? WHERE id = ?', [
+          opening,
+          todayISO(),
+          tx.id,
+        ]);
       }
     } else if (opening !== 0) {
       await db.runAsync(
@@ -450,8 +454,10 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
     `SELECT COALESCE(SUM(current_balance), 0) as total FROM accounts WHERE ${ACTIVE_ACCOUNT_SQL}`
   );
 
+  // Clamp qty at 0 so negative stock (oversell) does not invent negative assets.
   const inventory = await db.getFirstAsync<{ total: number }>(
-    'SELECT COALESCE(SUM(current_qty * avg_cost), 0) as total FROM products WHERE COALESCE(is_hidden, 0) = 0'
+    `SELECT COALESCE(SUM(CASE WHEN current_qty > 0 THEN current_qty * avg_cost ELSE 0 END), 0) as total
+     FROM products WHERE COALESCE(is_hidden, 0) = 0`
   );
 
   const receivables = await db.getFirstAsync<{ total: number }>(
@@ -896,10 +902,19 @@ const LAST_RECURRING_PROCESS_KEY = 'last_recurring_process_date';
 const MAX_RECURRING_PER_RUN = 24;
 
 /** Generate due recurring expense entries that have not yet been created. */
+/**
+ * Posts due recurring expense instances using the device-local calendar day (`todayISO`).
+ * Duplicate rows for the same category/description/amount/account/date are skipped.
+ * If the device clock moves backward, we do not re-process earlier days.
+ */
 export async function processRecurringExpenses(): Promise<number> {
   const today = todayISO();
   const lastRun = await AsyncStorage.getItem(LAST_RECURRING_PROCESS_KEY);
   if (lastRun === today) {
+    return 0;
+  }
+  // Device date went backward — wait until local date catches up; do not re-post.
+  if (lastRun && lastRun > today) {
     return 0;
   }
 

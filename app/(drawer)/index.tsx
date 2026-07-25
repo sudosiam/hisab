@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, ScrollView, RefreshControl, ActivityIndicator, Alert } from 'react-native';
+import { View, ScrollView, RefreshControl, Alert } from 'react-native';
+import { DashboardSkeleton } from '../../src/components/Skeleton';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { formatSqliteError } from '../../src/db/database';
@@ -32,6 +33,7 @@ export default function DashboardScreen() {
   const { colors } = useTheme();
   const styles = useScreenStyles();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
+  const [debouncedRefreshKey, setDebouncedRefreshKey] = useState(refreshKey);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [activities, setActivities] = useState<GroupedRecentActivity>({
     sales: [],
@@ -46,6 +48,12 @@ export default function DashboardScreen() {
       if (stored === '1') setAmountsHidden(true);
     });
   }, []);
+
+  // Coalesce rapid DB writes so the dashboard does not flash on every save.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedRefreshKey(refreshKey), 250);
+    return () => clearTimeout(timer);
+  }, [refreshKey]);
 
   const toggleAmountsHidden = useCallback(() => {
     setAmountsHidden((prev) => {
@@ -64,18 +72,14 @@ export default function DashboardScreen() {
     setActivities(recent);
   }, [monthKey]);
 
-  const { booting, error, retry } = useFocusRefresh(load, [refreshKey, monthKey]);
+  const { booting, error, retry } = useFocusRefresh(load, [debouncedRefreshKey, monthKey]);
 
   if (error) {
     return <ErrorState message={error} onRetry={retry} />;
   }
 
   if (booting && !stats) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <DashboardSkeleton />;
   }
 
   return (

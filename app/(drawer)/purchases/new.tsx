@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useDeferredValue, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -240,14 +240,24 @@ export default function NewPurchaseScreen() {
           );
           setItems(
             validItems.length
-              ? validItems.map((i) => ({
-                  key: i.key || `purchase-item-${Date.now()}-${++lineItemCounter}`,
-                  product_id: i.product_id,
-                  qty: i.qty || '1',
-                  unit_cost: i.unit_cost || '',
-                  gst_rate: i.gst_rate ?? '',
-                  hsn_sac: i.hsn_sac ?? '',
-                }))
+              ? (() => {
+                  const seen = new Set<string>();
+                  return validItems.map((i) => {
+                    let key = i.key || `purchase-item-${Date.now()}-${++lineItemCounter}`;
+                    while (seen.has(key)) {
+                      key = `purchase-item-${Date.now()}-${++lineItemCounter}`;
+                    }
+                    seen.add(key);
+                    return {
+                      key,
+                      product_id: i.product_id,
+                      qty: i.qty || '1',
+                      unit_cost: i.unit_cost || '',
+                      gst_rate: i.gst_rate ?? '',
+                      hsn_sac: i.hsn_sac ?? '',
+                    };
+                  });
+                })()
               : [createEmptyLineItem()]
           );
           setPayments(draft.payments || []);
@@ -310,17 +320,19 @@ export default function NewPurchaseScreen() {
   }, [supplierName]);
 
   const discountAmount = roundMoney(Math.max(0, parseAmountInput(discount) || 0));
+  const deferredItems = useDeferredValue(items);
+  const deferredDiscount = useDeferredValue(discountAmount);
 
   const gstDoc = useMemo(() => {
     try {
       return computeGstDocument({
-        lines: items.map((item) => ({
+        lines: deferredItems.map((item) => ({
           qty: parseAmountInput(item.qty) || 0,
           unit_price: parseAmountInput(item.unit_cost) || 0,
           gst_rate: parseAmountInput(item.gst_rate) || 0,
           hsn_sac: item.hsn_sac.trim() || null,
         })),
-        discount_amount: discountAmount,
+        discount_amount: deferredDiscount,
         business_state: businessState || null,
         party_state: partyState,
         gst_enabled: gstEnabled,
@@ -329,7 +341,7 @@ export default function NewPurchaseScreen() {
     } catch {
       return null;
     }
-  }, [items, discountAmount, businessState, partyState, gstEnabled, taxInclusive]);
+  }, [deferredItems, deferredDiscount, businessState, partyState, gstEnabled, taxInclusive]);
 
   const subtotal = gstDoc?.subtotal ?? 0;
   const total = gstDoc?.total_amount ?? 0;

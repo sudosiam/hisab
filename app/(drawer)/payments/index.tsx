@@ -3,13 +3,13 @@ import {
   View,
   Text,
   FlatList,
-  ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { ListItem } from '../../../src/components/ListItem';
 import { MoneyTotalRow } from '../../../src/components/MoneyText';
+import { ListSkeleton } from '../../../src/components/Skeleton';
 import {
   ErrorState,
   Fab,
@@ -186,7 +186,7 @@ export default function PaymentsListScreen() {
       />
 
       {booting && items.length === 0 ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
+        <ListSkeleton />
       ) : (
         <FlatList
           data={filtered}

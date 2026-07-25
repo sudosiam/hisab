@@ -3,7 +3,6 @@ import {
   View,
   Text,
   FlatList,
-  ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -12,6 +11,7 @@ import { getSales } from '../../../src/services/sales';
 import { StatusBadge } from '../../../src/components/StatusBadge';
 import { ListItem } from '../../../src/components/ListItem';
 import { MoneyTotalRow } from '../../../src/components/MoneyText';
+import { ListSkeleton } from '../../../src/components/Skeleton';
 import {
   ErrorState,
   Fab,
@@ -167,7 +167,7 @@ export default function SalesListScreen() {
       />
 
       {booting && sales.length === 0 ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
+        <ListSkeleton />
       ) : (
         <FlatList
           data={filteredSales}

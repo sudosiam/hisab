@@ -19,6 +19,7 @@ const GST_ENABLED_KEY = 'gst_enabled';
 const TAX_INCLUSIVE_KEY = 'tax_inclusive_pricing';
 const UPI_ID_KEY = 'business_upi_id';
 const WHATSAPP_MESSAGE_TEMPLATE_KEY = 'whatsapp_message_template';
+const HAPTICS_ENABLED_KEY = 'haptics_enabled';
 const DEFAULT_FINANCIAL_YEAR_START_MONTH = 4;
 const DEFAULT_SALE_INVOICE_PREFIX = 'S';
 const DEFAULT_BOS_INVOICE_PREFIX = 'BOS';
@@ -268,6 +269,17 @@ export async function setWhatsappMessageTemplate(template: string): Promise<void
     WHATSAPP_MESSAGE_TEMPLATE_KEY,
     cleaned ? cleaned.slice(0, 500) : DEFAULT_WHATSAPP_TEMPLATE
   );
+}
+
+/** Haptic feedback on primary actions — on by default. */
+export async function isHapticsEnabled(): Promise<boolean> {
+  const value = await getSettingValue(HAPTICS_ENABLED_KEY);
+  if (value == null) return true;
+  return value === '1';
+}
+
+export async function setHapticsEnabled(enabled: boolean): Promise<void> {
+  await setSettingValue(HAPTICS_ENABLED_KEY, enabled ? '1' : '0');
 }
 
 export async function getBusinessProfile(): Promise<{

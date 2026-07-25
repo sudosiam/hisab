@@ -1,4 +1,4 @@
-import { pickLegacyPaymentMatch } from '../paymentPair';
+import { pickLegacyPaymentMatch, tryPickLegacyPaymentMatch } from '../paymentPair';
 
 describe('pickLegacyPaymentMatch', () => {
   it('returns the sole candidate', () => {
@@ -11,5 +11,15 @@ describe('pickLegacyPaymentMatch', () => {
 
   it('throws when multiple candidates are ambiguous', () => {
     expect(() => pickLegacyPaymentMatch([{ id: 1 }, { id: 2 }])).toThrow(/Several payments match/);
+  });
+});
+
+describe('tryPickLegacyPaymentMatch', () => {
+  it('returns null when no candidates match', () => {
+    expect(tryPickLegacyPaymentMatch([])).toBeNull();
+  });
+
+  it('returns the sole candidate', () => {
+    expect(tryPickLegacyPaymentMatch([{ id: 3 }])).toEqual({ id: 3 });
   });
 });

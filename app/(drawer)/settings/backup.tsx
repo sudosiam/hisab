@@ -45,6 +45,7 @@ import {
   signOutCloudBackup,
   signUpWithEmailPassword,
   uploadCloudBackup,
+  deleteCloudBackups,
 } from '../../../src/services/cloudBackup';
 import { isSupabaseConfigured } from '../../../src/services/supabaseClient';
 import {
@@ -452,6 +453,31 @@ export default function BackupSettingsScreen() {
     }
   };
 
+  const handleDeleteCloudBackup = () => {
+    Alert.alert(
+      'Delete cloud backup?',
+      'This permanently removes your cloud backup files. Local data on this device is not erased.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete cloud data',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              try {
+                const result = await deleteCloudBackups();
+                await refreshCloudStatus();
+                Alert.alert(result.success ? 'Deleted' : 'Delete failed', result.message);
+              } catch (e) {
+                Alert.alert('Delete failed', formatSqliteError(e));
+              }
+            })();
+          },
+        },
+      ]
+    );
+  };
+
   const folderLabel = folderUri
     ? folderUri.split('/').filter(Boolean).slice(-2).join('/')
     : 'Not set';
@@ -694,6 +720,15 @@ export default function BackupSettingsScreen() {
                     activeOpacity={0.7}
                   >
                     <Text style={localStyles.outlineBtnText}>Sign out</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={localStyles.outlineBtn}
+                    onPress={handleDeleteCloudBackup}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[localStyles.outlineBtnText, { color: colors.danger }]}>
+                      Delete cloud backup
+                    </Text>
                   </TouchableOpacity>
                 </>
               )}

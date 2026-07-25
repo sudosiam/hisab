@@ -5,7 +5,6 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   Alert,
   RefreshControl,
   KeyboardAvoidingView,
@@ -14,6 +13,7 @@ import {
 import { useRouter } from 'expo-router';
 import { ListItem } from '../../../src/components/ListItem';
 import { MoneyText } from '../../../src/components/MoneyText';
+import { ListSkeleton } from '../../../src/components/Skeleton';
 import {
   ErrorState,
   Fab,
@@ -266,7 +266,7 @@ export default function PartiesScreen() {
       ) : null}
 
       {booting && parties.length === 0 ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
+        <ListSkeleton />
       ) : (
         <FlatList
           data={filteredParties}

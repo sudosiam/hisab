@@ -9,6 +9,7 @@ import {
   TextInput,
   ScrollView,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
@@ -25,6 +26,7 @@ import {
 import { formatSqliteError } from '../db/database';
 import { productCategorySource } from './categorySources';
 import { FormInput, PrimaryButton } from './ui';
+import { claimDropdownOpen, releaseDropdownOpen } from '../utils/dropdownOpen';
 import type { Product } from '../types';
 
 interface Props {
@@ -98,6 +100,7 @@ export function ProductPicker({
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [savedCategories, setSavedCategories] = useState<string[]>([]);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const selected = products.find((p) => p.id === value);
 
   const [newName, setNewName] = useState('');
@@ -120,6 +123,25 @@ export function ProductPicker({
   useEffect(() => {
     void loadSavedCategories();
   }, [loadSavedCategories, products]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 200);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const closeAllPickers = useCallback(() => {
+    setCategoryOpen(false);
+    setProductOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (categoryOpen || productOpen) {
+      claimDropdownOpen(closeAllPickers);
+    } else {
+      releaseDropdownOpen(closeAllPickers);
+    }
+    return () => releaseDropdownOpen(closeAllPickers);
+  }, [categoryOpen, productOpen, closeAllPickers]);
 
   const categories = useMemo(
     () => buildCategoryOptions(savedCategories, products),
@@ -145,7 +167,7 @@ export function ProductPicker({
       categoryFilter === 'All categories'
         ? products
         : products.filter((product) => categoryLabel(product) === categoryFilter);
-    const q = search.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     const searched = q
       ? pool.filter(
           (product) =>
@@ -155,7 +177,7 @@ export function ProductPicker({
         )
       : pool;
     return [...searched].sort((a, b) => a.name.localeCompare(b.name));
-  }, [products, categoryFilter, search]);
+  }, [products, categoryFilter, debouncedSearch]);
 
   const resetCreateForm = useCallback(() => {
     setNewName('');
@@ -393,175 +415,186 @@ export function ProductPicker({
           />
         </TouchableOpacity>
 
-        {productOpen ? (
+        {productOpen && !creating ? (
           <View style={styles.panel}>
-            {creating && createStep === 'category' ? (
-              <>
-                <TouchableOpacity onPress={() => setCreateStep('form')} disabled={addingCategory}>
-                  <Text style={styles.backLink}>← Back</Text>
-                </TouchableOpacity>
-                <Text style={styles.panelTitle}>Product Category</Text>
-                <View style={styles.addCategoryRow}>
-                  <TextInput
-                    style={[styles.search, { flex: 1, marginBottom: 0 }]}
-                    value={newCategoryName}
-                    onChangeText={setNewCategoryName}
-                    placeholder="New category name"
-                    placeholderTextColor={colors.textMuted}
-                    editable={!addingCategory}
-                  />
-                  <TouchableOpacity
-                    style={styles.addCategoryBtn}
-                    onPress={handleAddCreateCategory}
-                    disabled={addingCategory}
-                  >
-                    <Text style={styles.createBtnText}>{addingCategory ? '…' : 'Add'}</Text>
+            <TouchableOpacity style={styles.createBtn} onPress={startCreate}>
+              <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+              <Text style={styles.createBtnText}>New product</Text>
+            </TouchableOpacity>
+            <TextInput
+              style={styles.search}
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search products..."
+              placeholderTextColor={colors.textMuted}
+            />
+            <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+              {filteredProducts.length === 0 ? (
+                <View style={styles.emptyWrap}>
+                  <Text style={styles.empty}>
+                    {products.length === 0
+                      ? 'No products yet. Create one above.'
+                      : search.trim()
+                        ? 'No products match your search.'
+                        : 'No products in this category.'}
+                  </Text>
+                  <TouchableOpacity onPress={startCreate}>
+                    <Text style={styles.emptyLink}>Create new product</Text>
                   </TouchableOpacity>
                 </View>
-                <ScrollView style={{ maxHeight: 160 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-                  {savedCategories.map((item) => (
+              ) : (
+                filteredProducts.map((item) => {
+                  const meta = productMeta(item, variant);
+                  return (
                     <TouchableOpacity
-                      key={item}
-                      style={[styles.option, item === newCategory && styles.optionActive]}
-                      onPress={() => {
-                        setNewCategory(item);
-                        setCreateStep('form');
-                      }}
+                      key={item.id}
+                      style={[styles.option, item.id === value && styles.optionActive]}
+                      onPress={() => selectProduct(item)}
                     >
-                      <Text style={styles.optionText}>{item}</Text>
-                      {item === newCategory ? (
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.optionText}>{item.name}</Text>
+                        <Text style={[styles.meta, meta.negative && { color: colors.danger }]}>
+                          {categoryFilter === 'All categories'
+                            ? `${categoryLabel(item)} · ${meta.text}`
+                            : meta.text}
+                        </Text>
+                      </View>
+                      {item.id === value ? (
                         <Ionicons name="checkmark" size={18} color={colors.primary} />
                       ) : null}
                     </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </>
-            ) : creating ? (
-              <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled style={{ maxHeight: 360 }}>
-                <TouchableOpacity onPress={() => setCreating(false)} disabled={saving}>
-                  <Text style={styles.backLink}>← Back</Text>
-                </TouchableOpacity>
-                <Text style={styles.panelTitle}>New Product</Text>
-                <FormInput label="Product Name" value={newName} onChangeText={setNewName} />
-                <View style={styles.fieldInner}>
-                  <Text style={styles.label}>Category</Text>
-                  <TouchableOpacity
-                    style={styles.trigger}
-                    onPress={openCreateCategoryStep}
-                    disabled={saving}
-                  >
-                    <Text style={[styles.triggerText, !newCategory && styles.placeholder]}>
-                      {newCategory || 'Select or add category'}
-                    </Text>
-                    <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                </View>
-                <FormInput
-                  label="Unit"
-                  value={newUnit}
-                  onChangeText={setNewUnit}
-                  placeholder="pcs, kg, box..."
-                />
-                {variant === 'purchase' ? (
-                  <FormInput
-                    label="Cost (per unit, optional)"
-                    value={newCost}
-                    onChangeText={setNewCost}
-                    money
-                  />
-                ) : (
-                  <FormInput
-                    label="Sell Price (per unit)"
-                    value={newSellPrice}
-                    onChangeText={setNewSellPrice}
-                    money
-                  />
-                )}
-                {variant === 'sale' ? (
-                  <FormInput
-                    label="Opening Stock (optional)"
-                    value={newOpeningQty}
-                    onChangeText={setNewOpeningQty}
-                    qty
-                  />
-                ) : null}
-                {variant === 'sale' ? (
-                  <FormInput label="Cost (optional)" value={newCost} onChangeText={setNewCost} money />
-                ) : (
-                  <FormInput
-                    label="Sell Price (optional)"
-                    value={newSellPrice}
-                    onChangeText={setNewSellPrice}
-                    money
-                  />
-                )}
-                <PrimaryButton
-                  title={saving ? 'Creating…' : 'Create & Select'}
-                  onPress={handleCreateProduct}
-                  loading={saving}
-                />
-              </ScrollView>
-            ) : (
-              <>
-                <TouchableOpacity style={styles.createBtn} onPress={startCreate}>
-                  <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
-                  <Text style={styles.createBtnText}>New product</Text>
-                </TouchableOpacity>
-                <TextInput
-                  style={styles.search}
-                  value={search}
-                  onChangeText={setSearch}
-                  placeholder="Search products..."
-                  placeholderTextColor={colors.textMuted}
-                />
-                <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-                  {filteredProducts.length === 0 ? (
-                    <View style={styles.emptyWrap}>
-                      <Text style={styles.empty}>
-                        {products.length === 0
-                          ? 'No products yet. Create one above.'
-                          : search.trim()
-                            ? 'No products match your search.'
-                            : 'No products in this category.'}
-                      </Text>
-                      <TouchableOpacity onPress={startCreate}>
-                        <Text style={styles.emptyLink}>Create new product</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    filteredProducts.map((item) => {
-                      const meta = productMeta(item, variant);
-                      return (
-                        <TouchableOpacity
-                          key={item.id}
-                          style={[styles.option, item.id === value && styles.optionActive]}
-                          onPress={() => selectProduct(item)}
-                        >
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.optionText}>{item.name}</Text>
-                            <Text style={[styles.meta, meta.negative && { color: colors.danger }]}>
-                              {categoryFilter === 'All categories'
-                                ? `${categoryLabel(item)} · ${meta.text}`
-                                : meta.text}
-                            </Text>
-                          </View>
-                          {item.id === value ? (
-                            <Ionicons name="checkmark" size={18} color={colors.primary} />
-                          ) : null}
-                        </TouchableOpacity>
-                      );
-                    })
-                  )}
-                </ScrollView>
-                {saving ? (
-                  <View style={styles.savingOverlay}>
-                    <ActivityIndicator color={colors.primary} />
-                  </View>
-                ) : null}
-              </>
-            )}
+                  );
+                })
+              )}
+            </ScrollView>
+            {saving ? (
+              <View style={styles.savingOverlay}>
+                <ActivityIndicator color={colors.primary} />
+              </View>
+            ) : null}
           </View>
         ) : null}
+
+        <Modal
+          visible={creating}
+          transparent
+          animationType="slide"
+          onRequestClose={() => {
+            if (!saving) setCreating(false);
+          }}
+        >
+          <View style={styles.createModalBackdrop}>
+            <View style={styles.createModalCard}>
+              {createStep === 'category' ? (
+                <>
+                  <TouchableOpacity onPress={() => setCreateStep('form')} disabled={addingCategory}>
+                    <Text style={styles.backLink}>← Back</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.panelTitle}>Product Category</Text>
+                  <View style={styles.addCategoryRow}>
+                    <TextInput
+                      style={[styles.search, { flex: 1, marginBottom: 0 }]}
+                      value={newCategoryName}
+                      onChangeText={setNewCategoryName}
+                      placeholder="New category name"
+                      placeholderTextColor={colors.textMuted}
+                      editable={!addingCategory}
+                    />
+                    <TouchableOpacity
+                      style={styles.addCategoryBtn}
+                      onPress={handleAddCreateCategory}
+                      disabled={addingCategory}
+                    >
+                      <Text style={styles.createBtnText}>{addingCategory ? '…' : 'Add'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled">
+                    {savedCategories.map((item) => (
+                      <TouchableOpacity
+                        key={item}
+                        style={[styles.option, item === newCategory && styles.optionActive]}
+                        onPress={() => {
+                          setNewCategory(item);
+                          setCreateStep('form');
+                        }}
+                      >
+                        <Text style={styles.optionText}>{item}</Text>
+                        {item === newCategory ? (
+                          <Ionicons name="checkmark" size={18} color={colors.primary} />
+                        ) : null}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </>
+              ) : (
+                <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }}>
+                  <TouchableOpacity onPress={() => setCreating(false)} disabled={saving}>
+                    <Text style={styles.backLink}>← Back</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.panelTitle}>New Product</Text>
+                  <FormInput label="Product Name" value={newName} onChangeText={setNewName} />
+                  <View style={styles.fieldInner}>
+                    <Text style={styles.label}>Category</Text>
+                    <TouchableOpacity
+                      style={styles.trigger}
+                      onPress={openCreateCategoryStep}
+                      disabled={saving}
+                    >
+                      <Text style={[styles.triggerText, !newCategory && styles.placeholder]}>
+                        {newCategory || 'Select or add category'}
+                      </Text>
+                      <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                  <FormInput
+                    label="Unit"
+                    value={newUnit}
+                    onChangeText={setNewUnit}
+                    placeholder="pcs, kg, box..."
+                  />
+                  {variant === 'purchase' ? (
+                    <FormInput
+                      label="Cost (per unit, optional)"
+                      value={newCost}
+                      onChangeText={setNewCost}
+                      money
+                    />
+                  ) : (
+                    <FormInput
+                      label="Sell Price (per unit)"
+                      value={newSellPrice}
+                      onChangeText={setNewSellPrice}
+                      money
+                    />
+                  )}
+                  {variant === 'sale' ? (
+                    <FormInput
+                      label="Opening Stock (optional)"
+                      value={newOpeningQty}
+                      onChangeText={setNewOpeningQty}
+                      qty
+                    />
+                  ) : null}
+                  {variant === 'sale' ? (
+                    <FormInput label="Cost (optional)" value={newCost} onChangeText={setNewCost} money />
+                  ) : (
+                    <FormInput
+                      label="Sell Price (optional)"
+                      value={newSellPrice}
+                      onChangeText={setNewSellPrice}
+                      money
+                    />
+                  )}
+                  <PrimaryButton
+                    title={saving ? 'Creating…' : 'Create & Select'}
+                    onPress={handleCreateProduct}
+                    loading={saving}
+                  />
+                </ScrollView>
+              )}
+            </View>
+          </View>
+        </Modal>
       </View>
     </View>
   );
@@ -571,7 +604,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
   return StyleSheet.create({
     wrap: { marginBottom: spacing.sm, gap: spacing.sm },
     field: { gap: 6, zIndex: 1 },
-    fieldOpen: { zIndex: 25 },
+    fieldOpen: { zIndex: 40 },
     fieldInner: { gap: 6, marginBottom: spacing.sm },
     label: { fontSize: 12, fontWeight: '500', color: colors.textSecondary },
     trigger: {
@@ -592,6 +625,20 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       marginTop: 4,
       padding: spacing.sm,
       borderRadius: radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
+    createModalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      justifyContent: 'flex-end',
+    },
+    createModalCard: {
+      ...elevatedSurface(colors, isDark),
+      maxHeight: '88%',
+      borderTopLeftRadius: radius.lg,
+      borderTopRightRadius: radius.lg,
+      padding: spacing.md,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
     },

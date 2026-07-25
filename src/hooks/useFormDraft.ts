@@ -14,6 +14,7 @@ export function useFormDraft<T>(
   const [ready, setReady] = useState(false);
   const [hasDraft, setHasDraft] = useState(false);
   const skipSave = useRef(true);
+  const disposed = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dataRef = useRef(data);
   dataRef.current = data;
@@ -26,16 +27,31 @@ export function useFormDraft<T>(
   }, []);
 
   const persistDraft = useCallback(async () => {
-    if (!enabled || !ready) return;
+    if (!enabled || !ready || skipSave.current || disposed.current) return;
     const payload = dataRef.current;
     if (isEmpty(payload)) {
       await clearDraft(key);
-      setHasDraft(false);
+      if (!disposed.current) setHasDraft(false);
       return;
     }
     await saveDraft(key, payload);
-    setHasDraft(true);
+    if (!disposed.current && !skipSave.current) setHasDraft(true);
   }, [key, enabled, ready, isEmpty]);
+
+  useEffect(() => {
+    disposed.current = false;
+    return () => {
+      disposed.current = true;
+      cancelPendingSave();
+      if (!enabled || !ready || skipSave.current) return;
+      const payload = dataRef.current;
+      if (isEmpty(payload)) {
+        clearDraft(key).catch(() => {});
+      } else {
+        saveDraft(key, payload).catch(() => {});
+      }
+    };
+  }, [cancelPendingSave, enabled, isEmpty, key, ready]);
 
   useEffect(() => {
     if (!enabled || !ready) return;
@@ -50,35 +66,22 @@ export function useFormDraft<T>(
     return cancelPendingSave;
   }, [data, enabled, ready, debounceMs, persistDraft, cancelPendingSave]);
 
-  useEffect(() => {
-    return () => {
-      cancelPendingSave();
-      if (!enabled || !ready || skipSave.current) return;
-      const payload = dataRef.current;
-      if (isEmpty(payload)) {
-        clearDraft(key).catch(() => {});
-      } else {
-        saveDraft(key, payload).catch(() => {});
-      }
-    };
-  }, [cancelPendingSave, enabled, isEmpty, key, ready]);
-
   const markReady = useCallback(() => {
     setReady(true);
   }, []);
 
   const discardDraft = useCallback(async () => {
+    skipSave.current = true;
     cancelPendingSave();
     await clearDraft(key);
     setHasDraft(false);
-    skipSave.current = true;
   }, [key, cancelPendingSave]);
 
   const clearDraftOnSave = useCallback(async () => {
+    skipSave.current = true;
     cancelPendingSave();
     await clearDraft(key);
     setHasDraft(false);
-    skipSave.current = true;
   }, [key, cancelPendingSave]);
 
   const noteDraftLoaded = useCallback(() => {

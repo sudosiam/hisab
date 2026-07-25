@@ -1,96 +1,47 @@
 # Hisab — Business Management App
 
-Android business management app built with **Expo SDK 54** and **SQLite**. All data stays on your device.
+Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. Books stay on the device; optional encrypted cloud backup via Supabase.
 
-**Current version:** `10.1.0` (Android `versionCode` 31)
+**Current version:** `10.5.0` (Android `versionCode` 35 · schema v26)
 
 ## What's in Hisab
 
-- **Full offline accounting** — Sales, purchases, inventory, banking, parties, reports
-- **Double-entry general ledger** — Journal entries with balance enforcement; debounced rebuild after writes
-- **Financial year settings** — FY picker with auto-advance; all reports stay in sync
-- **Growth dashboard** — Net worth, monthly profit charts, equity trend
-- **Other income, loans & fixed assets** — Complete balance sheet beyond inventory
-- **Backup & restore** — Local daily auto-backup (SAF) plus optional encrypted cloud backup (Supabase)
-- **Data safety** — Corrupt DB never auto-wiped; restore-first recovery; integrity repair on boot
-- **Automated tests** — 42 unit + integration tests (money, payments, GST, sale/purchase flows)
+- **Offline accounting** — Sales (Tax Invoice / BOS), purchases, inventory, banking, parties, expenses, other income
+- **Payments** — Money in/out with against-invoice, advance, and on-account allocation
+- **Double-entry ledger** — Journal rebuild after writes; P&L, balance sheet, growth, GST reports
+- **Tally XML** — Import/export sales, purchases, parties, receipts, and payments
+- **PDF & WhatsApp** — Invoice and ledger PDFs; WhatsApp share opens the party number when available (native build)
+- **Backup** — Local SAF daily backup + optional cloud backup; delete cloud snapshot from Settings
+- **Reliability** — DB init generation guard, deferred integrity repair, draft/haptic/skeleton UX polish
 
-## What's new in 10.1.0
+## What's new in 10.5.0
 
-**Mobile UI polish**
-- Compact list rows across sales, purchases, parties, inventory, expenses, banking
-- Full-row taps navigate to detail; report rows open related invoices/products
-- Overflow-safe money amounts (shrink/wrap — no clipped totals)
-- Drawer back uses real history (no more surprise jump to Dashboard)
+**Reliability pass**
+- Safe database re-init after restore/invalidate; ledger rebuild coalesce (no skipped rebuilds)
+- Deferred financial integrity repair (avoids cold-start ANR on large books)
+- Chunked cloud backup decode; balance sheet clamps negative stock qty
+- Form draft save race fixed; dropdown blur/z-index coordination; date/product create modals
+- Debounced product search / deferred GST / coalesced dashboard refresh
 
-**Cloud backup (optional)**
-- Settings → Backup — encrypted cloud sync when Supabase env is configured
-- Local daily backup remains the default; cloud is additive
-- See `.env.example` and `supabase/cloud-backup-setup.sql`
+**UX**
+- Skeleton loaders on dashboard and main lists
+- Haptic feedback toggle (Settings → Appearance)
+- Delete cloud backup in Settings → Backup
+- Stronger payment status badge contrast
 
-## What's new in 10.0.0
+## What's new in 10.4.0
 
-**Material 3 Android UI**
-- Compact navy Material 3 theme — tonal surfaces, filled chips, circular FABs, denser list/form density
-- Shared UI kit refresh (drawer, headers, pickers as bottom sheets, ledger tables, status badges)
-- Light and dark modes aligned to the same compact layout system
-
-**GST**
-- Regular-scheme GST fields and reports (summary, outward supplies, HSN, state-wise)
-- Schema v25 — additive GST columns with safe migration
-
-**Quality**
-- `npm run verify` — typecheck + lint + **42/42 tests passed**
-
-## What's new in 8.1.0
-
-**Bill of Supply (BOS)**
-- Sales support Invoice and Bill of Supply as separate document types
-- Independent BOS numbering sequence and prefix (Settings → Next BOS number)
-- Type badges and filters on sales list; labels on party history, reports, and PDFs
-- Ledger journal descriptions distinguish Invoice vs Bill of Supply (amounts unchanged)
-- Schema v24 — `sales.invoice_type` with safe migration (existing rows default to invoice)
-
-## What's new in 8.0.0
-
-**Ledger & reports**
-- General ledger, trial balance, day book, cash flow, customer/vendor statements (with PDF export)
-- Expanded reports hub — P&L, receivables, payables, expense categories, operational summaries
-- Ledger refresh scheduled after every sale/purchase write (create, edit, add/remove payment) — no more stale GL after common actions
-
-**Mobile performance**
-- Post-save work no longer runs a full integrity repair + ledger rebuild on every tap — debounced 400ms coalesced refresh keeps saves responsive on large books
-
-**Data integrity (fixes from audit PRs #1–#5)**
-- Backup guard counts `transactions` — opening-balance-only books back up correctly
-- Legacy transfer delete throws on ambiguous pairs instead of corrupting balances
-- Backup and restore serialized via unified maintenance lock; WAL checkpoint before snapshot
-- Orphan invoice cleanup guarded when line-item tables are empty (partial restore)
-- Legacy payment delete uses strict `payment_id` matching with backfill migration
-
-**Invoice payments**
-- **Remove payment** button on sale and purchase detail screens — no Banking workaround needed
-- `removeSalePayment` / `removePurchasePayment` delete by payment ID with account balance + status sync
-
-**UX polish**
-- Unsaved-changes guards on edit screens; iOS keyboard Done bar; form drafts on new sale/purchase
-- Human-readable dates on lists; loading states on P&L, cash flow, and statement reports
-- Drawer uses `router.navigate` (no stack replace freeze); boot restore requires typing `IMPORT`
-
-**Testing**
-- Integration tests: sale/purchase create → stock → cash → payment add/remove (in-memory SQLite via `better-sqlite3`)
-- `npm run verify` — typecheck + lint + 42 tests
+- Payment vouchers (receipt/payment) with advances and on-account
+- Tally Receipt/Payment import-export + sample XML
+- WhatsApp PDF share targeting party phone (requires native APK with `react-native-share`)
 
 ## Features
 
-- **Sidebar navigation** — Dashboard, Sales, Purchases, Inventory, Banking, Balance Sheet, Growth, Reports, Settings
-- **SQLite database** — Local-first storage (schema v25)
-- **Dashboard** — Revenue, purchases, profit, expense, liquid cash, receivable, payable, inventory, net worth
-- **Sales & Purchases** — Paid/unpaid lists, split payments, edit with stock checks, invoice detail with add/remove payment
-- **Inventory** — Weighted average cost, opening stock, movement history, soft-delete when referenced
-- **Banking** — Cash/bank accounts, expenses (incl. recurring), transfers, transaction ledger
-- **Parties** — Customers/suppliers with statements and balances
-- **Reports** — P&L, cash flow, trial balance, general ledger, day book, receivables, payables, sales/purchase/inventory summaries, party statements (PDF)
+- Drawer navigation — Dashboard, Sales, Purchases, Payments, Inventory, Banking, Parties, Reports, Settings
+- SQLite local-first storage (schema v26)
+- Split payments, negative stock allowed, weighted-average COGS
+- Reports — P&L, cash flow, trial balance, GL, day book, receivables/payables, GST, party ledgers (PDF)
+- Financial year settings with period sync across screens
 
 ## Quick Start (development)
 
@@ -100,26 +51,15 @@ npm install
 npx expo start
 ```
 
-Scan the QR code with **Expo Go** (SDK 54) on Android, or press `a` for an emulator.
+Use a **dev/production build** for native modules (WhatsApp share, haptics). Expo Go may fall back for those features.
 
 ## Quality checks
 
 ```bash
-npm run verify    # typecheck + lint + tests (run before every release)
-npm run typecheck
-npm run lint
-npm test
+npm run verify    # typecheck + lint + tests — run before every release
 ```
 
-## Install APK (release build)
-
-After building, copy the APK to `releases/` for distribution (APKs are gitignored). Install on your phone from that folder or share directly.
-
-```powershell
-adb install "android\app\build\outputs\apk\release\app-release.apk"
-```
-
-## Build APK locally
+## Build APK locally (production)
 
 Requires Android SDK and JDK 17:
 
@@ -130,14 +70,32 @@ $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 npm run build:apk:local
 ```
 
-APK output: `android/app/build/outputs/apk/release/app-release.apk`
+APK output:
+
+`android/app/build/outputs/apk/release/app-release.apk`
+
+Copy into `releases/` for handoff (APKs are gitignored):
+
+```powershell
+New-Item -ItemType Directory -Force releases | Out-Null
+Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-10.5.0.apk" -Force
+adb install -r "releases\hisab-10.5.0.apk"
+```
 
 ## Build APK (EAS cloud)
 
 ```bash
-npm run verify          # run first — must pass before every release
-npm run build:apk:prod  # EAS cloud production APK
+npm run verify
+npm run build:apk:prod
 ```
+
+## OTA updates (JS-only)
+
+```bash
+npm run update:prod
+```
+
+Native changes (new modules / `versionCode`) need a new APK build.
 
 ## Version bumps
 
@@ -147,54 +105,42 @@ Keep these in sync when releasing:
 |------|--------|
 | `app.json` | `expo.version`, `android.versionCode`, `ios.buildNumber` |
 | `package.json` | `version` |
-| `src/constants/appVersion.ts` | fallback string (optional) |
-
-Settings → About reads `app.json` via `expo-constants`.
+| `src/constants/appVersion.ts` | fallback string |
 
 ## Cloud backup (optional)
 
-Local daily backup works offline with no setup. For encrypted cloud backup:
-
 1. Create a Supabase project and run `supabase/cloud-backup-setup.sql`
-2. Copy `.env.example` → `.env` and set:
-   - `EXPO_PUBLIC_SUPABASE_URL`
-   - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+2. Copy `.env.example` → `.env` and set `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY`
 3. Rebuild the app (env is baked in at build time)
-4. Open **Settings → Backup** to enable cloud sync
+4. Settings → Backup to sign in, upload, restore, or delete cloud data
 
-For EAS cloud builds, add the same keys as EAS secrets / env for the `production` and `preview` profiles.
+## First steps
 
-## First Steps
+1. **Inventory** — add products with opening stock  
+2. **Banking** — default Cash / Bank accounts  
+3. Create **Purchases** and **Sales**  
+4. **Settings** — financial year, WhatsApp template, backup folder  
 
-1. Open **Inventory** → add products with opening stock
-2. **Banking** includes default Cash and Bank accounts
-3. Create **Purchases** and **Sales**
-4. **Settings** → set financial year and backup folder
+## Tech stack
 
-## Tech Stack
-
-- Expo SDK 54 / React Native 0.81
-- expo-router (drawer sidebar)
-- expo-sqlite (schema v25, 25 migrations)
-- expo-file-system (SAF backup on Android)
-- Jest — unit + integration tests (`better-sqlite3` harness)
+- Expo SDK 54 / React Native 0.81 / expo-router
+- expo-sqlite (schema v26)
+- expo-print / expo-sharing / react-native-share
+- Jest + `better-sqlite3` integration harness
 
 ## Scripts
 
 | Command | Description |
 |---------|-------------|
 | `npm start` | Expo dev server |
-| `npm run android` | Run on Android device/emulator |
-| `npm run verify` | Full pre-release check |
-| `npm run typecheck` | TypeScript check |
-| `npm run lint` | ESLint |
-| `npm test` | Jest (unit + integration) |
-| `npm run build:apk` | EAS preview APK |
+| `npm run verify` | Typecheck + lint + tests |
+| `npm run build:apk:local` | Clean prebuild + assembleRelease |
 | `npm run build:apk:prod` | EAS production APK |
-| `npm run build:apk:local` | Local prebuild + assembleRelease |
+| `npm run update:prod` | EAS Update → production channel |
 
 ## Known limits
 
-- Money stored as SQLite `REAL` (rupees); `roundMoney()` used throughout — not integer paise columns
-- No receivables/payables aging buckets (flat outstanding lists only)
-- Loans are manual balance-sheet memos — not linked to banking repayments
+- Money stored as SQLite `REAL` with `roundMoney()` — not integer-paise columns
+- Tally import does not include expense/journal vouchers; imported Net Profit may differ from Tally P&L
+- WhatsApp chat+PDF targeting needs a native APK (not Expo Go alone)
+- Loans are balance-sheet memos — not linked to banking repayments

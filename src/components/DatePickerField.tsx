@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   addMonths,
@@ -23,6 +23,7 @@ import {
   parseISODate,
   todayISO,
 } from '../utils/date';
+import { claimDropdownOpen, releaseDropdownOpen } from '../utils/dropdownOpen';
 
 const WEEKDAY_LABELS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'] as const;
 const WEEK_OPTS = { weekStartsOn: 1 as const };
@@ -48,12 +49,22 @@ export function DatePickerField({
   const selectedDate = isValidISODate(value) ? parseISODate(value) : new Date();
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(selectedDate));
   const [draft, setDraft] = useState(selectedDate);
+  const close = useCallback(() => setOpen(false), []);
 
   useEffect(() => {
     const next = isValidISODate(value) ? parseISODate(value) : new Date();
     setDraft(next);
     setViewMonth(startOfMonth(next));
   }, [value]);
+
+  useEffect(() => {
+    if (open) {
+      claimDropdownOpen(close);
+    } else {
+      releaseDropdownOpen(close);
+    }
+    return () => releaseDropdownOpen(close);
+  }, [open, close]);
 
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
 
@@ -93,98 +104,101 @@ export function DatePickerField({
         <Ionicons name="calendar-outline" size={compact ? 18 : 20} color={colors.primary} />
       </TouchableOpacity>
 
-      {open ? (
-        <View style={styles.panel}>
-          <View style={styles.sheetHeader}>
-            <TouchableOpacity
-              style={styles.navBtn}
-              onPress={() => setViewMonth((m) => addMonths(m, -1))}
-              accessibilityLabel="Previous month"
-              accessibilityRole="button"
-              hitSlop={6}
-            >
-              <Ionicons name="chevron-back" size={18} color={colors.primary} />
-            </TouchableOpacity>
-            <Text style={styles.monthTitle}>{format(viewMonth, 'MMMM yyyy')}</Text>
-            <TouchableOpacity
-              style={styles.navBtn}
-              onPress={() => setViewMonth((m) => addMonths(m, 1))}
-              accessibilityLabel="Next month"
-              accessibilityRole="button"
-              hitSlop={6}
-            >
-              <Ionicons name="chevron-forward" size={18} color={colors.primary} />
-            </TouchableOpacity>
-          </View>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
+        <Pressable style={styles.backdrop} onPress={close} accessibilityLabel="Dismiss date picker">
+          <Pressable style={styles.panel} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.sheetHeader}>
+              <TouchableOpacity
+                style={styles.navBtn}
+                onPress={() => setViewMonth((m) => addMonths(m, -1))}
+                accessibilityLabel="Previous month"
+                accessibilityRole="button"
+                hitSlop={6}
+              >
+                <Ionicons name="chevron-back" size={18} color={colors.primary} />
+              </TouchableOpacity>
+              <Text style={styles.monthTitle}>{format(viewMonth, 'MMMM yyyy')}</Text>
+              <TouchableOpacity
+                style={styles.navBtn}
+                onPress={() => setViewMonth((m) => addMonths(m, 1))}
+                accessibilityLabel="Next month"
+                accessibilityRole="button"
+                hitSlop={6}
+              >
+                <Ionicons name="chevron-forward" size={18} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
 
-          <View style={styles.weekRow}>
-            {WEEKDAY_LABELS.map((day) => (
-              <Text key={day} style={styles.weekday}>
-                {day}
-              </Text>
-            ))}
-          </View>
+            <View style={styles.weekRow}>
+              {WEEKDAY_LABELS.map((day) => (
+                <Text key={day} style={styles.weekday}>
+                  {day}
+                </Text>
+              ))}
+            </View>
 
-          <View style={styles.grid}>
-            {monthDays.map((day) => {
-              const inMonth = isSameMonth(day, viewMonth);
-              const selected = isSameDay(day, draft);
-              const today = isToday(day);
-              return (
-                <TouchableOpacity
-                  key={day.toISOString()}
-                  style={[
-                    styles.dayCell,
-                    selected && styles.dayCellSelected,
-                    today && !selected && styles.dayCellToday,
-                  ]}
-                  onPress={() => {
-                    setDraft(day);
-                    confirm(day);
-                  }}
-                  disabled={!inMonth}
-                  accessibilityLabel={format(day, 'd MMMM yyyy')}
-                >
-                  <Text
+            <View style={styles.grid}>
+              {monthDays.map((day) => {
+                const inMonth = isSameMonth(day, viewMonth);
+                const selected = isSameDay(day, draft);
+                const today = isToday(day);
+                return (
+                  <TouchableOpacity
+                    key={day.toISOString()}
                     style={[
-                      styles.dayText,
-                      !inMonth && styles.dayTextMuted,
-                      selected && styles.dayTextSelected,
-                      today && !selected && styles.dayTextToday,
+                      styles.dayCell,
+                      selected && styles.dayCellSelected,
+                      today && !selected && styles.dayCellToday,
                     ]}
+                    onPress={() => {
+                      setDraft(day);
+                      confirm(day);
+                    }}
+                    disabled={!inMonth}
+                    accessibilityLabel={format(day, 'd MMMM yyyy')}
+                    accessibilityState={{ selected }}
                   >
-                    {format(day, 'd')}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+                    <Text
+                      style={[
+                        styles.dayText,
+                        !inMonth && styles.dayTextMuted,
+                        selected && styles.dayTextSelected,
+                        today && !selected && styles.dayTextToday,
+                      ]}
+                    >
+                      {format(day, 'd')}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
-          <View style={styles.footer}>
-            <TouchableOpacity
-              style={styles.footerBtn}
-              onPress={() => {
-                const today = new Date();
-                setDraft(today);
-                setViewMonth(startOfMonth(today));
-                confirm(today);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Select today"
-            >
-              <Text style={styles.footerBtnText}>Today</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.footerBtn}
-              onPress={() => setOpen(false)}
-              accessibilityRole="button"
-              accessibilityLabel="Cancel date picker"
-            >
-              <Text style={styles.footerBtnTextMuted}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : null}
+            <View style={styles.footer}>
+              <TouchableOpacity
+                style={styles.footerBtn}
+                onPress={() => {
+                  const today = new Date();
+                  setDraft(today);
+                  setViewMonth(startOfMonth(today));
+                  confirm(today);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Select today"
+              >
+                <Text style={styles.footerBtnText}>Today</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.footerBtn}
+                onPress={close}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel date picker"
+              >
+                <Text style={styles.footerBtnTextMuted}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -200,7 +214,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       flex: 1,
     },
     fieldOpen: {
-      zIndex: 25,
+      zIndex: 40,
     },
     label: {
       ...typography.label,
@@ -239,13 +253,21 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       color: colors.textMuted,
       fontWeight: '400',
     },
+    backdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      justifyContent: 'center',
+      padding: spacing.lg,
+    },
     panel: {
       ...elevatedSurface(colors, isDark),
-      marginTop: 4,
       padding: spacing.md,
-      borderRadius: radius.md,
+      borderRadius: radius.lg,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
+      maxWidth: 400,
+      width: '100%',
+      alignSelf: 'center',
     },
     sheetHeader: {
       flexDirection: 'row',

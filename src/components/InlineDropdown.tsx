@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { spacing, radius } from '../constants/theme';
 import { elevatedSurface } from '../constants/shadows';
+import { claimDropdownOpen, releaseDropdownOpen } from '../utils/dropdownOpen';
 
 export interface InlineDropdownOption<T extends string | number = string> {
   key: string;
@@ -61,6 +62,16 @@ export function InlineDropdown<T extends string | number = string>({
 }: Props<T>) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
+  const close = useCallback(() => onOpenChange(false), [onOpenChange]);
+
+  useEffect(() => {
+    if (open) {
+      claimDropdownOpen(close);
+    } else {
+      releaseDropdownOpen(close);
+    }
+    return () => releaseDropdownOpen(close);
+  }, [open, close]);
 
   return (
     <View style={[styles.wrap, style, open && styles.wrapOpen]}>
@@ -148,7 +159,7 @@ export function InlineDropdown<T extends string | number = string>({
 function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boolean) {
   return StyleSheet.create({
     wrap: { marginBottom: spacing.sm, zIndex: 1 },
-    wrapOpen: { zIndex: 20 },
+    wrapOpen: { zIndex: 40 },
     label: { fontSize: 12, fontWeight: '500', color: colors.textSecondary, marginBottom: 4 },
     trigger: {
       flexDirection: 'row',

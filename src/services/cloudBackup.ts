@@ -39,11 +39,29 @@ const cloudBackupInFlight: { current: Promise<{ success: boolean; message: strin
   current: null,
 };
 
-function base64ToUint8Array(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
+/** Decode base64 in chunks so a large DB backup does not spike memory via one giant atob(). */
+export function base64ToUint8Array(base64: string): Uint8Array {
+  const clean = base64.replace(/[^A-Za-z0-9+/=]/g, '');
+  const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0;
+  const outputLen = Math.floor((clean.length * 3) / 4) - padding;
+  const bytes = new Uint8Array(Math.max(0, outputLen));
+  let byteIndex = 0;
+  // Multiple of 4 so atob chunks stay valid.
+  const CHUNK = 0x8000;
+  for (let offset = 0; offset < clean.length; ) {
+    let end = Math.min(offset + CHUNK, clean.length);
+    if (end < clean.length) {
+      end -= end % 4;
+    }
+    if (end <= offset) {
+      end = Math.min(offset + 4, clean.length);
+    }
+    const binary = atob(clean.slice(offset, end));
+    for (let j = 0; j < binary.length && byteIndex < bytes.length; j += 1) {
+      bytes[byteIndex] = binary.charCodeAt(j);
+      byteIndex += 1;
+    }
+    offset = end;
   }
   return bytes;
 }
@@ -112,6 +130,53 @@ async function markCloudReconcileAttempted(): Promise<void> {
 
 export async function clearCloudReconcileAttempted(): Promise<void> {
   await AsyncStorage.removeItem(CLOUD_RECONCILE_ATTEMPTED_KEY);
+}
+
+/** Delete all cloud backup objects for the signed-in user and clear local cloud markers. */
+export async function deleteCloudBackups(): Promise<{ success: boolean; message: string }> {
+  const supabase = getSupabaseClient();
+  const session = await getCloudSession();
+  if (!supabase) {
+    return { success: false, message: 'Cloud backup is not configured on this build.' };
+  }
+  if (!session?.user?.id) {
+    return { success: false, message: 'Sign in to cloud backup first.' };
+  }
+
+  const userId = session.user.id;
+  try {
+    const { data, error } = await supabase.storage.from(CLOUD_BACKUP_BUCKET).list(userId, {
+      limit: 200,
+    });
+    if (error) {
+      return { success: false, message: error.message };
+    }
+    const paths = (data ?? [])
+      .map((item) => item.name)
+      .filter(Boolean)
+      .map((name) => objectPath(userId, name));
+    // Always try to remove the known latest object even if list is empty/stale.
+    const latestPath = objectPath(userId, CLOUD_LATEST_OBJECT);
+    if (!paths.includes(latestPath)) paths.push(latestPath);
+
+    if (paths.length > 0) {
+      const { error: removeError } = await supabase.storage.from(CLOUD_BACKUP_BUCKET).remove(paths);
+      if (removeError) {
+        return { success: false, message: removeError.message };
+      }
+    }
+
+    await supabase.from('cloud_backups').delete().eq('user_id', userId);
+    await AsyncStorage.removeItem(CLOUD_LAST_BACKUP_KEY);
+    await AsyncStorage.removeItem(CLOUD_LAST_ERROR_KEY);
+    await clearCloudReconcileAttempted();
+    return { success: true, message: 'Cloud backup deleted.' };
+  } catch (e) {
+    return {
+      success: false,
+      message: e instanceof Error ? e.message : 'Could not delete cloud backup.',
+    };
+  }
 }
 
 // --- Auth ------------------------------------------------------------------

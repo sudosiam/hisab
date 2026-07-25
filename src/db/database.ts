@@ -30,6 +30,8 @@ export class SchemaMigrationError extends Error {
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 let initPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let financialIntegrityRepaired = false;
+/** Bumped on invalidate/reset so in-flight opens cannot publish a stale handle. */
+let initGeneration = 0;
 
 function isLikelyCorruptDatabaseError(error: unknown): boolean {
   const msg = formatSqliteError(error).toLowerCase();
@@ -42,6 +44,7 @@ function isLikelyCorruptDatabaseError(error: unknown): boolean {
 }
 
 export async function invalidateDatabase(): Promise<void> {
+  initGeneration += 1;
   if (dbInstance) {
     try {
       await dbInstance.closeAsync();
@@ -62,16 +65,27 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
   }
 
   if (!initPromise) {
+    const gen = initGeneration;
     initPromise = (async () => {
       let db: SQLite.SQLiteDatabase | null = null;
       try {
         db = await SQLite.openDatabaseAsync(DB_NAME);
         await db.execAsync('PRAGMA foreign_keys = ON;');
         await initSchema(db);
+        if (gen !== initGeneration) {
+          try {
+            await db.closeAsync();
+          } catch {
+            // superseded init — discard orphaned handle
+          }
+          const superseded = new Error('DATABASE_INIT_SUPERSEDED');
+          superseded.name = 'DatabaseInitSuperseded';
+          throw superseded;
+        }
         dbInstance = db;
         return db;
       } catch (error) {
-        if (db) {
+        if (db && (error as Error)?.name !== 'DatabaseInitSuperseded') {
           try {
             await db.closeAsync();
           } catch {
@@ -79,6 +93,10 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
           }
         }
         dbInstance = null;
+
+        if ((error as Error)?.name === 'DatabaseInitSuperseded') {
+          throw error;
+        }
 
         if (isLikelyCorruptDatabaseError(error)) {
           throw new SchemaMigrationError(
@@ -90,6 +108,9 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
       }
     })().catch((error) => {
       initPromise = null;
+      if ((error as Error)?.name === 'DatabaseInitSuperseded') {
+        return getDatabase();
+      }
       throw error;
     });
   }
@@ -273,7 +294,8 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       );
     }
     await seedDefaultAccounts(db);
-    await repairFinancialDataIntegrity(db, { force: true, rebuildLedger: false });
+    // Full integrity repair is deferred until after first paint (see DatabaseContext)
+    // so large books do not ANR on cold start.
     try {
       const { hasGeneralLedger, rebuildGeneralLedger } = await import('../services/ledger');
       if (!(await hasGeneralLedger(db))) {
@@ -1223,6 +1245,8 @@ async function cleanupOrphanChildRows(db: SQLite.SQLiteDatabase): Promise<void> 
   }
 }
 
+const INTEGRITY_REPAIR_SCHEMA_KEY = 'integrity_repair_schema';
+
 /** Fix stale sale costs and remove invoice headers left behind by old deletes. */
 export async function repairFinancialDataIntegrity(
   db?: SQLite.SQLiteDatabase,
@@ -1230,6 +1254,18 @@ export async function repairFinancialDataIntegrity(
 ): Promise<void> {
   if (financialIntegrityRepaired && !options?.force) return;
   const database = db ?? (await getDatabase());
+
+  if (!options?.force) {
+    const marker = await database.getFirstAsync<{ value: string }>(
+      `SELECT value FROM settings WHERE key = ?`,
+      [INTEGRITY_REPAIR_SCHEMA_KEY]
+    );
+    if (marker?.value === String(SCHEMA_VERSION)) {
+      financialIntegrityRepaired = true;
+      return;
+    }
+  }
+
   await cleanupOrphanTransactions(database);
   await repairSaleItemUnitCosts(database);
   await cleanupOrphanInvoiceHeaders(database);
@@ -1243,6 +1279,14 @@ export async function repairFinancialDataIntegrity(
     } catch {
       // Ledger tables may not exist on very old schemas during partial init.
     }
+  }
+  try {
+    await database.runAsync(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, [
+      INTEGRITY_REPAIR_SCHEMA_KEY,
+      String(SCHEMA_VERSION),
+    ]);
+  } catch {
+    // Settings table should exist; ignore marker write failures.
   }
   financialIntegrityRepaired = true;
 }

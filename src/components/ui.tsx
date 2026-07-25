@@ -171,7 +171,12 @@ export function PrimaryButton({
   return (
     <TouchableOpacity
       style={[btnStyle, (disabled || loading) && styles.disabled]}
-      onPress={onPress}
+      onPress={() => {
+        void import('../utils/haptics').then((m) =>
+          variant === 'danger' ? m.hapticWarning() : m.hapticLight()
+        );
+        onPress();
+      }}
       disabled={disabled || loading}
       activeOpacity={0.8}
       accessibilityRole="button"
@@ -1051,7 +1056,10 @@ export function Fab({
   return (
     <TouchableOpacity
       style={styles.fab}
-      onPress={onPress}
+      onPress={() => {
+        void import('../utils/haptics').then((m) => m.hapticLight());
+        onPress();
+      }}
       activeOpacity={0.85}
       accessibilityRole="button"
       accessibilityLabel={label}

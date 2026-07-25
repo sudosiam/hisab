@@ -180,6 +180,8 @@ export async function hasGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<bool
 
 const LEDGER_CODE_VERSION = '6';
 let rebuildInFlight: Promise<void> | null = null;
+/** Set when a rebuild is requested while another is already running. */
+let rebuildQueued = false;
 let ledgerRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Coalesce ledger rebuilds so rapid saves stay snappy; run after transitions settle. */
@@ -226,11 +228,35 @@ export async function ensureLedgerUpToDate(db?: SQLite.SQLiteDatabase): Promise<
 /** Rebuild the general ledger from all business records (double-entry). */
 export async function rebuildGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<void> {
   if (rebuildInFlight) {
+    rebuildQueued = true;
     await rebuildInFlight;
+    if (rebuildQueued) {
+      await rebuildGeneralLedger(db);
+    }
     return;
   }
 
-  rebuildInFlight = (async () => {
+  const run = (async () => {
+    do {
+      rebuildQueued = false;
+      await performGeneralLedgerRebuild(db);
+    } while (rebuildQueued);
+  })();
+
+  rebuildInFlight = run;
+  try {
+    await run;
+  } finally {
+    if (rebuildInFlight === run) {
+      rebuildInFlight = null;
+    }
+  }
+  if (rebuildQueued) {
+    await rebuildGeneralLedger(db);
+  }
+}
+
+async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<void> {
   const database = db ?? (await getDatabase());
 
   const table = await database.getFirstAsync<{ name: string }>(
@@ -797,13 +823,6 @@ export async function rebuildGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<
     });
   }
   });
-  })();
-
-  try {
-    await rebuildInFlight;
-  } finally {
-    rebuildInFlight = null;
-  }
 }
 
 function buildRunningBalance(

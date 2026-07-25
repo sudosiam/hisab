@@ -14,11 +14,11 @@ export function StatusBadge({ status }: Props) {
 
   const tone =
     status === 'paid'
-      ? { bg: colors.success + '18', fg: colors.paid }
+      ? { bg: colors.success + '33', fg: colors.paid }
       : status === 'partial'
-        ? { bg: colors.warning + '18', fg: colors.partial }
+        ? { bg: colors.warning + '40', fg: colors.partial }
         : status === 'unpaid'
-          ? { bg: colors.danger + '18', fg: colors.unpaid }
+          ? { bg: colors.danger + '33', fg: colors.unpaid }
           : { bg: colors.surfaceContainer, fg: colors.textSecondary };
 
   return (
@@ -31,13 +31,13 @@ export function StatusBadge({ status }: Props) {
 function createStyles(_colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
     badge: {
-      paddingHorizontal: 6,
-      paddingVertical: 2,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
       borderRadius: radius.full,
       alignSelf: 'flex-start',
     },
     text: {
-      fontSize: 9,
+      fontSize: 11,
       fontWeight: '700',
       textTransform: 'uppercase',
       letterSpacing: 0.3,

@@ -14,7 +14,7 @@ import { getBusinessState, isGstEnabled, isTaxInclusivePricing } from './appSett
 import { formatCurrency } from '../utils/format';
 import { addMoney, roundMoney, subMoney } from '../utils/money';
 import { resolvePeriodRange } from '../utils/period';
-import { pickLegacyPaymentMatch } from '../utils/paymentPair';
+import { tryPickLegacyPaymentMatch } from '../utils/paymentPair';
 import type { PaymentInput, Sale, SaleInvoiceType, SaleItem, SaleItemInput, SalePayment } from '../types';
 
 function normalizeInvoiceType(value?: string | null): SaleInvoiceType {
@@ -658,7 +658,7 @@ export async function removeSalePayment(saleId: number, paymentId: number): Prom
       await updateAccountBalance(db, linkedTx.account_id, -linkedTx.amount);
       await db.runAsync('DELETE FROM transactions WHERE id = ?', [linkedTx.id]);
     } else {
-      const legacy = pickLegacyPaymentMatch(
+      const legacy = tryPickLegacyPaymentMatch(
         await db.getAllAsync<{ id: number }>(
           `SELECT id FROM transactions
            WHERE reference_type = 'sale' AND reference_id = ? AND type = 'sale_payment'
@@ -666,8 +666,11 @@ export async function removeSalePayment(saleId: number, paymentId: number): Prom
           [saleId, payment.account_id, payment.amount, payment.date]
         )
       );
-      await updateAccountBalance(db, payment.account_id, -payment.amount);
-      await db.runAsync('DELETE FROM transactions WHERE id = ?', [legacy.id]);
+      if (legacy) {
+        await updateAccountBalance(db, payment.account_id, -payment.amount);
+        await db.runAsync('DELETE FROM transactions WHERE id = ?', [legacy.id]);
+      }
+      // Orphan payment row: still remove the payment; cash was never linked.
     }
 
     await db.runAsync('DELETE FROM sale_payments WHERE id = ?', [paymentId]);
