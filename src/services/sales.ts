@@ -34,26 +34,23 @@ async function resolvePartyState(
   partyName: string,
   partyId?: number | null
 ): Promise<string | null> {
+  const { normalizeStateToCode, stateCodeFromGstin } = await import('./gst');
   if (partyId) {
     const row = await db.getFirstAsync<{ state: string | null; gstin: string | null }>(
       'SELECT state, gstin FROM parties WHERE id = ?',
       [partyId]
     );
-    if (row?.state) return row.state;
-    if (row?.gstin) {
-      const { stateCodeFromGstin } = await import('./gst');
-      return stateCodeFromGstin(row.gstin);
-    }
+    const fromState = normalizeStateToCode(row?.state);
+    if (fromState) return fromState;
+    if (row?.gstin) return stateCodeFromGstin(row.gstin);
   }
   const byName = await db.getFirstAsync<{ state: string | null; gstin: string | null }>(
     `SELECT state, gstin FROM parties WHERE name = ? COLLATE NOCASE AND type = 'customer' LIMIT 1`,
     [partyName.trim()]
   );
-  if (byName?.state) return byName.state;
-  if (byName?.gstin) {
-    const { stateCodeFromGstin } = await import('./gst');
-    return stateCodeFromGstin(byName.gstin);
-  }
+  const fromNameState = normalizeStateToCode(byName?.state);
+  if (fromNameState) return fromNameState;
+  if (byName?.gstin) return stateCodeFromGstin(byName.gstin);
   return null;
 }
 

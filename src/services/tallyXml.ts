@@ -7,6 +7,7 @@ import {
   getBusinessName,
   getBusinessState,
   getSelectedFinancialYearStartYear,
+  setBusinessState,
 } from './appSettings';
 import { getParties, upsertParty } from './parties';
 import { createSale, getSaleItems, getSales } from './sales';
@@ -18,7 +19,9 @@ import {
   getPaymentVoucherLines,
   getPaymentVouchers,
   paymentVoucherExists,
+  planFifoAllocationsAgainstOpenInvoices,
 } from './paymentVouchers';
+import { normalizeStateToCode, stateCodeFromGstin } from './gst';
 import { getDatabase } from '../db/database';
 import { makeFinancialYearPeriodKey } from '../utils/date';
 import { deferDeleteCacheFile } from '../utils/tempShareFiles';
@@ -347,7 +350,8 @@ function classifyVoucherType(raw: string):
   const t = raw.toLowerCase().trim();
   if (!t) return 'unsupported';
   if (t.includes('receipt')) return 'receipt';
-  if (t === 'payment' || t.startsWith('payment ')) return 'payment';
+  // After receipt: "Cash Payment" / "Bank Payment" must not fall through.
+  if (t.includes('payment')) return 'payment';
   if (t.includes('bill of supply') || t === 'bos' || t.includes('sales-bos')) return 'bos';
   if (t.includes('sale')) return 'sale';
   if (t.includes('purchase')) return 'purchase';
@@ -688,11 +692,19 @@ function bumpSkip(map: Map<string, number>, reason: string) {
   map.set(reason, (map.get(reason) ?? 0) + 1);
 }
 
-async function saleExists(invoiceNo: string, date: string): Promise<boolean> {
+type ImportVoucherKind = 'sale' | 'bos' | 'purchase' | 'receipt' | 'payment';
+
+async function saleExists(
+  invoiceNo: string,
+  date: string,
+  invoiceType: 'invoice' | 'bos'
+): Promise<boolean> {
   const db = await getDatabase();
   const row = await db.getFirstAsync<{ id: number }>(
-    'SELECT id FROM sales WHERE invoice_no = ? COLLATE NOCASE AND date = ? LIMIT 1',
-    [normalizeVoucherNo(invoiceNo), date]
+    `SELECT id FROM sales
+     WHERE invoice_no = ? COLLATE NOCASE AND date = ? AND invoice_type = ?
+     LIMIT 1`,
+    [normalizeVoucherNo(invoiceNo), date, invoiceType]
   );
   return !!row;
 }
@@ -704,6 +716,30 @@ async function purchaseExists(invoiceNo: string, date: string): Promise<boolean>
     [normalizeVoucherNo(invoiceNo), date]
   );
   return !!row;
+}
+
+/**
+ * Tally duplicate key: (VCHTYPE family, VOUCHERNUMBER, DATE).
+ * Receipt #1 and Payment #1 are never duplicates of each other — each voucher
+ * type keeps an independent numbering series.
+ */
+async function importVoucherAlreadyExists(
+  kind: ImportVoucherKind,
+  voucherNo: string,
+  date: string
+): Promise<boolean> {
+  if (kind === 'receipt' || kind === 'payment') {
+    return paymentVoucherExists(kind, voucherNo, date);
+  }
+  if (kind === 'purchase') {
+    return purchaseExists(voucherNo, date);
+  }
+  return saleExists(voucherNo, date, kind === 'bos' ? 'bos' : 'invoice');
+}
+
+function isVoucherDuplicateError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /^Duplicate (receipt|payment) voucher\b/i.test(msg);
 }
 
 async function ensureProductByName(
@@ -859,6 +895,12 @@ export async function importTallyXml(xml: string): Promise<TallyImportResult> {
     result.skipped += 1;
   };
 
+  const stateVotes = new Map<string, number>();
+  const voteState = (code: string | null | undefined) => {
+    if (!code) return;
+    stateVotes.set(code, (stateVotes.get(code) ?? 0) + 1);
+  };
+
   const ledgerBlocks = extractBlocks(xml, 'LEDGER');
   for (const block of ledgerBlocks) {
     const name = extractTag(block, 'NAME') || block.match(/NAME="([^"]+)"/i)?.[1] || '';
@@ -867,19 +909,48 @@ export async function importTallyXml(xml: string): Promise<TallyImportResult> {
     const type = parent.includes('creditor') ? 'vendor' : 'customer';
     try {
       await upsertParty(name.trim(), type, undefined, extractTag(block, 'LEDGERPHONE') || undefined);
-      const gstin = extractTag(block, 'GSTIN');
-      const state = extractTag(block, 'PRIORSTATENAME') || extractTag(block, 'STATENAME');
+      const gstin = extractTag(block, 'GSTIN').trim().toUpperCase() || '';
+      const rawState = extractTag(block, 'PRIORSTATENAME') || extractTag(block, 'STATENAME');
+      const state =
+        normalizeStateToCode(rawState) || (gstin ? stateCodeFromGstin(gstin) : null) || null;
       if (gstin || state) {
         const db = await getDatabase();
         await db.runAsync(
           `UPDATE parties SET gstin = COALESCE(?, gstin), state = COALESCE(?, state)
            WHERE name = ? COLLATE NOCASE AND type = ?`,
-          [gstin || null, state || null, name.trim(), type]
+          [gstin || null, state, name.trim(), type]
         );
+      }
+      if (parent.includes('debtor') || parent.includes('creditor')) {
+        voteState(state);
       }
       result.partiesCreated += 1;
     } catch (e) {
       result.errors.push(`Party ${name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // GST invoices need a business state. Infer from the file when Settings is empty
+  // so Tally imports with CGST/SGST do not all fail.
+  if (!(await getBusinessState()) && stateVotes.size > 0) {
+    let bestCode = '';
+    let bestCount = -1;
+    for (const [code, count] of stateVotes) {
+      if (count > bestCount) {
+        bestCode = code;
+        bestCount = count;
+      }
+    }
+    if (bestCode) {
+      try {
+        await setBusinessState(bestCode);
+      } catch (e) {
+        result.errors.push(
+          `Could not set business state from Tally file: ${
+            e instanceof Error ? e.message : String(e)
+          }`
+        );
+      }
     }
   }
 
@@ -939,7 +1010,7 @@ export async function importTallyXml(xml: string): Promise<TallyImportResult> {
     try {
       if (kind === 'receipt' || kind === 'payment') {
         const voucherType = kind;
-        if (await paymentVoucherExists(voucherType, voucherNo, date)) {
+        if (await importVoucherAlreadyExists(voucherType, voucherNo, date)) {
           skip(
             `${kind === 'receipt' ? 'Receipts' : 'Payments'}: duplicate voucher number`
           );
@@ -960,8 +1031,14 @@ export async function importTallyXml(xml: string): Promise<TallyImportResult> {
         }
         const bank = detectBankLedger(ledgerEntries, party);
         let allocations = parseBillAllocations(ledgerEntries, party);
+        // Many Tally exports omit BILLALLOCATIONS — without this, every receipt/payment
+        // stays "on account" and invoices remain Due even when the party was paid.
         if (allocations.length === 0) {
-          allocations = [{ bill_name: 'On Account', bill_type: 'on_account', amount }];
+          allocations = await planFifoAllocationsAgainstOpenInvoices(
+            voucherType,
+            party.trim(),
+            amount
+          );
         }
         const lines = ledgerEntries.map((block) => {
           const ledgerName = extractTag(block, 'LEDGERNAME');
@@ -1027,7 +1104,7 @@ export async function importTallyXml(xml: string): Promise<TallyImportResult> {
       }
 
       if (kind === 'purchase') {
-        if (await purchaseExists(voucherNo, date)) {
+        if (await importVoucherAlreadyExists('purchase', voucherNo, date)) {
           skip('Purchases: duplicate voucher number');
           continue;
         }
@@ -1048,11 +1125,11 @@ export async function importTallyXml(xml: string): Promise<TallyImportResult> {
         });
         result.purchasesImported += 1;
       } else {
-        if (await saleExists(voucherNo, date)) {
+        const invoiceType = kind === 'bos' ? 'bos' : 'invoice';
+        if (await importVoucherAlreadyExists(kind, voucherNo, date)) {
           skip('Sales: duplicate voucher number');
           continue;
         }
-        const invoiceType = kind === 'bos' ? 'bos' : 'invoice';
         await createSale({
           party_name: party.trim(),
           date,
@@ -1073,14 +1150,14 @@ export async function importTallyXml(xml: string): Promise<TallyImportResult> {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       result.errors.push(`Voucher ${voucherNo || '?'}: ${msg}`);
-      if (/duplicate/i.test(msg)) {
+      if (isVoucherDuplicateError(e)) {
         skip(
-          kind === 'purchase'
-            ? 'Purchases: duplicate voucher number'
-            : kind === 'receipt'
-              ? 'Receipts: duplicate voucher number'
-              : kind === 'payment'
-                ? 'Payments: duplicate voucher number'
+          kind === 'receipt'
+            ? 'Receipts: duplicate voucher number'
+            : kind === 'payment'
+              ? 'Payments: duplicate voucher number'
+              : kind === 'purchase'
+                ? 'Purchases: duplicate voucher number'
                 : 'Sales: duplicate voucher number'
         );
       } else {
@@ -1151,4 +1228,6 @@ export const __tallyXmlTestUtils = {
   normalizeVoucherNo,
   classifyVoucherType,
   formatTallyImportSummary,
+  importVoucherAlreadyExists,
+  isVoucherDuplicateError,
 };

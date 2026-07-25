@@ -51,6 +51,42 @@ export function stateName(code: string | null | undefined): string {
   return found ? found.name : code;
 }
 
+/** Common Tally / legacy aliases → canonical INDIAN_STATES names. */
+const STATE_NAME_ALIASES: Record<string, string> = {
+  orissa: 'Odisha',
+  pondicherry: 'Puducherry',
+  'daman and diu': 'Dadra and Nagar Haveli and Daman and Diu',
+  'dadra and nagar haveli': 'Dadra and Nagar Haveli and Daman and Diu',
+  'andhra pradesh (new)': 'Andhra Pradesh (new)',
+  'jammu & kashmir': 'Jammu and Kashmir',
+  'j&k': 'Jammu and Kashmir',
+};
+
+/** Map a GST state code or full state name (e.g. Tally PRIORSTATENAME) to a 2-digit code. */
+export function normalizeStateToCode(raw: string | null | undefined): string | null {
+  const cleaned = (raw ?? '').trim();
+  if (!cleaned) return null;
+  // Tally sometimes emits control-char placeholders like "&#4; Any"
+  if (/^&#\d+;/i.test(cleaned) || /^any$/i.test(cleaned) || /^not\s*applicable$/i.test(cleaned)) {
+    return null;
+  }
+  if (/^\d{2}$/.test(cleaned) && isValidStateCode(cleaned)) return cleaned;
+  const lower = cleaned.toLowerCase();
+  const aliased = STATE_NAME_ALIASES[lower];
+  if (aliased) {
+    const hit = INDIAN_STATES.find((s) => s.name === aliased);
+    if (hit) return hit.code;
+  }
+  const byName = INDIAN_STATES.find((s) => s.name.toLowerCase() === lower);
+  if (byName) return byName.code;
+  // Avoid short fuzzy matches ("a", "bi") picking the wrong state.
+  if (lower.length < 4) return null;
+  const partial = INDIAN_STATES.find(
+    (s) => lower.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(lower)
+  );
+  return partial?.code ?? null;
+}
+
 /** First 2 digits of GSTIN are the state code. */
 export function stateCodeFromGstin(gstin: string | null | undefined): string | null {
   const cleaned = (gstin ?? '').trim().toUpperCase();

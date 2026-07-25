@@ -11,6 +11,7 @@ const {
   parseRate,
   normalizeVoucherNo,
   classifyVoucherType,
+  isVoucherDuplicateError,
 } = __tallyXmlTestUtils;
 
 describe('tallyXml helpers', () => {
@@ -36,7 +37,21 @@ describe('tallyXml helpers', () => {
     expect(classifyVoucherType('Bill of Supply')).toBe('bos');
     expect(classifyVoucherType('Receipt')).toBe('receipt');
     expect(classifyVoucherType('Payment')).toBe('payment');
+    expect(classifyVoucherType('Cash Payment')).toBe('payment');
+    expect(classifyVoucherType('Bank Receipt')).toBe('receipt');
     expect(classifyVoucherType('Contra')).toBe('unsupported');
+  });
+
+  it('only treats real voucher-duplicate errors as duplicates', () => {
+    expect(
+      isVoucherDuplicateError(new Error('Duplicate receipt voucher 1 on 2026-04-02'))
+    ).toBe(true);
+    expect(
+      isVoucherDuplicateError(new Error('Duplicate payment voucher 1 on 2026-04-06'))
+    ).toBe(true);
+    expect(isVoucherDuplicateError(new Error('A product with this name already exists'))).toBe(
+      false
+    );
   });
 
   it('sample XML contains all supported voucher kinds', () => {

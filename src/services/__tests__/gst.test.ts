@@ -5,6 +5,7 @@ import {
   isInterStateSupply,
   isValidGstin,
   isValidStateCode,
+  normalizeStateToCode,
 } from '../gst';
 
 describe('GST engine', () => {
@@ -69,6 +70,17 @@ describe('GST engine', () => {
   it('enforces Tax Invoice when tax > 0', () => {
     expect(enforceInvoiceTypeForTax('bos', 10)).toBe('invoice');
     expect(enforceInvoiceTypeForTax('bos', 0)).toBe('bos');
+  });
+
+  it('normalizes Tally state names to GST codes', () => {
+    expect(normalizeStateToCode('West Bengal')).toBe('19');
+    expect(normalizeStateToCode('19')).toBe('19');
+    expect(normalizeStateToCode('Orissa')).toBe('21');
+    expect(normalizeStateToCode('Pondicherry')).toBe('34');
+    expect(normalizeStateToCode('&#4; Any')).toBeNull();
+    expect(normalizeStateToCode('Not Applicable')).toBeNull();
+    expect(normalizeStateToCode('a')).toBeNull();
+    expect(normalizeStateToCode('')).toBeNull();
   });
 
   it('requires states when GST is charged', () => {

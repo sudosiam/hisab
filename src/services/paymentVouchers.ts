@@ -85,11 +85,49 @@ async function ensureCashBankAccount(
   return createAccount({ name: 'Cash', type: 'cash', opening_balance: 0 });
 }
 
-async function findSaleByBillName(billName: string) {
+async function findSaleByBillName(billName: string, partyName?: string) {
   const db = await getDatabase();
   const name = billName.trim();
   if (!name) return null;
-  return db.getFirstAsync<{ id: number; invoice_no: string; total_amount: number; paid_amount: number; party_name: string }>(
+  const party = partyName?.trim() || '';
+  // Prefer open invoice for this party (FIFO-safe when invoice numbers collide).
+  if (party) {
+    const openForParty = await db.getFirstAsync<{
+      id: number;
+      invoice_no: string;
+      total_amount: number;
+      paid_amount: number;
+      party_name: string;
+    }>(
+      `SELECT id, invoice_no, total_amount, paid_amount, party_name FROM sales
+       WHERE invoice_no = ? COLLATE NOCASE
+         AND party_name = ? COLLATE NOCASE
+         AND (total_amount - paid_amount) > 0.009
+       ORDER BY date ASC, id ASC LIMIT 1`,
+      [name, party]
+    );
+    if (openForParty) return openForParty;
+    const anyForParty = await db.getFirstAsync<{
+      id: number;
+      invoice_no: string;
+      total_amount: number;
+      paid_amount: number;
+      party_name: string;
+    }>(
+      `SELECT id, invoice_no, total_amount, paid_amount, party_name FROM sales
+       WHERE invoice_no = ? COLLATE NOCASE AND party_name = ? COLLATE NOCASE
+       ORDER BY id DESC LIMIT 1`,
+      [name, party]
+    );
+    if (anyForParty) return anyForParty;
+  }
+  return db.getFirstAsync<{
+    id: number;
+    invoice_no: string;
+    total_amount: number;
+    paid_amount: number;
+    party_name: string;
+  }>(
     `SELECT id, invoice_no, total_amount, paid_amount, party_name FROM sales
      WHERE invoice_no = ? COLLATE NOCASE
      ORDER BY id DESC LIMIT 1`,
@@ -97,10 +135,44 @@ async function findSaleByBillName(billName: string) {
   );
 }
 
-async function findPurchaseByBillName(billName: string) {
+async function findPurchaseByBillName(billName: string, partyName?: string) {
   const db = await getDatabase();
   const name = billName.trim();
   if (!name) return null;
+  const party = partyName?.trim() || '';
+  if (party) {
+    const openForParty = await db.getFirstAsync<{
+      id: number;
+      invoice_no: string;
+      vendor_invoice_no: string | null;
+      total_amount: number;
+      paid_amount: number;
+      supplier_name: string;
+    }>(
+      `SELECT id, invoice_no, vendor_invoice_no, total_amount, paid_amount, supplier_name FROM purchases
+       WHERE (invoice_no = ? COLLATE NOCASE OR vendor_invoice_no = ? COLLATE NOCASE)
+         AND supplier_name = ? COLLATE NOCASE
+         AND (total_amount - paid_amount) > 0.009
+       ORDER BY date ASC, id ASC LIMIT 1`,
+      [name, name, party]
+    );
+    if (openForParty) return openForParty;
+    const anyForParty = await db.getFirstAsync<{
+      id: number;
+      invoice_no: string;
+      vendor_invoice_no: string | null;
+      total_amount: number;
+      paid_amount: number;
+      supplier_name: string;
+    }>(
+      `SELECT id, invoice_no, vendor_invoice_no, total_amount, paid_amount, supplier_name FROM purchases
+       WHERE (invoice_no = ? COLLATE NOCASE OR vendor_invoice_no = ? COLLATE NOCASE)
+         AND supplier_name = ? COLLATE NOCASE
+       ORDER BY id DESC LIMIT 1`,
+      [name, name, party]
+    );
+    if (anyForParty) return anyForParty;
+  }
   return db.getFirstAsync<{
     id: number;
     invoice_no: string;
@@ -114,6 +186,75 @@ async function findPurchaseByBillName(billName: string) {
      ORDER BY id DESC LIMIT 1`,
     [name, name]
   );
+}
+
+/**
+ * When Tally omits BILLALLOCATIONS (common in exports), apply the voucher amount
+ * FIFO against open invoices for the same party. Leftover stays on-account/advance.
+ */
+export async function planFifoAllocationsAgainstOpenInvoices(
+  voucherType: PaymentVoucherType,
+  partyName: string,
+  amount: number
+): Promise<PaymentVoucherAllocationInput[]> {
+  const total = roundMoney(Math.abs(amount));
+  if (!(total > 0.009) || !partyName.trim()) {
+    return [{ bill_name: 'On Account', bill_type: 'on_account', amount: total }];
+  }
+
+  const db = await getDatabase();
+  const open =
+    voucherType === 'receipt'
+      ? await db.getAllAsync<{
+          invoice_no: string;
+          total_amount: number;
+          paid_amount: number;
+        }>(
+          `SELECT invoice_no, total_amount, paid_amount FROM sales
+           WHERE party_name = ? COLLATE NOCASE
+             AND (total_amount - paid_amount) > 0.009
+           ORDER BY date ASC, id ASC`,
+          [partyName.trim()]
+        )
+      : await db.getAllAsync<{
+          invoice_no: string;
+          total_amount: number;
+          paid_amount: number;
+        }>(
+          `SELECT invoice_no, total_amount, paid_amount FROM purchases
+           WHERE supplier_name = ? COLLATE NOCASE
+             AND (total_amount - paid_amount) > 0.009
+           ORDER BY date ASC, id ASC`,
+          [partyName.trim()]
+        );
+
+  const allocations: PaymentVoucherAllocationInput[] = [];
+  let remaining = total;
+  for (const inv of open) {
+    if (remaining <= 0.009) break;
+    const due = roundMoney(Math.max(0, inv.total_amount - inv.paid_amount));
+    if (due <= 0.009) continue;
+    const apply = roundMoney(Math.min(remaining, due));
+    allocations.push({
+      bill_name: inv.invoice_no,
+      bill_type: 'agst_ref',
+      amount: apply,
+    });
+    remaining = roundMoney(remaining - apply);
+  }
+
+  if (remaining > 0.009) {
+    allocations.push({
+      bill_name: 'On Account',
+      bill_type: 'on_account',
+      amount: remaining,
+    });
+  }
+
+  if (allocations.length === 0) {
+    return [{ bill_name: 'On Account', bill_type: 'on_account', amount: total }];
+  }
+  return allocations;
 }
 
 /**
@@ -202,7 +343,7 @@ export async function createPaymentVoucher(
 
       if (billType === 'agst_ref') {
         if (params.voucher_type === 'receipt') {
-          const sale = await findSaleByBillName(alloc.bill_name);
+          const sale = await findSaleByBillName(alloc.bill_name, params.party_name);
           if (sale) {
             saleId = sale.id;
             const due = roundMoney(Math.max(0, sale.total_amount - sale.paid_amount));
@@ -246,7 +387,7 @@ export async function createPaymentVoucher(
             billType = 'on_account';
           }
         } else {
-          const purchase = await findPurchaseByBillName(alloc.bill_name);
+          const purchase = await findPurchaseByBillName(alloc.bill_name, params.party_name);
           if (purchase) {
             purchaseId = purchase.id;
             const due = roundMoney(Math.max(0, purchase.total_amount - purchase.paid_amount));

@@ -2,7 +2,7 @@
 
 Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. Books stay on the device; optional encrypted cloud backup via Supabase.
 
-**Current version:** `10.5.0` (Android `versionCode` 35 · schema v26)
+**Current version:** `10.6.0` (Android `versionCode` 36 · schema v26)
 
 ## What's in Hisab
 
@@ -13,6 +13,19 @@ Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. 
 - **PDF & WhatsApp** — Invoice and ledger PDFs; WhatsApp share opens the party number when available (native build)
 - **Backup** — Local SAF daily backup + optional cloud backup; delete cloud snapshot from Settings
 - **Reliability** — DB init generation guard, deferred integrity repair, draft/haptic/skeleton UX polish
+
+## What's new in 10.6.0
+
+**Tally import accuracy**
+- FIFO allocation when Tally omits `BILLALLOCATIONS` so receipts/payments clear open invoices
+- Duplicate voucher key respects voucher type family (Receipt #1 ≠ Payment #1; Tax Invoice ≠ BOS)
+- Cash/Bank Payment voucher types classified correctly
+- Infer business GST state from party states when Settings is empty
+- Normalize Tally state names / aliases (Orissa, Pondicherry, `&#4; Any`) to GST codes
+
+**Correctness**
+- Bill lookup scopes to the voucher party and prefers open invoices (safe with duplicate invoice numbers)
+- Party/vendor state resolution never keeps invalid Tally placeholders for CGST/SGST vs IGST
 
 ## What's new in 10.5.0
 
@@ -78,8 +91,8 @@ Copy into `releases/` for handoff (APKs are gitignored):
 
 ```powershell
 New-Item -ItemType Directory -Force releases | Out-Null
-Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-10.5.0.apk" -Force
-adb install -r "releases\hisab-10.5.0.apk"
+Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-10.6.0.apk" -Force
+adb install -r "releases\hisab-10.6.0.apk"
 ```
 
 ## Build APK (EAS cloud)
