@@ -35,6 +35,12 @@ const SETTINGS_ITEMS = [
     icon: 'cloud-upload-outline' as const,
   },
   {
+    title: 'Tally XML',
+    route: '/(drawer)/settings/tally',
+    desc: 'Import and export vouchers for Tally',
+    icon: 'swap-horizontal-outline' as const,
+  },
+  {
     title: 'Data',
     route: '/(drawer)/settings/data',
     desc: 'Reset database',

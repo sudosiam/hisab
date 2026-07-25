@@ -12,6 +12,7 @@ import { HeaderBackButton } from '@react-navigation/elements';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../context/ThemeContext';
+import { CalculatorHeaderButton } from '../components/QuickCalculator';
 
 const LIST_ROUTE = 'index';
 const FORM_ROUTES = new Set(['new', 'edit', 'add-account', 'transfer', 'cash']);
@@ -167,6 +168,7 @@ export function useStackScreenOptions() {
         />
       );
     },
+    headerRight: () => <CalculatorHeaderButton tintColor={colors.headerText} />,
   });
 }
 
@@ -178,5 +180,6 @@ export function useDrawerScreenOptions() {
   return {
     ...base,
     headerLeft: () => <DrawerMenuButton tintColor={colors.headerText} />,
+    headerRight: () => <CalculatorHeaderButton tintColor={colors.headerText} />,
   };
 }

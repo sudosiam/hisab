@@ -42,6 +42,8 @@ export default function SalesListScreen() {
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [invoiceCount, setInvoiceCount] = useState(0);
+  const [bosCount, setBosCount] = useState(0);
 
   const filteredSales = useMemo(
     () =>
@@ -75,7 +77,13 @@ export default function SalesListScreen() {
   const load = useCallback(async () => {
     const paymentFilter = filter === 'bos' ? 'all' : filter;
     const invoiceType = filter === 'bos' ? 'bos' : 'all';
-    setSales(await getSales(paymentFilter, { periodKey: monthKey, invoiceType }));
+    const [list, allInPeriod] = await Promise.all([
+      getSales(paymentFilter, { periodKey: monthKey, invoiceType }),
+      getSales('all', { periodKey: monthKey, invoiceType: 'all' }),
+    ]);
+    setSales(list);
+    setInvoiceCount(allInPeriod.filter((s) => s.invoice_type !== 'bos').length);
+    setBosCount(allInPeriod.filter((s) => s.invoice_type === 'bos').length);
   }, [filter, monthKey]);
 
   const { booting, error, retry } = useFocusRefresh(load, [refreshKey, filter, monthKey]);
@@ -121,6 +129,17 @@ export default function SalesListScreen() {
             labelStyle={{ fontWeight: '400', fontSize: 13, color: colors.textSecondary }}
           />
         ) : null}
+        <Text
+          style={{
+            fontSize: 11,
+            color: colors.textMuted,
+            marginTop: 2,
+            marginBottom: 2,
+            fontVariant: ['tabular-nums'],
+          }}
+        >
+          Inv {invoiceCount} · BOS {bosCount}
+        </Text>
       </View>
 
       <FilterRow>

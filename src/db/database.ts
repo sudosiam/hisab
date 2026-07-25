@@ -1878,9 +1878,7 @@ export async function reduceInventory(
     [productId]
   );
   if (!product) throw new Error('Product not found');
-  if (roundMoney(product.current_qty) < roundMoney(qty)) {
-    throw new Error(`Insufficient stock for ${product.name} (${product.current_qty} available)`);
-  }
+  // Negative stock is allowed (sell / issue even when on-hand is insufficient).
 
   let unitCost = product.avg_cost;
   if (unitCost <= 0) {

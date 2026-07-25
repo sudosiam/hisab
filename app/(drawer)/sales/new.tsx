@@ -95,55 +95,97 @@ export default function NewSaleScreen() {
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        typeRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+        headerStrip: {
+          ...cardSurface(colors, isDark),
+          paddingHorizontal: spacing.sm + 2,
+          paddingVertical: spacing.sm,
+          marginBottom: spacing.sm,
+          gap: spacing.sm,
+        },
+        typeRow: { flexDirection: 'row', gap: spacing.xs },
         typeChip: {
           flex: 1,
-          paddingVertical: 10,
-          borderRadius: radius.md,
+          paddingVertical: 8,
+          borderRadius: radius.sm,
           borderWidth: 1,
           borderColor: colors.border,
           alignItems: 'center',
           backgroundColor: colors.surface,
         },
         typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-        typeChipText: { fontWeight: '600', color: colors.text },
+        typeChipText: { fontWeight: '600', color: colors.text, fontSize: 13 },
         typeChipTextActive: { color: colors.onPrimary },
+        headerMeta: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
+        headerMetaGrow: { flex: 1.2 },
+        headerMetaDate: { flex: 1 },
+        partyBlock: {
+          ...cardSurface(colors, isDark),
+          paddingHorizontal: spacing.sm + 2,
+          paddingVertical: spacing.sm,
+          marginBottom: spacing.sm,
+          gap: 2,
+        },
         itemCard: {
           ...cardSurface(colors, isDark),
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
+          paddingHorizontal: spacing.sm + 2,
+          paddingVertical: spacing.sm,
           marginBottom: spacing.sm,
         },
-        itemRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm },
-        qtyField: { flex: 1 },
-        priceField: { flex: 1.2 },
+        itemRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs },
+        qtyField: { flex: 0.85 },
+        priceField: { flex: 1.1 },
+        gstField: { flex: 0.75 },
         removeBtn: { padding: spacing.sm, marginBottom: spacing.md },
-        removeText: { color: colors.danger, fontSize: 18 },
+        removeText: { color: colors.danger, fontSize: 16 },
+        hsnToggle: { marginTop: 2, marginBottom: spacing.xs },
+        hsnToggleText: { fontSize: 12, color: colors.primary, fontWeight: '600' },
         totals: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
           paddingVertical: spacing.sm + 2,
           marginVertical: spacing.sm,
-          gap: spacing.xs,
+          gap: 4,
         },
-        totalRow: { flexDirection: 'row', justifyContent: 'space-between' },
-        totalLabel: { fontSize: 14, color: colors.textSecondary },
+        totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+        totalLabel: { fontSize: 13, color: colors.textSecondary },
         totalValue: {
-          fontSize: 14,
+          fontSize: 13,
           fontWeight: '600',
           color: colors.text,
           fontVariant: ['tabular-nums'],
         },
         grandTotal: {
-          fontSize: 18,
+          fontSize: 17,
           fontWeight: '700',
           color: colors.primary,
           fontVariant: ['tabular-nums'],
         },
+        paidHint: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
         hint: { color: colors.warning },
+        discountRow: { flexDirection: 'row', gap: spacing.sm },
+        discountField: { flex: 1 },
+        addItemBtn: {
+          marginTop: spacing.xs,
+          marginBottom: spacing.sm,
+          minHeight: 52,
+          borderRadius: radius.md,
+          borderWidth: 1.5,
+          borderColor: colors.primary,
+          borderStyle: 'dashed',
+          backgroundColor: colors.primaryContainer,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingVertical: spacing.md,
+        },
+        addItemBtnText: {
+          fontSize: 16,
+          fontWeight: '700',
+          color: colors.primary,
+        },
       }),
     [colors, isDark]
   );
+  const [showHsnByLine, setShowHsnByLine] = useState<Record<string, boolean>>({});
 
   const [partyName, setPartyName] = useState(
     () => (typeof partyNameParam === 'string' ? decodeURIComponent(partyNameParam) : '')
@@ -451,7 +493,6 @@ export default function NewSaleScreen() {
       return;
     }
     // Aggregate quantities per product so split lines are validated together.
-    const qtyByProduct = new Map<number, number>();
     for (const item of items) {
       if (!item.product_id) {
         Alert.alert('Error', 'Select a product for each line item');
@@ -467,19 +508,7 @@ export default function NewSaleScreen() {
         Alert.alert('Error', 'Each item must have unit price greater than zero');
         return;
       }
-      qtyByProduct.set(item.product_id, (qtyByProduct.get(item.product_id) ?? 0) + qty);
     }
-    for (const [productId, qty] of qtyByProduct) {
-      const product = products.find((p) => p.id === productId);
-      if (product && product.current_qty < qty) {
-        Alert.alert(
-          'Insufficient stock',
-          `${product.name} has only ${product.current_qty} in stock (need ${qty}).`
-        );
-        return;
-      }
-    }
-
     const performSave = async () => {
       try {
         const saleId = await createSale({
@@ -528,62 +557,72 @@ export default function NewSaleScreen() {
   return (
     <FormScreen>
       <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
-      <View style={localStyles.typeRow}>
-        {([
-          { value: 'invoice', label: 'Tax Invoice' },
-          { value: 'bos', label: 'Bill of Supply' },
-        ] as { value: SaleInvoiceType; label: string }[]).map((option) => (
-          <TouchableOpacity
-            key={option.value}
-            style={[
-              localStyles.typeChip,
-              invoiceType === option.value && localStyles.typeChipActive,
-            ]}
-            onPress={() => {
-              if (option.value === invoiceType) return;
-              setInvoiceType(option.value);
-              getNextSaleDocumentNo(option.value)
-                .then(setInvoiceNo)
-                .catch(() => {});
-            }}
-          >
-            <Text
+
+      <View style={localStyles.headerStrip}>
+        <View style={localStyles.typeRow}>
+          {(
+            [
+              { value: 'invoice', label: 'Tax Invoice' },
+              { value: 'bos', label: 'Bill of Supply' },
+            ] as { value: SaleInvoiceType; label: string }[]
+          ).map((option) => (
+            <TouchableOpacity
+              key={option.value}
               style={[
-                localStyles.typeChipText,
-                invoiceType === option.value && localStyles.typeChipTextActive,
+                localStyles.typeChip,
+                invoiceType === option.value && localStyles.typeChipActive,
               ]}
+              onPress={() => {
+                if (option.value === invoiceType) return;
+                setInvoiceType(option.value);
+                getNextSaleDocumentNo(option.value)
+                  .then(setInvoiceNo)
+                  .catch(() => {});
+              }}
             >
-              {option.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              <Text
+                style={[
+                  localStyles.typeChipText,
+                  invoiceType === option.value && localStyles.typeChipTextActive,
+                ]}
+              >
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <View style={localStyles.headerMeta}>
+          <View style={localStyles.headerMetaGrow}>
+            <FormInput
+              label={invoiceType === 'bos' ? 'BOS No' : 'Invoice No'}
+              value={invoiceNo}
+              onChangeText={setInvoiceNo}
+              placeholder="Auto"
+            />
+          </View>
+          <View style={localStyles.headerMetaDate}>
+            <DatePickerField label="Date" value={date} onChange={setDate} />
+          </View>
+        </View>
       </View>
-      <FormInput
-        label={invoiceType === 'bos' ? 'BOS No' : 'Invoice No'}
-        value={invoiceNo}
-        onChangeText={setInvoiceNo}
-        placeholder="Auto-generated"
-      />
-      <CustomerAutocomplete value={partyName} onChange={setPartyName} />
-      <FormInput
-        label="Phone"
-        value={partyPhone}
-        onChangeText={setPartyPhone}
-        keyboardType="phone-pad"
-        placeholder="Customer mobile number"
-      />
-      <DatePickerField label="Date" value={date} onChange={setDate} />
-      <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
+
+      <View style={localStyles.partyBlock}>
+        <CustomerAutocomplete value={partyName} onChange={setPartyName} />
+        <FormInput
+          label="Phone"
+          value={partyPhone}
+          onChangeText={setPartyPhone}
+          keyboardType="phone-pad"
+          placeholder="Mobile"
+        />
+      </View>
 
       <View style={styles.section}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <SectionHeader title="Line Items" />
-          <TouchableOpacity onPress={addItem}>
-            <Text style={styles.link}>+ Add Item</Text>
-          </TouchableOpacity>
-        </View>
+        <SectionHeader title="Items" />
 
-        {items.map((item, index) => (
+        {items.map((item, index) => {
+          const showHsn = showHsnByLine[item.key] || !!item.hsn_sac.trim();
+          return (
             <View key={item.key} style={localStyles.itemCard}>
               <ProductPicker
                 products={products}
@@ -605,10 +644,19 @@ export default function NewSaleScreen() {
                 </View>
                 <View style={localStyles.priceField}>
                   <FormInput
-                    label="Unit Price (₹)"
+                    label="Rate"
                     value={item.unit_price}
                     onChangeText={(v) => updateItem(index, 'unit_price', v)}
                     money
+                  />
+                </View>
+                <View style={localStyles.gstField}>
+                  <FormInput
+                    label="GST%"
+                    value={item.gst_rate}
+                    onChangeText={(v) => updateItem(index, 'gst_rate', v)}
+                    money
+                    placeholder="0"
                   />
                 </View>
                 <TouchableOpacity
@@ -621,46 +669,61 @@ export default function NewSaleScreen() {
                   <Text style={localStyles.removeText}>✕</Text>
                 </TouchableOpacity>
               </View>
-              <View style={localStyles.itemRow}>
-                <View style={localStyles.qtyField}>
-                  <FormInput
-                    label="HSN/SAC"
-                    value={item.hsn_sac}
-                    onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
-                    placeholder="Optional"
-                    keyboardType="number-pad"
-                  />
-                </View>
-                <View style={localStyles.priceField}>
-                  <FormInput
-                    label="GST %"
-                    value={item.gst_rate}
-                    onChangeText={(v) => updateItem(index, 'gst_rate', v)}
-                    money
-                    placeholder="0"
-                  />
-                </View>
-              </View>
+              {!showHsn ? (
+                <TouchableOpacity
+                  style={localStyles.hsnToggle}
+                  onPress={() =>
+                    setShowHsnByLine((prev) => ({ ...prev, [item.key]: true }))
+                  }
+                >
+                  <Text style={localStyles.hsnToggleText}>+ HSN/SAC</Text>
+                </TouchableOpacity>
+              ) : (
+                <FormInput
+                  label="HSN/SAC"
+                  value={item.hsn_sac}
+                  onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
+                  placeholder="Optional"
+                  keyboardType="number-pad"
+                />
+              )}
             </View>
-          ))}
+          );
+        })}
+
+        <TouchableOpacity
+          style={localStyles.addItemBtn}
+          onPress={addItem}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Add item"
+        >
+          <Text style={localStyles.addItemBtnText}>+ Add Item</Text>
+        </TouchableOpacity>
 
         <View style={localStyles.totals}>
           {gstEnabled ? (
-            <Text style={[localStyles.totalLabel, localStyles.hint, { marginBottom: spacing.xs }]}>
-              {taxInclusive ? 'Prices are tax-inclusive' : 'Prices are tax-exclusive'}
+            <Text style={[localStyles.totalLabel, localStyles.hint]}>
+              {taxInclusive ? 'Tax-inclusive prices' : 'Tax-exclusive prices'}
             </Text>
           ) : null}
           <View style={localStyles.totalRow}>
             <Text style={localStyles.totalLabel}>Subtotal</Text>
             <Text style={localStyles.totalValue}>{formatCurrency(subtotal)}</Text>
           </View>
-          <FormInput label="Total Discount (₹)" value={discount} onChangeText={setDiscount} money />
-          <FormInput
-            label="Service Charges (₹, optional)"
-            value={serviceCharges}
-            onChangeText={setServiceCharges}
-            money
-          />
+          <View style={localStyles.discountRow}>
+            <View style={localStyles.discountField}>
+              <FormInput label="Discount" value={discount} onChangeText={setDiscount} money />
+            </View>
+            <View style={localStyles.discountField}>
+              <FormInput
+                label="Service"
+                value={serviceCharges}
+                onChangeText={setServiceCharges}
+                money
+              />
+            </View>
+          </View>
           {gstEnabled && gstDoc && gstDoc.tax_amount > 0.009 ? (
             <>
               <View style={localStyles.totalRow}>
@@ -686,12 +749,15 @@ export default function NewSaleScreen() {
               )}
             </>
           ) : null}
-          <View style={[localStyles.totalRow, { marginTop: spacing.sm }]}>
-            <Text style={localStyles.totalLabel}>Grand Total</Text>
+          <View style={[localStyles.totalRow, { marginTop: 4 }]}>
+            <Text style={localStyles.totalLabel}>Total</Text>
             <Text style={localStyles.grandTotal}>{formatCurrency(total)}</Text>
           </View>
+          <Text style={localStyles.paidHint}>Paid {formatCurrency(paidTotal)}</Text>
         </View>
       </View>
+
+      <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
 
       <SectionHeader title="Payment" />
       <PaymentSplitForm

@@ -11,6 +11,7 @@ export default function SettingsLayout() {
       <Stack.Screen name="financial-year" options={{ title: 'Financial Year' }} />
       <Stack.Screen name="invoicing" options={{ title: 'Invoicing' }} />
       <Stack.Screen name="backup" options={{ title: 'Backup' }} />
+      <Stack.Screen name="tally" options={{ title: 'Tally XML' }} />
       <Stack.Screen name="data" options={{ title: 'Data' }} />
     </Stack>
   );

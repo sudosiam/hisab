@@ -390,22 +390,6 @@ async function replaceSaleItems(
     await recomputeProductStock(db, productId);
   }
 
-  const qtyByProduct = new Map<number, number>();
-  for (const item of items) {
-    qtyByProduct.set(item.product_id, (qtyByProduct.get(item.product_id) ?? 0) + item.qty);
-  }
-  for (const [productId, qty] of qtyByProduct) {
-    const product = await db.getFirstAsync<{ current_qty: number; name: string }>(
-      'SELECT current_qty, name FROM products WHERE id = ?',
-      [productId]
-    );
-    if (product && product.current_qty + 0.0001 < qty) {
-      throw new Error(
-        `Insufficient stock for ${product.name} (only ${product.current_qty} available)`
-      );
-    }
-  }
-
   let subtotal = 0;
   for (let i = 0; i < items.length; i++) {
     const item = items[i];

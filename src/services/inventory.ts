@@ -255,13 +255,6 @@ export async function adjustStock(
     ]);
     if (!product) throw new Error('Product not found');
 
-    const projectedQty = roundMoney(product.current_qty + qty);
-    if (projectedQty < 0) {
-      throw new Error(
-        `Cannot reduce stock below zero (current: ${product.current_qty}, adjustment: ${qty})`
-      );
-    }
-
     await db.runAsync(
       `INSERT INTO inventory_movements (product_id, type, qty, unit_cost, reference_type, notes)
        VALUES (?, 'adjustment', ?, ?, 'adjustment', ?)`,

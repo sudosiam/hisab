@@ -82,15 +82,18 @@ export default function EditSaleScreen() {
         typeChipTextActive: { color: colors.onPrimary },
         itemCard: {
           ...cardSurface(colors, isDark),
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
+          paddingHorizontal: spacing.sm + 2,
+          paddingVertical: spacing.sm,
           marginBottom: spacing.sm,
         },
-        itemRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm },
-        qtyField: { flex: 1 },
-        priceField: { flex: 1.2 },
+        itemRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs },
+        qtyField: { flex: 0.85 },
+        priceField: { flex: 1.1 },
+        gstField: { flex: 0.75 },
         removeBtn: { padding: spacing.sm, marginBottom: spacing.md },
-        removeText: { color: colors.danger, fontSize: 18 },
+        removeText: { color: colors.danger, fontSize: 16 },
+        hsnToggle: { marginTop: 2, marginBottom: spacing.xs },
+        hsnToggleText: { fontSize: 12, color: colors.primary, fontWeight: '600' },
         totals: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
@@ -114,6 +117,24 @@ export default function EditSaleScreen() {
         },
         hint: { color: colors.warning },
         paidHint: { fontSize: 12, color: colors.textSecondary, marginBottom: spacing.sm },
+        addItemBtn: {
+          marginTop: spacing.xs,
+          marginBottom: spacing.sm,
+          minHeight: 52,
+          borderRadius: radius.md,
+          borderWidth: 1.5,
+          borderColor: colors.primary,
+          borderStyle: 'dashed',
+          backgroundColor: colors.primaryContainer,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingVertical: spacing.md,
+        },
+        addItemBtnText: {
+          fontSize: 16,
+          fontWeight: '700',
+          color: colors.primary,
+        },
       }),
     [colors, isDark]
   );
@@ -133,13 +154,13 @@ export default function EditSaleScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const savedSnapshotRef = useRef<string | null>(null);
-  const originalQtyByProductRef = useRef<Map<number, number>>(new Map());
   const productsRef = useRef<Product[]>([]);
   productsRef.current = products;
   const [businessState, setBusinessState] = useState('');
   const [gstEnabled, setGstEnabled] = useState(true);
   const [taxInclusive, setTaxInclusive] = useState(false);
   const [partyState, setPartyState] = useState<string | null>(null);
+  const [showHsnByLine, setShowHsnByLine] = useState<Record<string, boolean>>({});
 
   const saleId = React.useMemo(() => {
     const raw = Array.isArray(id) ? id[0] : id;
@@ -186,11 +207,6 @@ export default function EditSaleScreen() {
               ? [createEmptyLineItem()]
               : []
         );
-        const originalQty = new Map<number, number>();
-        for (const item of saleItems) {
-          originalQty.set(item.product_id, (originalQty.get(item.product_id) ?? 0) + item.qty);
-        }
-        originalQtyByProductRef.current = originalQty;
         savedSnapshotRef.current = JSON.stringify({
           partyName: s.party_name,
           partyPhone: '',
@@ -431,26 +447,6 @@ export default function EditSaleScreen() {
       }
     }
 
-    const qtyByProduct = new Map<number, number>();
-    for (const item of items) {
-      const qty = parseAmountInput(item.qty);
-      if (item.product_id && qty > 0) {
-        qtyByProduct.set(item.product_id, (qtyByProduct.get(item.product_id) ?? 0) + qty);
-      }
-    }
-    for (const [productId, qty] of qtyByProduct) {
-      const product = products.find((p) => p.id === productId);
-      const originalQty = originalQtyByProductRef.current.get(productId) ?? 0;
-      const available = (product?.current_qty ?? 0) + originalQty;
-      if (product && available < qty) {
-        Alert.alert(
-          'Insufficient stock',
-          `${product.name} has only ${available} in stock (need ${qty}).`
-        );
-        return;
-      }
-    }
-
     setSaving(true);
     try {
       await saveWithDuplicateInvoiceWarning(
@@ -560,14 +556,11 @@ export default function EditSaleScreen() {
       <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
 
       <View style={styles.section}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <SectionHeader title="Line Items" />
-          <TouchableOpacity onPress={addItem}>
-            <Text style={styles.link}>+ Add Item</Text>
-          </TouchableOpacity>
-        </View>
+        <SectionHeader title="Line Items" />
 
-        {items.map((item, index) => (
+        {items.map((item, index) => {
+          const showHsn = showHsnByLine[item.key] || !!item.hsn_sac.trim();
+          return (
             <View key={item.key} style={localStyles.itemCard}>
               <ProductPicker
                 products={products}
@@ -589,10 +582,19 @@ export default function EditSaleScreen() {
                 </View>
                 <View style={localStyles.priceField}>
                   <FormInput
-                    label="Unit Price (₹)"
+                    label="Rate"
                     value={item.unit_price}
                     onChangeText={(v) => updateItem(index, 'unit_price', v)}
                     money
+                  />
+                </View>
+                <View style={localStyles.gstField}>
+                  <FormInput
+                    label="GST%"
+                    value={item.gst_rate}
+                    onChangeText={(v) => updateItem(index, 'gst_rate', v)}
+                    money
+                    placeholder="0"
                   />
                 </View>
                 <TouchableOpacity
@@ -605,28 +607,35 @@ export default function EditSaleScreen() {
                   <Text style={localStyles.removeText}>✕</Text>
                 </TouchableOpacity>
               </View>
-              <View style={localStyles.itemRow}>
-                <View style={localStyles.qtyField}>
-                  <FormInput
-                    label="HSN/SAC"
-                    value={item.hsn_sac}
-                    onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
-                    placeholder="Optional"
-                    keyboardType="number-pad"
-                  />
-                </View>
-                <View style={localStyles.priceField}>
-                  <FormInput
-                    label="GST %"
-                    value={item.gst_rate}
-                    onChangeText={(v) => updateItem(index, 'gst_rate', v)}
-                    money
-                    placeholder="0"
-                  />
-                </View>
-              </View>
+              {!showHsn ? (
+                <TouchableOpacity
+                  style={localStyles.hsnToggle}
+                  onPress={() => setShowHsnByLine((prev) => ({ ...prev, [item.key]: true }))}
+                >
+                  <Text style={localStyles.hsnToggleText}>+ HSN/SAC</Text>
+                </TouchableOpacity>
+              ) : (
+                <FormInput
+                  label="HSN/SAC"
+                  value={item.hsn_sac}
+                  onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
+                  placeholder="Optional"
+                  keyboardType="number-pad"
+                />
+              )}
             </View>
-          ))}
+          );
+        })}
+
+        <TouchableOpacity
+          style={localStyles.addItemBtn}
+          onPress={addItem}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Add item"
+        >
+          <Text style={localStyles.addItemBtnText}>+ Add Item</Text>
+        </TouchableOpacity>
 
         <View style={localStyles.totals}>
           {gstEnabled ? (

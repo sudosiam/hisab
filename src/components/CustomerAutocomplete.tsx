@@ -5,13 +5,12 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Modal,
-  Pressable,
   ScrollView,
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { useDatabase } from '../context/DatabaseContext';
 import { spacing, radius } from '../constants/theme';
+import { elevatedSurface } from '../constants/shadows';
 import { searchCustomers, searchVendors } from '../services/customers';
 import type { PartyType } from '../types';
 
@@ -32,9 +31,9 @@ export function CustomerAutocomplete({
   partyType = 'customer',
   searchFn,
 }: Props) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const { refreshKey } = useDatabase();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [focused, setFocused] = useState(false);
   const [searchTick, setSearchTick] = useState(0);
@@ -74,7 +73,7 @@ export function CustomerAutocomplete({
   };
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, showDropdown && styles.wrapOpen]}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
         style={styles.input}
@@ -86,47 +85,49 @@ export function CustomerAutocomplete({
           setFocused(true);
           setSearchTick((tick) => tick + 1);
         }}
+        onBlur={() => {
+          // Delay so option presses register before closing.
+          setTimeout(() => setFocused(false), 180);
+        }}
         accessibilityLabel={label}
       />
-      <Modal visible={showDropdown} transparent animationType="fade" onRequestClose={() => setFocused(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setFocused(false)}>
-          <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>{label}</Text>
-            <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 280 }}>
-              {showCreate ? (
-                <TouchableOpacity
-                  style={styles.suggestion}
-                  onPress={() => handleSelect(value.trim())}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Create new ${partyLabel} ${value.trim()}`}
-                >
-                  <Text style={styles.createText}>
-                    Create new {partyLabel}: &ldquo;{value.trim()}&rdquo;
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-              {filtered.slice(0, 12).map((item) => (
-                <TouchableOpacity
-                  key={item}
-                  style={styles.suggestion}
-                  onPress={() => handleSelect(item)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Select ${item}`}
-                >
-                  <Text style={styles.suggestionText}>{item}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {showDropdown ? (
+        <View style={styles.panel}>
+          <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 220 }} nestedScrollEnabled>
+            {showCreate ? (
+              <TouchableOpacity
+                style={styles.suggestion}
+                onPress={() => handleSelect(value.trim())}
+                accessibilityRole="button"
+                accessibilityLabel={`Create new ${partyLabel} ${value.trim()}`}
+              >
+                <Text style={styles.createText}>
+                  Create new {partyLabel}: &ldquo;{value.trim()}&rdquo;
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {filtered.slice(0, 12).map((item) => (
+              <TouchableOpacity
+                key={item}
+                style={styles.suggestion}
+                onPress={() => handleSelect(item)}
+                accessibilityRole="button"
+                accessibilityLabel={`Select ${item}`}
+              >
+                <Text style={styles.suggestionText}>{item}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
     </View>
   );
 }
 
-function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
+function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boolean) {
   return StyleSheet.create({
-    wrap: { marginBottom: spacing.md },
+    wrap: { marginBottom: spacing.md, zIndex: 1 },
+    wrapOpen: { zIndex: 30 },
     label: { fontSize: 12, fontWeight: '500', color: colors.textSecondary, marginBottom: 4 },
     input: {
       borderWidth: 0,
@@ -138,20 +139,21 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       fontSize: 14,
       color: colors.text,
     },
-    modalBackdrop: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.45)',
-      justifyContent: 'flex-end',
+    panel: {
+      ...elevatedSurface(colors, isDark),
+      marginTop: 4,
+      borderRadius: radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      overflow: 'hidden',
     },
-    modalSheet: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: radius.xl,
-      borderTopRightRadius: radius.xl,
-      padding: spacing.md,
-      borderWidth: 0,
+    suggestion: {
+      paddingVertical: 12,
+      paddingHorizontal: spacing.md,
+      minHeight: 44,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.borderLight,
     },
-    modalTitle: { fontSize: 14, fontWeight: '700', color: colors.text, marginBottom: spacing.sm },
-    suggestion: { paddingVertical: 12, minHeight: 44, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderLight },
     suggestionText: { fontSize: 14, color: colors.text },
     createText: { fontSize: 14, color: colors.primary, fontWeight: '600' },
   });

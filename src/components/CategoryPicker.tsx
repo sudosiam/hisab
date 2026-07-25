@@ -3,17 +3,16 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Modal,
-  FlatList,
   StyleSheet,
   Pressable,
   TextInput,
   Alert,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { spacing, radius } from '../constants/theme';
-import { cardSurface } from '../constants/shadows';
+import { elevatedSurface } from '../constants/shadows';
 import { formatSqliteError } from '../db/database';
 import { CategoryPickerSource, productCategorySource } from './categorySources';
 
@@ -58,6 +57,10 @@ export function CategoryPicker({
   }, [source]);
 
   const openPicker = async () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
     setNewName('');
     await loadCategories();
     setOpen(true);
@@ -112,7 +115,7 @@ export function CategoryPicker({
   const showDeleteHint = allowDelete && categories.length > 0;
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, open && styles.wrapOpen]}>
       <Text style={styles.label}>{label}</Text>
       <TouchableOpacity
         style={styles.trigger}
@@ -121,69 +124,65 @@ export function CategoryPicker({
         accessibilityRole="button"
         accessibilityLabel={label}
         accessibilityHint="Opens category selector"
+        accessibilityState={{ expanded: open }}
       >
         <Text style={[styles.triggerText, showPlaceholderStyle && styles.placeholder]}>
           {displayValue}
         </Text>
-        <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
+        <Ionicons
+          name={open ? 'chevron-up' : 'chevron-down'}
+          size={18}
+          color={colors.textSecondary}
+        />
       </TouchableOpacity>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.sheetTitle}>{allowAll ? 'Filter by Category' : 'Select Category'}</Text>
+      {open ? (
+        <View style={styles.panel}>
+          {allowAdd ? (
+            <View style={styles.addRow}>
+              <TextInput
+                style={styles.addInput}
+                value={newName}
+                onChangeText={setNewName}
+                placeholder="New category name"
+                placeholderTextColor={colors.textMuted}
+              />
+              <TouchableOpacity
+                style={[styles.addBtn, adding && styles.addBtnDisabled]}
+                onPress={handleAddCategory}
+                disabled={adding}
+              >
+                <Text style={styles.addBtnText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
-            {allowAdd ? (
-              <View style={styles.addRow}>
-                <TextInput
-                  style={styles.addInput}
-                  value={newName}
-                  onChangeText={setNewName}
-                  placeholder="New category name"
-                  placeholderTextColor={colors.textMuted}
-                />
-                <TouchableOpacity
-                  style={[styles.addBtn, adding && styles.addBtnDisabled]}
-                  onPress={handleAddCategory}
-                  disabled={adding}
-                >
-                  <Text style={styles.addBtnText}>Add</Text>
-                </TouchableOpacity>
-              </View>
+          {showDeleteHint ? <Text style={styles.hint}>Long press a category to delete</Text> : null}
+
+          <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+            {allowAll ? (
+              <TouchableOpacity
+                style={[styles.option, !value && styles.optionActive]}
+                onPress={() => {
+                  onChange('');
+                  setOpen(false);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: !value }}
+              >
+                <Text style={styles.optionText}>{allLabel}</Text>
+                {!value ? <Ionicons name="checkmark" size={18} color={colors.primary} /> : null}
+              </TouchableOpacity>
             ) : null}
 
-            {showDeleteHint ? (
-              <Text style={styles.hint}>Long press a category to delete</Text>
-            ) : null}
-
-            <FlatList
-              data={categories}
-              keyExtractor={(item) => item}
-              ListHeaderComponent={
-                allowAll ? (
-                  <TouchableOpacity
-                    style={[styles.option, !value && styles.optionActive]}
-                    onPress={() => {
-                      onChange('');
-                      setOpen(false);
-                    }}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: !value }}
-                  >
-                    <Text style={styles.optionText}>{allLabel}</Text>
-                    {!value ? <Ionicons name="checkmark" size={18} color={colors.primary} /> : null}
-                  </TouchableOpacity>
-                ) : null
-              }
-              ListEmptyComponent={
-                allowAdd ? (
-                  <Text style={styles.empty}>No categories yet. Add one above.</Text>
-                ) : (
-                  <Text style={styles.empty}>No categories yet.</Text>
-                )
-              }
-              renderItem={({ item }) => (
+            {categories.length === 0 ? (
+              <Text style={styles.empty}>
+                {allowAdd ? 'No categories yet. Add one above.' : 'No categories yet.'}
+              </Text>
+            ) : (
+              categories.map((item) => (
                 <Pressable
+                  key={item}
                   style={[styles.option, item === value && styles.optionActive]}
                   onPress={() => {
                     onChange(item);
@@ -200,18 +199,19 @@ export function CategoryPicker({
                     <Ionicons name="checkmark" size={18} color={colors.primary} />
                   ) : null}
                 </Pressable>
-              )}
-            />
-          </Pressable>
-        </Pressable>
-      </Modal>
+              ))
+            )}
+          </ScrollView>
+        </View>
+      ) : null}
     </View>
   );
 }
 
 function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boolean) {
   return StyleSheet.create({
-    wrap: { marginBottom: spacing.sm },
+    wrap: { marginBottom: spacing.sm, zIndex: 1 },
+    wrapOpen: { zIndex: 20 },
     label: { fontSize: 12, fontWeight: '500', color: colors.textSecondary, marginBottom: 4 },
     trigger: {
       flexDirection: 'row',
@@ -226,25 +226,19 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     },
     triggerText: { fontSize: 14, color: colors.text, fontWeight: '600', flex: 1 },
     placeholder: { color: colors.textMuted, fontWeight: '500' },
-    backdrop: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.45)',
-      justifyContent: 'flex-end',
+    panel: {
+      ...elevatedSurface(colors, isDark),
+      marginTop: 4,
+      padding: spacing.sm,
+      borderRadius: radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
     },
-    sheet: {
-      ...cardSurface(colors, isDark),
-      maxHeight: '70%',
-      padding: spacing.md,
-      borderBottomLeftRadius: 0,
-      borderBottomRightRadius: 0,
-      borderTopLeftRadius: radius.xl,
-      borderTopRightRadius: radius.xl,
-    },
-    sheetTitle: { fontSize: 16, fontWeight: '700', color: colors.text, marginBottom: spacing.sm },
     hint: {
       fontSize: 12,
       color: colors.textMuted,
       marginBottom: spacing.sm,
+      paddingHorizontal: spacing.xs,
     },
     addRow: {
       flexDirection: 'row',
@@ -259,7 +253,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       borderRadius: radius.md,
       paddingHorizontal: spacing.md,
       paddingVertical: 10,
-      fontSize: 15,
+      fontSize: 14,
       color: colors.text,
       backgroundColor: colors.inputBg,
     },
@@ -279,8 +273,9 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       paddingVertical: 12,
       paddingHorizontal: spacing.sm,
       borderRadius: radius.sm,
+      minHeight: 44,
     },
     optionActive: { backgroundColor: colors.navActive },
-    optionText: { fontSize: 15, color: colors.text, fontWeight: '500' },
+    optionText: { fontSize: 14, color: colors.text, fontWeight: '500' },
   });
 }
