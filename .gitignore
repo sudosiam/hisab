@@ -31,6 +31,7 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript
@@ -42,6 +43,11 @@ yarn-error.*
 
 # release artifacts
 releases/*.apk
+
+# local build / export noise
+build-apk*.log
+expo-start.log
+.expo-export-test/
 
 # local IDE / agent config
 .claude/

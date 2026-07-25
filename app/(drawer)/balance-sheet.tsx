@@ -76,7 +76,7 @@ export default function BalanceSheetScreen() {
         infoText: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
         row: { ...moneyRowStyles.row, paddingVertical: spacing.sm },
         rowLabel: { fontSize: 14, color: colors.text, flex: 1, minWidth: 0, paddingRight: spacing.sm },
-        rowValue: { maxWidth: '52%' },
+        rowValue: { maxWidth: '62%', flexShrink: 1, minWidth: 88, width: '100%', textAlign: 'right' },
         bold: { fontWeight: '700' },
         highlight: { color: colors.text, fontSize: 17, fontWeight: '600' },
       }),
@@ -143,12 +143,12 @@ export default function BalanceSheetScreen() {
     >
       <View style={localStyles.hero}>
         <Text style={localStyles.heroLabel}>Owner{"'"}s Equity</Text>
-        <MoneyText amount={data.equity} size="hero" style={localStyles.heroValue} />
+        <MoneyText amount={data.equity} size="hero" style={[localStyles.heroValue, { width: '100%' }]} />
         <Text
           style={{ color: colors.textSecondary, marginTop: spacing.sm, fontSize: 12, textAlign: 'center' }}
-          numberOfLines={2}
+          numberOfLines={3}
           adjustsFontSizeToFit
-          minimumFontScale={0.8}
+          minimumFontScale={0.7}
         >
           Assets {formatCurrency(data.assets.total)} − Liabilities {formatCurrency(data.liabilities.total)}
         </Text>

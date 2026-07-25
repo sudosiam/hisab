@@ -2,7 +2,7 @@
 
 Android business management app built with **Expo SDK 54** and **SQLite**. All data stays on your device.
 
-**Current version:** `10.0.0` (Android `versionCode` 30)
+**Current version:** `10.1.0` (Android `versionCode` 31)
 
 ## What's in Hisab
 
@@ -11,9 +11,22 @@ Android business management app built with **Expo SDK 54** and **SQLite**. All d
 - **Financial year settings** — FY picker with auto-advance; all reports stay in sync
 - **Growth dashboard** — Net worth, monthly profit charts, equity trend
 - **Other income, loans & fixed assets** — Complete balance sheet beyond inventory
-- **Backup & restore** — Daily auto-backup with WAL checkpoint; exclusive backup/restore lock
+- **Backup & restore** — Local daily auto-backup (SAF) plus optional encrypted cloud backup (Supabase)
 - **Data safety** — Corrupt DB never auto-wiped; restore-first recovery; integrity repair on boot
 - **Automated tests** — 42 unit + integration tests (money, payments, GST, sale/purchase flows)
+
+## What's new in 10.1.0
+
+**Mobile UI polish**
+- Compact list rows across sales, purchases, parties, inventory, expenses, banking
+- Full-row taps navigate to detail; report rows open related invoices/products
+- Overflow-safe money amounts (shrink/wrap — no clipped totals)
+- Drawer back uses real history (no more surprise jump to Dashboard)
+
+**Cloud backup (optional)**
+- Settings → Backup — encrypted cloud sync when Supabase env is configured
+- Local daily backup remains the default; cloud is additive
+- See `.env.example` and `supabase/cloud-backup-setup.sql`
 
 ## What's new in 10.0.0
 
@@ -137,6 +150,19 @@ Keep these in sync when releasing:
 | `src/constants/appVersion.ts` | fallback string (optional) |
 
 Settings → About reads `app.json` via `expo-constants`.
+
+## Cloud backup (optional)
+
+Local daily backup works offline with no setup. For encrypted cloud backup:
+
+1. Create a Supabase project and run `supabase/cloud-backup-setup.sql`
+2. Copy `.env.example` → `.env` and set:
+   - `EXPO_PUBLIC_SUPABASE_URL`
+   - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+3. Rebuild the app (env is baked in at build time)
+4. Open **Settings → Backup** to enable cloud sync
+
+For EAS cloud builds, add the same keys as EAS secrets / env for the `production` and `preview` profiles.
 
 ## First Steps
 

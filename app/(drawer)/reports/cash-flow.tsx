@@ -51,7 +51,7 @@ export default function CashFlowReportScreen() {
         },
         line: { ...moneyRowStyles.row, paddingVertical: spacing.sm },
         lineLabel: { fontSize: 14, color: colors.text, flex: 1, minWidth: 0, paddingRight: spacing.sm },
-        lineValue: { maxWidth: '50%' },
+        lineValue: { maxWidth: '62%', flexShrink: 1, minWidth: 88, width: '100%', textAlign: 'right' },
         sectionNet: {
           borderTopWidth: 1,
           borderTopColor: colors.borderLight,

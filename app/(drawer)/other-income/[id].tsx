@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
+  ScrollView,
   StyleSheet,
   ActivityIndicator,
   Alert,
@@ -29,7 +30,7 @@ import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuar
 import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
-import { formatAmountInput, parsePositiveAmount } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
 import { isValidISODate, formatDisplayDate } from '../../../src/utils/date';
 import { formatSqliteError } from '../../../src/db/database';
 import { spacing } from '../../../src/constants/theme';
@@ -44,13 +45,36 @@ export default function OtherIncomeDetailScreen() {
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        title: { fontSize: 20, fontWeight: '700', color: colors.text },
-        meta: { color: colors.textSecondary, marginTop: 4 },
+        header: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: spacing.sm,
+          width: '100%',
+        },
+        headerText: { flex: 1, minWidth: 0 },
+        editTap: {
+          flexShrink: 0,
+          paddingVertical: spacing.xs,
+          paddingHorizontal: spacing.xs,
+          minHeight: 44,
+          justifyContent: 'center',
+        },
+        title: { fontSize: 18, fontWeight: '700', color: colors.text },
+        meta: { color: colors.textSecondary, marginTop: 4, fontSize: 13, lineHeight: 18 },
         kpiRow: {
           flexDirection: 'row',
           flexWrap: 'wrap',
           gap: spacing.sm,
           marginVertical: spacing.md,
+          width: '100%',
+        },
+        kpiFull: { width: '100%', maxWidth: '100%', flexBasis: '100%', flexGrow: 1 },
+        deleteWrap: {
+          width: '100%',
+          maxWidth: '100%',
+          marginTop: spacing.sm,
+          alignSelf: 'stretch',
         },
       }),
     [colors]
@@ -103,14 +127,15 @@ export default function OtherIncomeDetailScreen() {
   editingRef.current = editing;
 
   const hasLoadedRef = React.useRef(false);
-  useFocusEffect(useCallback(() => {
-    // Don't reload over an open edit form — it would wipe unsaved changes.
-    if (editingRef.current) return;
-    if (!hasLoadedRef.current) setLoading(true);
-    load().finally(() => {
-      hasLoadedRef.current = true;
-    });
-  }, [load]));
+  useFocusEffect(
+    useCallback(() => {
+      if (editingRef.current) return;
+      if (!hasLoadedRef.current) setLoading(true);
+      load().finally(() => {
+        hasLoadedRef.current = true;
+      });
+    }, [load])
+  );
 
   const isEditDirty = useMemo(() => {
     if (!editing || !item) return false;
@@ -165,22 +190,26 @@ export default function OtherIncomeDetailScreen() {
 
   const handleDelete = () => {
     if (!item) return;
-    Alert.alert('Delete Other Income', `Delete "${item.description}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteOtherIncome(item.id);
-            refresh();
-            router.back();
-          } catch (e) {
-            Alert.alert('Error', formatSqliteError(e));
-          }
+    Alert.alert(
+      'Delete Other Income',
+      `Delete ${item.category} — ${formatCurrency(item.amount)}? Account balance will be reversed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteOtherIncome(item.id);
+              refresh();
+              router.back();
+            } catch (e) {
+              Alert.alert('Error', formatSqliteError(e));
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   if (loading) {
@@ -202,42 +231,66 @@ export default function OtherIncomeDetailScreen() {
     );
   }
 
-  return (
-    <FormScreen>
-      {!editing ? (
-        <>
-          <Text style={localStyles.title}>{item.category}</Text>
-          <Text style={localStyles.meta}>{item.description}</Text>
-          <Text style={localStyles.meta}>{formatDisplayDate(item.date)} · {item.account_name}</Text>
-          <View style={localStyles.kpiRow}>
-            <StatCard label="Amount" value={item.amount} color={colors.success} />
-          </View>
-        </>
-      ) : (
-        <>
-          <CategoryPicker value={category} onChange={setCategory} source={otherIncomeCategorySource} />
-          <FormInput label="Description" value={description} onChangeText={setDescription} />
-          <FormInput
-            label="Amount (₹)"
-            value={amount}
-            onChangeText={setAmount}
-            money
-          />
-          <DatePickerField label="Date" value={date} onChange={setDate} />
-          <AccountPicker accounts={accounts} value={accountId} onChange={setAccountId} />
-          <PrimaryButton title="Save Changes" onPress={handleSave} loading={saving} />
-        </>
-      )}
+  if (editing) {
+    return (
+      <FormScreen>
+        <CategoryPicker value={category} onChange={setCategory} source={otherIncomeCategorySource} />
+        <FormInput label="Description" value={description} onChangeText={setDescription} />
+        <FormInput label="Amount (₹)" value={amount} onChangeText={setAmount} money />
+        <DatePickerField label="Date" value={date} onChange={setDate} />
+        <AccountPicker accounts={accounts} value={accountId} onChange={setAccountId} />
+        <PrimaryButton title="Save Changes" onPress={handleSave} loading={saving} />
+        <PrimaryButton
+          title="Cancel"
+          onPress={() => {
+            fillForm(item);
+            setEditing(false);
+          }}
+          variant="secondary"
+        />
+      </FormScreen>
+    );
+  }
 
-      <PrimaryButton
-        title={editing ? 'Cancel Edit' : 'Edit'}
-        onPress={() => {
-          if (editing) fillForm(item);
-          setEditing(!editing);
-        }}
-        variant="secondary"
-      />
-      <PrimaryButton title="Delete" onPress={handleDelete} variant="danger" />
-    </FormScreen>
+  return (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.content, { width: '100%' }]}
+    >
+      <View style={localStyles.header}>
+        <View style={localStyles.headerText}>
+          <Text style={localStyles.title} numberOfLines={2}>
+            {item.category}
+          </Text>
+          <Text style={localStyles.meta} numberOfLines={3}>
+            {item.description}
+          </Text>
+          <Text style={localStyles.meta} numberOfLines={1}>
+            {formatDisplayDate(item.date)} · {item.account_name}
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={localStyles.editTap}
+          onPress={() => setEditing(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Edit other income"
+        >
+          <Text style={styles.link}>Edit</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={localStyles.kpiRow}>
+        <StatCard
+          label="Amount"
+          value={item.amount}
+          color={colors.success}
+          style={localStyles.kpiFull}
+        />
+      </View>
+
+      <View style={localStyles.deleteWrap}>
+        <PrimaryButton title="Delete Income" onPress={handleDelete} variant="danger" />
+      </View>
+    </ScrollView>
   );
 }

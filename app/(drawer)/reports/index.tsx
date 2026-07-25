@@ -1,10 +1,11 @@
 import React from 'react';
-import { Text, TouchableOpacity, ScrollView, View, StyleSheet } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { ScreenTitle, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import { NavListRow } from '../../../src/components/ListItem';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { spacing } from '../../../src/constants/theme';
+import { cardSurface } from '../../../src/constants/shadows';
 
 type ReportItem = {
   title: string;
@@ -134,33 +135,25 @@ function ReportSection({
   items: ReportItem[];
   onPress: (route: string) => void;
 }) {
-  const styles = useScreenStyles();
-  const { colors } = useTheme();
-
+  const { colors, isDark } = useTheme();
   return (
-    <View style={[styles.card, { paddingHorizontal: 0, paddingVertical: 0, overflow: 'hidden' }]}>
+    <View
+      style={{
+        ...cardSurface(colors, isDark),
+        paddingHorizontal: 0,
+        paddingVertical: 0,
+        overflow: 'hidden',
+        marginBottom: spacing.sm,
+      }}
+    >
       {items.map((r, index) => (
-        <TouchableOpacity
+        <NavListRow
           key={r.route}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingVertical: spacing.sm + 2,
-            paddingHorizontal: spacing.md,
-            minHeight: 52,
-            borderBottomWidth: index < items.length - 1 ? StyleSheet.hairlineWidth : 0,
-            borderBottomColor: colors.borderLight,
-          }}
+          title={r.title}
+          description={r.desc}
           onPress={() => onPress(r.route)}
-          accessibilityRole="button"
-          accessibilityLabel={r.title}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>{r.title}</Text>
-            <Text style={styles.cardSub}>{r.desc}</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-        </TouchableOpacity>
+          isLast={index === items.length - 1}
+        />
       ))}
     </View>
   );

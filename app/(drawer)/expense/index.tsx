@@ -3,16 +3,16 @@ import {
   View,
   Text,
   FlatList,
-  TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
+import { ListItem } from '../../../src/components/ListItem';
+import { MoneyText, MoneyTotalRow } from '../../../src/components/MoneyText';
 import { ErrorState, Fab, SearchField, SectionHeader, useScreenStyles } from '../../../src/components/ui';
 import { getExpenses } from '../../../src/services/banking';
-import { formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { formatDisplayDate, getPeriodTotalLabel } from '../../../src/utils/date';
 import { useTheme } from '../../../src/context/ThemeContext';
@@ -32,29 +32,24 @@ export default function ExpenseListScreen() {
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        expenseRow: {
-          ...cardSurface(colors, isDark),
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
-          marginBottom: spacing.sm,
-        },
-        recurring: { fontSize: 11, color: colors.primary, fontWeight: '600', marginTop: 4 },
         categoryCard: {
           ...cardSurface(colors, isDark),
-          padding: spacing.sm,
+          paddingVertical: spacing.xs,
           marginBottom: spacing.sm,
+          overflow: 'hidden',
         },
         categoryRow: {
           flexDirection: 'row',
           justifyContent: 'space-between',
           alignItems: 'center',
           paddingVertical: spacing.sm,
-          paddingHorizontal: spacing.sm,
-          borderBottomWidth: 1,
+          paddingHorizontal: spacing.md,
+          minHeight: 44,
+          borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: colors.borderLight,
         },
         categoryRowLast: { borderBottomWidth: 0 },
-        categoryPct: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+        categoryPct: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
       }),
     [colors, isDark]
   );
@@ -99,29 +94,18 @@ export default function ExpenseListScreen() {
 
   const renderItem = useCallback(
     ({ item }: { item: Expense }) => (
-      <TouchableOpacity
-        style={localStyles.expenseRow}
+      <ListItem
+        title={item.category}
+        subtitle={item.description}
+        meta={`${formatDisplayDate(item.date)} · ${item.account_name}${
+          item.is_recurring ? ` · Recurring` : ''
+        }`}
+        amount={item.amount}
         onPress={() => router.push(`/(drawer)/expense/${item.id}` as never)}
-        activeOpacity={0.75}
-      >
-        <View style={styles.row}>
-          <Text style={styles.cardTitle} numberOfLines={1}>
-            {item.category}
-          </Text>
-          <Text style={styles.amount}>{formatCurrency(item.amount)}</Text>
-        </View>
-        <Text style={styles.cardSub} numberOfLines={2}>
-          {item.description}
-        </Text>
-        <Text style={styles.cardSub}>
-          {formatDisplayDate(item.date)} · {item.account_name}
-        </Text>
-        {item.is_recurring ? (
-          <Text style={localStyles.recurring}>Recurring · {item.recurrence ?? 'Monthly'}</Text>
-        ) : null}
-      </TouchableOpacity>
+        accessibilityLabel={`Expense ${item.category}`}
+      />
     ),
-    [localStyles, router, styles]
+    [router]
   );
 
   if (error && expenses.length === 0) {
@@ -138,12 +122,10 @@ export default function ExpenseListScreen() {
         placeholder="Search category, description, account..."
       />
 
-      <View style={styles.row}>
-        <Text style={styles.cardTitle}>
-          {search.trim() ? 'Filtered Total' : getPeriodTotalLabel(monthKey)}
-        </Text>
-        <Text style={styles.amount}>{formatCurrency(monthTotal)}</Text>
-      </View>
+      <MoneyTotalRow
+        label={search.trim() ? 'Filtered Total' : getPeriodTotalLabel(monthKey)}
+        amount={monthTotal}
+      />
 
       {!booting && categoryTotals.length > 0 ? (
         <>
@@ -159,13 +141,15 @@ export default function ExpenseListScreen() {
                     index === categoryTotals.length - 1 && localStyles.categoryRowLast,
                   ]}
                 >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.cardTitle} numberOfLines={1}>
+                  <View style={{ flex: 1, minWidth: 0, marginRight: spacing.sm }}>
+                    <Text style={styles.cardTitle} numberOfLines={2}>
                       {row.category}
                     </Text>
-                    <Text style={localStyles.categoryPct}>{pct.toFixed(0)}% of month</Text>
+                    <Text style={localStyles.categoryPct}>{pct.toFixed(0)}% of period</Text>
                   </View>
-                  <Text style={styles.amount}>{formatCurrency(row.total)}</Text>
+                  <View style={{ maxWidth: '48%', minWidth: 80, flexShrink: 1 }}>
+                    <MoneyText amount={row.total} size="md" style={{ width: '100%' }} />
+                  </View>
                 </View>
               );
             })}
@@ -184,7 +168,7 @@ export default function ExpenseListScreen() {
         data={booting && expenses.length === 0 ? [] : filteredExpenses}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.list, { paddingTop: spacing.sm }]}
         ListHeaderComponent={header}
         refreshControl={
           <RefreshControl

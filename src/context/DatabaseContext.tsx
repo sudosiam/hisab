@@ -10,6 +10,12 @@ import {
   restoreDatabaseFromBackup,
   restoreLatestFromBackupFolder,
 } from '../services/backup';
+import {
+  cloudBackupOnBackground,
+  reconcileCloudBackupOnEmptyLocal,
+  runCloudDailyBackupIfDue,
+} from '../services/cloudBackup';
+import { syncBackupBackgroundTask } from '../services/backupBackgroundTask';
 import { processRecurringExpenses } from '../services/banking';
 import { useTheme } from './ThemeContext';
 import { spacing, radius } from '../constants/theme';
@@ -168,12 +174,27 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
 
     // Defer backup so DB + UI finish mounting first (avoids Android SAF native crashes).
     const backupTimer = setTimeout(() => {
-      runDailyBackupIfDue().catch(() => {});
+      void (async () => {
+        const reconcile = await reconcileCloudBackupOnEmptyLocal().catch(() => ({
+          restored: false as const,
+        }));
+        if (reconcile.restored) {
+          setRefreshKey((k) => k + 1);
+          setInitAttempt((a) => a + 1);
+          return;
+        }
+        await Promise.all([
+          runDailyBackupIfDue().catch(() => {}),
+          runCloudDailyBackupIfDue().catch(() => {}),
+        ]);
+        await syncBackupBackgroundTask().catch(() => {});
+      })();
     }, 3000);
 
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'background' || state === 'inactive') {
         backupOnBackground().catch(() => {});
+        cloudBackupOnBackground().catch(() => {});
       }
     });
 

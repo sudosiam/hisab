@@ -3,15 +3,15 @@ import {
   View,
   Text,
   FlatList,
-  TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  StyleSheet,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getSales } from '../../../src/services/sales';
 import { StatusBadge } from '../../../src/components/StatusBadge';
+import { ListItem } from '../../../src/components/ListItem';
+import { MoneyTotalRow } from '../../../src/components/MoneyText';
 import {
   ErrorState,
   Fab,
@@ -20,7 +20,6 @@ import {
   SearchField,
   useScreenStyles,
 } from '../../../src/components/ui';
-import { formatCurrency } from '../../../src/utils/format';
 import { formatDisplayDate, getPeriodTotalLabel } from '../../../src/utils/date';
 import { matchesSearch } from '../../../src/utils/search';
 import { useTheme } from '../../../src/context/ThemeContext';
@@ -28,7 +27,7 @@ import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
-import { radius, spacing } from '../../../src/constants/theme';
+import { spacing } from '../../../src/constants/theme';
 import type { Sale } from '../../../src/types';
 
 type Filter = 'all' | 'paid' | 'unpaid' | 'bos';
@@ -38,27 +37,6 @@ export default function SalesListScreen() {
   const { refreshKey } = useDatabase();
   const { colors } = useTheme();
   const styles = useScreenStyles();
-  const localStyles = useMemo(
-    () =>
-      StyleSheet.create({
-        typeBadge: {
-          alignSelf: 'flex-start',
-          marginTop: spacing.xs,
-          paddingHorizontal: spacing.sm,
-          paddingVertical: 2,
-          borderRadius: radius.sm,
-          backgroundColor: colors.primary + '18',
-        },
-        typeBadgeBos: { backgroundColor: colors.warning + '22' },
-        typeBadgeText: {
-          fontSize: 11,
-          fontWeight: '700',
-          color: colors.primary,
-        },
-        typeBadgeTextBos: { color: colors.warning },
-      }),
-    [colors]
-  );
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [sales, setSales] = useState<Sale[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
@@ -105,34 +83,22 @@ export default function SalesListScreen() {
   const renderItem = useCallback(
     ({ item }: { item: Sale }) => {
       const isBos = item.invoice_type === 'bos';
+      const due = Math.max(0, item.total_amount - item.paid_amount);
       return (
-        <TouchableOpacity
-          style={styles.card}
+        <ListItem
+          title={item.invoice_no}
+          subtitle={`${item.party_name} · ${formatDisplayDate(item.date)}`}
+          amount={item.total_amount}
+          badge={<StatusBadge status={item.status} />}
+          pill={isBos ? 'BOS' : undefined}
+          pillTone={isBos ? 'warn' : 'default'}
+          dueAmount={due}
           onPress={() => router.push(`/(drawer)/sales/${item.id}`)}
-        >
-          <View style={styles.row}>
-            <Text style={styles.cardTitle}>{item.invoice_no}</Text>
-            <StatusBadge status={item.status} />
-          </View>
-          <View style={[localStyles.typeBadge, isBos && localStyles.typeBadgeBos]}>
-            <Text style={[localStyles.typeBadgeText, isBos && localStyles.typeBadgeTextBos]}>
-              {isBos ? 'BOS' : 'Invoice'}
-            </Text>
-          </View>
-          <Text style={styles.cardSub}>{item.party_name}</Text>
-          <View style={[styles.row, { marginTop: 4 }]}>
-            <Text style={styles.cardSub}>{formatDisplayDate(item.date)}</Text>
-            <Text style={styles.amount}>{formatCurrency(item.total_amount)}</Text>
-          </View>
-          {item.paid_amount < item.total_amount && (
-            <Text style={{ fontSize: 12, color: colors.danger, marginTop: 4 }}>
-              Due: {formatCurrency(item.total_amount - item.paid_amount)}
-            </Text>
-          )}
-        </TouchableOpacity>
+          accessibilityLabel={`Sale ${item.invoice_no}`}
+        />
       );
     },
-    [colors.danger, localStyles, router, styles]
+    [router]
   );
 
   if (error) {
@@ -141,31 +107,31 @@ export default function SalesListScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={{ paddingHorizontal: spacing.sm, paddingTop: spacing.sm }}>
+      <View style={{ paddingHorizontal: spacing.md, paddingTop: spacing.sm }}>
         <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
-        <View style={[styles.row, { marginBottom: spacing.sm }]}>
-          <Text style={styles.cardTitle}>
-            {search.trim() ? 'Filtered Total' : getPeriodTotalLabel(monthKey)}
-          </Text>
-          <Text style={styles.amount}>{formatCurrency(periodTotal)}</Text>
-        </View>
-        {periodDue > 0.01 && (
-          <View style={[styles.row, { marginBottom: spacing.sm }]}>
-            <Text style={styles.cardSub}>Outstanding in period</Text>
-            <Text style={[styles.amount, { color: colors.danger, fontSize: 15 }]}>
-              {formatCurrency(periodDue)}
-            </Text>
-          </View>
-        )}
+        <MoneyTotalRow
+          label={search.trim() ? 'Filtered Total' : getPeriodTotalLabel(monthKey)}
+          amount={periodTotal}
+        />
+        {periodDue > 0.01 ? (
+          <MoneyTotalRow
+            label="Outstanding in period"
+            amount={periodDue}
+            amountColor={colors.danger}
+            labelStyle={{ fontWeight: '400', fontSize: 13, color: colors.textSecondary }}
+          />
+        ) : null}
       </View>
 
       <FilterRow>
-        {([
-          { key: 'all', label: 'All' },
-          { key: 'paid', label: 'Paid' },
-          { key: 'unpaid', label: 'Outstanding' },
-          { key: 'bos', label: 'BOS' },
-        ] as { key: Filter; label: string }[]).map((f) => (
+        {(
+          [
+            { key: 'all', label: 'All' },
+            { key: 'paid', label: 'Paid' },
+            { key: 'unpaid', label: 'Outstanding' },
+            { key: 'bos', label: 'BOS' },
+          ] as { key: Filter; label: string }[]
+        ).map((f) => (
           <FilterChip
             key={f.key}
             label={f.label}

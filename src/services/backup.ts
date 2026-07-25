@@ -21,6 +21,10 @@ export interface PickedBackupFile {
 const BACKUP_FOLDER_KEY = '@hisab_backup_folder';
 const AUTO_BACKUP_KEY = '@hisab_auto_backup';
 const AUTO_BACKUP_PAUSED_KEY = '@hisab_auto_backup_paused';
+/** Remember auto-backup preference across reset → restore. */
+const AUTO_BACKUP_RESUME_KEY = '@hisab_auto_backup_resume';
+/** Remember cloud-backup preference across reset → restore. */
+const CLOUD_BACKUP_RESUME_KEY = '@hisab_cloud_backup_resume';
 const LAST_DAILY_BACKUP_KEY = '@hisab_last_daily_backup';
 const LAST_ERROR_KEY = '@hisab_backup_last_error';
 const BACKUP_PREFIX = 'hisab-backup-';
@@ -43,16 +47,81 @@ export async function isAutoBackupEnabled(): Promise<boolean> {
 
 export async function setAutoBackupEnabled(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(AUTO_BACKUP_KEY, enabled ? 'true' : 'false');
+  const { syncBackupBackgroundTask } = await import('./backupBackgroundTask');
+  await syncBackupBackgroundTask().catch(() => {});
 }
 
-/** Block auto backup after reset until a restore completes. */
+/** Block uploads after reset until restore (or explicit fresh start). Remembers prior prefs. */
 export async function pauseAutoBackupAfterReset(): Promise<void> {
+  const wasAuto = await isAutoBackupEnabled();
+  let wasCloud = false;
+  try {
+    const cloud = await import('./cloudBackup');
+    wasCloud = await cloud.isCloudBackupEnabled();
+  } catch {
+    wasCloud = false;
+  }
+
   await AsyncStorage.setItem(AUTO_BACKUP_PAUSED_KEY, 'reset');
-  await setAutoBackupEnabled(false);
+  await AsyncStorage.setItem(AUTO_BACKUP_RESUME_KEY, wasAuto ? 'true' : 'false');
+  await AsyncStorage.setItem(CLOUD_BACKUP_RESUME_KEY, wasCloud ? 'true' : 'false');
+
+  // Turn uploads off immediately so an empty DB cannot overwrite good backups.
+  await AsyncStorage.setItem(AUTO_BACKUP_KEY, 'false');
+  if (wasCloud) {
+    try {
+      const cloud = await import('./cloudBackup');
+      await cloud.setCloudBackupEnabled(false);
+    } catch {
+      // ignore
+    }
+  } else {
+    const { syncBackupBackgroundTask } = await import('./backupBackgroundTask');
+    await syncBackupBackgroundTask().catch(() => {});
+  }
 }
 
 export async function clearAutoBackupPause(): Promise<void> {
   await AsyncStorage.removeItem(AUTO_BACKUP_PAUSED_KEY);
+}
+
+/** After a successful restore: clear pause and turn previous backup prefs back on. */
+export async function resumeBackupsAfterRestore(): Promise<void> {
+  const resumeAuto = (await AsyncStorage.getItem(AUTO_BACKUP_RESUME_KEY)) === 'true';
+  const resumeCloud = (await AsyncStorage.getItem(CLOUD_BACKUP_RESUME_KEY)) === 'true';
+  await AsyncStorage.multiRemove([
+    AUTO_BACKUP_PAUSED_KEY,
+    AUTO_BACKUP_RESUME_KEY,
+    CLOUD_BACKUP_RESUME_KEY,
+  ]);
+  if (resumeAuto) {
+    await setAutoBackupEnabled(true);
+  } else {
+    const { syncBackupBackgroundTask } = await import('./backupBackgroundTask');
+    await syncBackupBackgroundTask().catch(() => {});
+  }
+  if (resumeCloud) {
+    try {
+      const cloud = await import('./cloudBackup');
+      await cloud.setCloudBackupEnabled(true);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * User chose to keep the empty post-reset DB (no restore).
+ * Clears the pause so they can enable backups again once they have data.
+ */
+export async function dismissBackupPauseForFreshStart(): Promise<void> {
+  await AsyncStorage.multiRemove([
+    AUTO_BACKUP_PAUSED_KEY,
+    AUTO_BACKUP_RESUME_KEY,
+    CLOUD_BACKUP_RESUME_KEY,
+  ]);
+  const { syncBackupBackgroundTask } = await import('./backupBackgroundTask');
+  await syncBackupBackgroundTask().catch(() => {});
 }
 
 export async function isAutoBackupPaused(): Promise<boolean> {
@@ -106,13 +175,13 @@ export async function getBackupLastError(): Promise<{ at: string; message: strin
 }
 
 /** Prevent empty or post-reset databases from overwriting real backups. */
-async function getBackupSafetyGuard(): Promise<{ blocked: boolean; message?: string }> {
+export async function getBackupSafetyGuard(): Promise<{ blocked: boolean; message?: string }> {
   try {
     if (await isAutoBackupPaused()) {
       return {
         blocked: true,
         message:
-          'Backup is paused after reset. Restore from your backup folder first, then turn auto backup back on.',
+          'Backup is paused after reset. Use Restore (folder, file, or cloud) — you do not need to turn auto backup on first.',
       };
     }
     if (!(await databaseHasUserData())) {
@@ -224,7 +293,7 @@ function getDbPath(): string {
   return `${FileSystem.documentDirectory}SQLite/${DB_NAME}`;
 }
 
-function todayDateKey(): string {
+export function todayDateKey(): string {
   return format(new Date(), 'yyyy-MM-dd');
 }
 
@@ -295,7 +364,7 @@ async function cleanupOldBackups(folderUri: string): Promise<number> {
 }
 
 /** Read the live database file as base64, after folding WAL data into it. */
-async function readDatabaseBase64(): Promise<string> {
+export async function readDatabaseBase64(): Promise<string> {
   // A backup taken after a failed checkpoint would silently miss the newest
   // transactions, so fail loudly instead.
   await checkpointDatabase({ strict: true });
@@ -582,7 +651,7 @@ export async function restoreDatabaseFromUri(
       await validateRestoredDatabase();
 
       await FileSystem.deleteAsync(preRestorePath, { idempotent: true });
-      await clearAutoBackupPause();
+      await resumeBackupsAfterRestore();
 
       return { success: true, message: `Imported from ${label}.` };
     } catch (error) {

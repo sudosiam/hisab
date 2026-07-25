@@ -44,6 +44,7 @@ export default function NewOtherIncomeScreen() {
 
   useFocusEffect(
     React.useCallback(() => {
+      void refreshKey;
       void reloadAccounts();
     }, [reloadAccounts, refreshKey])
   );

@@ -6,7 +6,6 @@ import {
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
-  TouchableOpacity,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
@@ -42,11 +41,13 @@ export default function GstOutwardScreen() {
         row: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
-          marginBottom: spacing.xs,
+          paddingVertical: spacing.sm,
+          marginBottom: spacing.xs + 2,
+          minHeight: 52,
+          justifyContent: 'center',
         },
-        title: { fontWeight: '600', color: colors.text },
-        meta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+        title: { fontWeight: '600', color: colors.text, fontSize: 14 },
+        meta: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
       }),
     [colors, isDark]
   );
@@ -102,22 +103,25 @@ export default function GstOutwardScreen() {
         ListEmptyComponent={<Text style={styles.empty}>No outward supplies in this period.</Text>}
         {...FLATLIST_PERF}
         renderItem={({ item }) => (
-          <TouchableOpacity onPress={() => router.push(`/(drawer)/sales/${item.id}`)}>
-            <ReportRow style={localStyles.row} amount={item.total_amount}>
-              <Text style={localStyles.title} numberOfLines={1}>
-                {item.invoice_no} · {item.party_name}
-              </Text>
-              <Text style={localStyles.meta}>
-                {formatDisplayDate(item.date)} · {item.supply_type} · {item.invoice_type}
-              </Text>
-              <Text style={localStyles.meta}>
-                Taxable {formatCurrency(item.taxable_amount)}
-                {item.igst_amount > 0
-                  ? ` · IGST ${formatCurrency(item.igst_amount)}`
-                  : ` · CGST ${formatCurrency(item.cgst_amount)} · SGST ${formatCurrency(item.sgst_amount)}`}
-              </Text>
-            </ReportRow>
-          </TouchableOpacity>
+          <ReportRow
+            style={localStyles.row}
+            amount={item.total_amount}
+            onPress={() => router.push(`/(drawer)/sales/${item.id}`)}
+            accessibilityLabel={`Sale ${item.invoice_no}`}
+          >
+            <Text style={localStyles.title} numberOfLines={1}>
+              {item.invoice_no} · {item.party_name}
+            </Text>
+            <Text style={localStyles.meta}>
+              {formatDisplayDate(item.date)} · {item.supply_type} · {item.invoice_type}
+            </Text>
+            <Text style={localStyles.meta}>
+              Taxable {formatCurrency(item.taxable_amount)}
+              {item.igst_amount > 0
+                ? ` · IGST ${formatCurrency(item.igst_amount)}`
+                : ` · CGST ${formatCurrency(item.cgst_amount)} · SGST ${formatCurrency(item.sgst_amount)}`}
+            </Text>
+          </ReportRow>
         )}
       />
     </View>

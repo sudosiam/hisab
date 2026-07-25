@@ -70,6 +70,7 @@ export default function CashMovementScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      void refreshKey;
       void reloadAccounts();
     }, [reloadAccounts, refreshKey])
   );

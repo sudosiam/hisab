@@ -3,17 +3,18 @@ import {
   View,
   Text,
   FlatList,
-  TouchableOpacity,
   ActivityIndicator,
   StyleSheet,
   RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { getProducts, getProductSellPrice } from '../../../src/services/inventory';
+import { ListItem } from '../../../src/components/ListItem';
+import { MoneyText } from '../../../src/components/MoneyText';
 import { ErrorState, Fab, SearchField, useScreenStyles } from '../../../src/components/ui';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 import { CategoryPicker } from '../../../src/components/CategoryPicker';
-import { formatCurrency, formatQty } from '../../../src/utils/format';
+import { formatQty } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
@@ -36,24 +37,8 @@ export default function InventoryListScreen() {
     () =>
       StyleSheet.create({
         filters: { paddingHorizontal: spacing.md, marginBottom: spacing.xs },
-        row: {
-          paddingVertical: spacing.sm,
-          paddingHorizontal: spacing.md,
-          marginBottom: spacing.xs,
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: colors.borderLight,
-          backgroundColor: colors.surface,
-        },
-        name: { fontSize: 15, fontWeight: '600', color: colors.text },
-        meta: {
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: spacing.sm,
-          marginTop: 4,
-        },
-        qty: { fontSize: 13, color: colors.primary, fontWeight: '600', flexShrink: 0 },
-        prices: { fontSize: 12, color: colors.textSecondary, flexShrink: 1, textAlign: 'right' },
+        prices: { width: '100%', gap: 2, alignItems: 'flex-end' },
+        priceLabel: { fontSize: 10, color: colors.textMuted, textAlign: 'right' },
       }),
     [colors]
   );
@@ -65,7 +50,9 @@ export default function InventoryListScreen() {
   const filteredProducts = useMemo(
     () =>
       products.filter(
-        (item) => matchesCategory(item, categoryFilter) && matchesSearch(search, [item.name, item.sku, item.unit, item.category])
+        (item) =>
+          matchesCategory(item, categoryFilter) &&
+          matchesSearch(search, [item.name, item.sku, item.unit, item.category])
       ),
     [products, search, categoryFilter]
   );
@@ -76,9 +63,32 @@ export default function InventoryListScreen() {
 
   const { booting, error, retry } = useFocusRefresh(load, [refreshKey]);
 
-  const emptyMessage = search.trim() || categoryFilter
-    ? 'No products match your filters.'
-    : 'No products. Add your first item.';
+  const emptyMessage =
+    search.trim() || categoryFilter
+      ? 'No products match your filters.'
+      : 'No products. Add your first item.';
+
+  const renderItem = useCallback(
+    ({ item }: { item: Product }) => (
+      <ListItem
+        title={item.name}
+        subtitle={formatQty(item.current_qty, item.unit)}
+        meta={item.category?.trim() || item.sku || undefined}
+        trailing={
+          <View style={localStyles.prices}>
+            <Text style={localStyles.priceLabel}>Sell</Text>
+            <MoneyText amount={getProductSellPrice(item)} size="sm" style={{ width: '100%' }} />
+            <Text style={localStyles.priceLabel}>Cost</Text>
+            <MoneyText amount={item.avg_cost} size="sm" color={colors.textSecondary} style={{ width: '100%' }} />
+          </View>
+        }
+        onPress={() => router.push(`/(drawer)/inventory/${item.id}`)}
+        accessibilityLabel={`Product ${item.name}`}
+        subtitleLines={1}
+      />
+    ),
+    [colors.textSecondary, localStyles.priceLabel, localStyles.prices, router]
+  );
 
   if (error && products.length === 0) {
     return <ErrorState message={error} onRetry={retry} />;
@@ -110,7 +120,7 @@ export default function InventoryListScreen() {
         <FlatList
           data={filteredProducts}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={[styles.list, { paddingHorizontal: 0, paddingTop: 0 }]}
+          contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -124,24 +134,7 @@ export default function InventoryListScreen() {
           }
           {...FLATLIST_PERF}
           ListEmptyComponent={<Text style={styles.empty}>{emptyMessage}</Text>}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={localStyles.row}
-              onPress={() => router.push(`/(drawer)/inventory/${item.id}`)}
-              activeOpacity={0.7}
-            >
-              <Text style={localStyles.name} numberOfLines={1}>
-                {item.name}
-              </Text>
-              <View style={localStyles.meta}>
-                <Text style={localStyles.qty}>{formatQty(item.current_qty, item.unit)}</Text>
-                <Text style={localStyles.prices} numberOfLines={1}>
-                  Sell {formatCurrency(getProductSellPrice(item))} · Cost{' '}
-                  {formatCurrency(item.avg_cost)}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          )}
+          renderItem={renderItem}
         />
       )}
 

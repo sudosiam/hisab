@@ -211,6 +211,7 @@ export default function NewPurchaseScreen() {
 
   useFocusEffect(
     React.useCallback(() => {
+      void refreshKey;
       void reloadProducts();
     }, [reloadProducts, refreshKey])
   );

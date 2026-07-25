@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { getInventoryReport } from '../../../src/services/reports';
 import { formatCurrency } from '../../../src/utils/format';
 import { ReportRow } from '../../../src/components/ReportRow';
@@ -17,6 +17,7 @@ import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 
 export default function InventoryReportScreen() {
+  const router = useRouter();
   const styles = useScreenStyles();
   const { refreshKey } = useDatabase();
   const { colors, isDark } = useTheme();
@@ -27,10 +28,12 @@ export default function InventoryReportScreen() {
         row: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
-          marginBottom: spacing.xs,
+          paddingVertical: spacing.sm,
+          marginBottom: spacing.xs + 2,
+          minHeight: 52,
+          justifyContent: 'center',
         },
-        name: { fontWeight: '600', color: colors.text },
+        name: { fontWeight: '600', color: colors.text, fontSize: 14 },
         meta: { fontSize: 11, color: colors.textSecondary, marginTop: 2, lineHeight: 15 },
       }),
     [colors, isDark]
@@ -86,7 +89,7 @@ export default function InventoryReportScreen() {
       </View>
       <FlatList
         data={rows}
-        keyExtractor={(item, index) => `${item.name}-${index}`}
+        keyExtractor={(item) => String(item.id)}
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
@@ -96,15 +99,23 @@ export default function InventoryReportScreen() {
         renderItem={({ item }) => {
           const sell = item.sell_price > 0 ? item.sell_price : item.avg_cost * 1.2;
           return (
-            <ReportRow style={localStyles.row} amount={item.value}>
+            <ReportRow
+              style={localStyles.row}
+              amount={item.value}
+              onPress={() => router.push(`/(drawer)/inventory/${item.id}`)}
+              accessibilityLabel={`Product ${item.name}`}
+            >
               <Text style={localStyles.name} numberOfLines={2}>
                 {item.name}
               </Text>
-              <Text style={localStyles.meta} numberOfLines={2}>
+              <Text style={localStyles.meta} numberOfLines={1}>
                 Qty {item.current_qty}
               </Text>
-              <Text style={localStyles.meta} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
-                Cost {formatCurrency(item.avg_cost)} · Sell {formatCurrency(sell)}
+              <Text style={localStyles.meta} numberOfLines={2}>
+                Cost {formatCurrency(item.avg_cost)}
+              </Text>
+              <Text style={localStyles.meta} numberOfLines={2}>
+                Sell {formatCurrency(sell)}
               </Text>
             </ReportRow>
           );

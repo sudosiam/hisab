@@ -8,6 +8,7 @@ import { getDayBookFromLedger, getTrialBalanceFromLedger, hasGeneralLedger } fro
 import { subDays, parseISO, format } from 'date-fns';
 
 export interface SalesReportRow {
+  id: number;
   invoice_no: string;
   invoice_type: string;
   party_name: string;
@@ -18,6 +19,7 @@ export interface SalesReportRow {
 }
 
 export interface PurchaseReportRow {
+  id: number;
   invoice_no: string;
   supplier_name: string;
   date: string;
@@ -27,6 +29,7 @@ export interface PurchaseReportRow {
 }
 
 export interface InventoryReportRow {
+  id: number;
   name: string;
   sku: string | null;
   current_qty: number;
@@ -48,7 +51,7 @@ export async function getSalesReport(periodKey: string): Promise<SalesReportRow[
   const db = await getDatabase();
   const { start, end } = await resolvePeriodRange(periodKey);
   return db.getAllAsync<SalesReportRow>(
-    `SELECT s.invoice_no, s.invoice_type, s.party_name, s.date, s.total_amount, s.paid_amount, s.status
+    `SELECT s.id, s.invoice_no, s.invoice_type, s.party_name, s.date, s.total_amount, s.paid_amount, s.status
      FROM sales s
      WHERE s.date >= ? AND s.date <= ?
        AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id)
@@ -61,7 +64,7 @@ export async function getPurchaseReport(periodKey: string): Promise<PurchaseRepo
   const db = await getDatabase();
   const { start, end } = await resolvePeriodRange(periodKey);
   return db.getAllAsync<PurchaseReportRow>(
-    `SELECT p.invoice_no, p.supplier_name, p.date, p.total_amount, p.paid_amount, p.status
+    `SELECT p.id, p.invoice_no, p.supplier_name, p.date, p.total_amount, p.paid_amount, p.status
      FROM purchases p
      WHERE p.date >= ? AND p.date <= ?
        AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = p.id)
@@ -73,7 +76,7 @@ export async function getPurchaseReport(periodKey: string): Promise<PurchaseRepo
 export async function getInventoryReport(): Promise<InventoryReportRow[]> {
   const db = await getDatabase();
   return db.getAllAsync<InventoryReportRow>(
-    `SELECT name, sku, current_qty, avg_cost, sell_price, (current_qty * avg_cost) as value
+    `SELECT id, name, sku, current_qty, avg_cost, sell_price, (current_qty * avg_cost) as value
      FROM products WHERE COALESCE(is_hidden, 0) = 0 ORDER BY name ASC`
   );
 }
@@ -242,11 +245,18 @@ export function sumReportAmounts(rows: { total_amount: number }[]): number {
 }
 
 export async function getReceivablesReport(): Promise<
-  { party_name: string; invoice_no: string; invoice_type: string; due: number; date: string }[]
+  {
+    id: number;
+    party_name: string;
+    invoice_no: string;
+    invoice_type: string;
+    due: number;
+    date: string;
+  }[]
 > {
   const db = await getDatabase();
   return db.getAllAsync(
-    `SELECT party_name, invoice_no, invoice_type, (total_amount - paid_amount) as due, date
+    `SELECT id, party_name, invoice_no, invoice_type, (total_amount - paid_amount) as due, date
      FROM sales
      WHERE total_amount - paid_amount > 0.01
        AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = sales.id)
@@ -255,11 +265,11 @@ export async function getReceivablesReport(): Promise<
 }
 
 export async function getPayablesReport(): Promise<
-  { supplier_name: string; invoice_no: string; due: number; date: string }[]
+  { id: number; supplier_name: string; invoice_no: string; due: number; date: string }[]
 > {
   const db = await getDatabase();
   return db.getAllAsync(
-    `SELECT supplier_name, invoice_no, (total_amount - paid_amount) as due, date
+    `SELECT id, supplier_name, invoice_no, (total_amount - paid_amount) as due, date
      FROM purchases
      WHERE total_amount - paid_amount > 0.01
        AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = purchases.id)

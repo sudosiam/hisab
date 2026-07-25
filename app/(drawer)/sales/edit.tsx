@@ -162,12 +162,7 @@ export default function EditSaleScreen() {
       if (s) {
         setSale(s);
         setPartyName(s.party_name);
-        getPartyByName(s.party_name, 'customer')
-          .then((party) => {
-            if (party?.phone) setPartyPhone(party.phone);
-            setPartyState(party?.state ?? null);
-          })
-          .catch(() => {});
+        setPartyPhone('');
         setInvoiceNo(s.invoice_no);
         setInvoiceType(s.invoice_type === 'bos' ? 'bos' : 'invoice');
         setDate(s.date);
@@ -198,7 +193,7 @@ export default function EditSaleScreen() {
         originalQtyByProductRef.current = originalQty;
         savedSnapshotRef.current = JSON.stringify({
           partyName: s.party_name,
-          partyPhone,
+          partyPhone: '',
           invoiceNo: s.invoice_no,
           invoiceType: s.invoice_type === 'bos' ? 'bos' : 'invoice',
           date: s.date,
@@ -217,6 +212,23 @@ export default function EditSaleScreen() {
                 }))
               : [],
         });
+        getPartyByName(s.party_name, 'customer')
+          .then((party) => {
+            const phone = party?.phone ?? '';
+            if (phone) setPartyPhone(phone);
+            setPartyState(party?.state ?? null);
+            // Align dirty-check baseline with async-loaded phone so load isn't marked dirty.
+            if (savedSnapshotRef.current) {
+              try {
+                const snap = JSON.parse(savedSnapshotRef.current) as { partyPhone?: string };
+                snap.partyPhone = phone;
+                savedSnapshotRef.current = JSON.stringify(snap);
+              } catch {
+                /* keep prior snapshot */
+              }
+            }
+          })
+          .catch(() => {});
         setError(null);
       } else {
         setError('Sale not found');

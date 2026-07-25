@@ -17,6 +17,7 @@ import {
   SectionHeader,
   useScreenStyles,
 } from '../../src/components/ui';
+import { MoneyText } from '../../src/components/MoneyText';
 import {
   addFixedAsset,
   deleteFixedAsset,
@@ -58,16 +59,25 @@ export default function OthersScreen() {
           alignItems: 'center',
         },
         heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
-        heroValue: { ...typography.display, color: colors.text, marginTop: spacing.sm },
+        heroValueWrap: { width: '100%', marginTop: spacing.sm, paddingHorizontal: spacing.sm },
         assetCard: {
           ...cardSurface(colors, isDark),
-          padding: spacing.md,
-          marginBottom: spacing.sm,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm,
+          marginBottom: spacing.xs + 2,
+          minHeight: 52,
+          overflow: 'visible',
         },
-        assetName: { fontSize: 16, fontWeight: '700', color: colors.text },
-        assetValue: { fontSize: 18, fontWeight: '700', color: colors.primary, marginTop: spacing.xs },
-        assetMeta: { fontSize: 12, color: colors.textSecondary, marginTop: spacing.xs },
+        assetName: { fontSize: 14, fontWeight: '600', color: colors.text },
+        amountCol: { flexShrink: 1, minWidth: 88, maxWidth: '48%', alignItems: 'flex-end' },
+        assetMeta: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
         actions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
+        actionTap: {
+          paddingVertical: spacing.sm,
+          paddingHorizontal: spacing.sm,
+          minHeight: 40,
+          justifyContent: 'center',
+        },
         form: {
           ...cardSurface(colors, isDark),
           padding: spacing.md,
@@ -180,7 +190,9 @@ export default function OthersScreen() {
     <FormScreen>
       <View style={localStyles.hero}>
         <Text style={localStyles.heroLabel}>Fixed Assets Total</Text>
-        <Text style={localStyles.heroValue}>{formatCurrency(total)}</Text>
+        <View style={localStyles.heroValueWrap}>
+          <MoneyText amount={total} size="hero" style={{ width: '100%', textAlign: 'center' }} />
+        </View>
         <Text style={{ color: colors.textSecondary, marginTop: spacing.sm, fontSize: 13 }}>
           {assets.length} asset{assets.length === 1 ? '' : 's'} · shown on Balance Sheet
         </Text>
@@ -224,20 +236,54 @@ export default function OthersScreen() {
         </Text>
       ) : (
         filteredAssets.map((asset) => (
-          <View key={asset.id} style={localStyles.assetCard}>
-            <Text style={localStyles.assetName}>{asset.name}</Text>
-            <Text style={localStyles.assetValue}>{formatCurrency(asset.value)}</Text>
-            {asset.notes ? <Text style={localStyles.assetMeta}>{asset.notes}</Text> : null}
-            <Text style={localStyles.assetMeta}>Added {asset.created_at.slice(0, 10)}</Text>
+          <TouchableOpacity
+            key={asset.id}
+            style={localStyles.assetCard}
+            onPress={() => startEdit(asset)}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit asset ${asset.name}`}
+          >
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={localStyles.assetName} numberOfLines={2}>
+                  {asset.name}
+                </Text>
+                {asset.notes ? (
+                  <Text style={localStyles.assetMeta} numberOfLines={2}>
+                    {asset.notes}
+                  </Text>
+                ) : null}
+                <Text style={localStyles.assetMeta}>Added {asset.created_at.slice(0, 10)}</Text>
+              </View>
+              <View style={localStyles.amountCol}>
+                <MoneyText
+                  amount={asset.value}
+                  size="md"
+                  color={colors.primary}
+                  style={{ width: '100%' }}
+                />
+              </View>
+            </View>
             <View style={localStyles.actions}>
-              <TouchableOpacity onPress={() => startEdit(asset)}>
+              <TouchableOpacity
+                style={localStyles.actionTap}
+                onPress={() => startEdit(asset)}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit asset ${asset.name}`}
+              >
                 <Text style={styles.link}>Edit</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleDelete(asset)}>
+              <TouchableOpacity
+                style={localStyles.actionTap}
+                onPress={() => handleDelete(asset)}
+                accessibilityRole="button"
+                accessibilityLabel={`Delete asset ${asset.name}`}
+              >
                 <Text style={{ color: colors.danger, fontWeight: '700' }}>Delete</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </TouchableOpacity>
         ))
       )}
     </FormScreen>

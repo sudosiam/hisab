@@ -49,14 +49,37 @@ export default function ExpenseDetailScreen() {
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+        header: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: spacing.sm,
+          width: '100%',
+        },
+        headerText: { flex: 1, minWidth: 0 },
+        editTap: {
+          flexShrink: 0,
+          paddingVertical: spacing.xs,
+          paddingHorizontal: spacing.xs,
+          minHeight: 44,
+          justifyContent: 'center',
+        },
         kpiRow: {
           flexDirection: 'row',
           flexWrap: 'wrap',
           gap: spacing.sm,
           marginVertical: spacing.md,
+          width: '100%',
         },
-        chipRow: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.sm },
+        kpiFull: { width: '100%', maxWidth: '100%', flexBasis: '100%', flexGrow: 1 },
+        kpiHalf: { flexGrow: 1, flexBasis: '47%', minWidth: 0, maxWidth: '100%' },
+        deleteWrap: {
+          width: '100%',
+          maxWidth: '100%',
+          marginTop: spacing.sm,
+          alignSelf: 'stretch',
+        },
+        chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.sm },
         chip: {
           paddingHorizontal: spacing.md,
           paddingVertical: 8,
@@ -276,29 +299,54 @@ export default function ExpenseDetailScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.content, { width: '100%' }]}
+    >
       <View style={localStyles.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.cardTitle}>{expense.category}</Text>
-          <Text style={styles.cardSub}>{expense.description}</Text>
+        <View style={localStyles.headerText}>
+          <Text style={styles.cardTitle} numberOfLines={2}>
+            {expense.category}
+          </Text>
+          <Text style={styles.cardSub} numberOfLines={3}>
+            {expense.description}
+          </Text>
         </View>
-        <TouchableOpacity onPress={() => setEditing(true)}>
+        <TouchableOpacity
+          style={localStyles.editTap}
+          onPress={() => setEditing(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Edit expense"
+        >
           <Text style={styles.link}>Edit</Text>
         </TouchableOpacity>
       </View>
 
       <View style={localStyles.kpiRow}>
-        <StatCard label="Amount" value={expense.amount} color={colors.warning} />
-        <StatCard label="Date" displayValue={formatDisplayDate(expense.date)} color={colors.primary} />
+        <StatCard
+          label="Amount"
+          value={expense.amount}
+          color={colors.warning}
+          style={localStyles.kpiFull}
+        />
+        <StatCard
+          label="Date"
+          displayValue={formatDisplayDate(expense.date)}
+          color={colors.primary}
+          style={localStyles.kpiHalf}
+        />
         <StatCard
           label="Account"
           displayValue={expense.account_name ?? '—'}
           color={colors.accent}
           subtitle={expense.is_recurring ? `Recurring · ${expense.recurrence ?? 'Monthly'}` : 'One-time'}
+          style={localStyles.kpiHalf}
         />
       </View>
 
-      <PrimaryButton title="Delete Expense" onPress={handleDelete} variant="danger" />
+      <View style={localStyles.deleteWrap}>
+        <PrimaryButton title="Delete Expense" onPress={handleDelete} variant="danger" />
+      </View>
     </ScrollView>
   );
 }

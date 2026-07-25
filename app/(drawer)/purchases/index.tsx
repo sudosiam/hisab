@@ -3,7 +3,6 @@ import {
   View,
   Text,
   FlatList,
-  TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
@@ -11,6 +10,8 @@ import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getPurchases } from '../../../src/services/purchases';
 import { StatusBadge } from '../../../src/components/StatusBadge';
+import { ListItem } from '../../../src/components/ListItem';
+import { MoneyTotalRow } from '../../../src/components/MoneyText';
 import {
   ErrorState,
   Fab,
@@ -19,7 +20,6 @@ import {
   SearchField,
   useScreenStyles,
 } from '../../../src/components/ui';
-import { formatCurrency } from '../../../src/utils/format';
 import { formatDisplayDate, getPeriodTotalLabel } from '../../../src/utils/date';
 import { matchesSearch } from '../../../src/utils/search';
 import { useTheme } from '../../../src/context/ThemeContext';
@@ -79,28 +79,21 @@ export default function PurchasesListScreen() {
   const { booting, error, retry } = useFocusRefresh(load, [refreshKey, filter, monthKey]);
 
   const renderItem = useCallback(
-    ({ item }: { item: Purchase }) => (
-      <TouchableOpacity
-        style={styles.card}
-        onPress={() => router.push(`/(drawer)/purchases/${item.id}`)}
-      >
-        <View style={styles.row}>
-          <Text style={styles.cardTitle}>{item.invoice_no}</Text>
-          <StatusBadge status={item.status} />
-        </View>
-        <Text style={styles.cardSub}>{item.supplier_name}</Text>
-        <View style={styles.row}>
-          <Text style={styles.cardSub}>{formatDisplayDate(item.date)}</Text>
-          <Text style={styles.amount}>{formatCurrency(item.total_amount)}</Text>
-        </View>
-        {item.paid_amount < item.total_amount && (
-          <Text style={{ fontSize: 12, color: colors.danger, marginTop: 4 }}>
-            Due: {formatCurrency(item.total_amount - item.paid_amount)}
-          </Text>
-        )}
-      </TouchableOpacity>
-    ),
-    [colors.danger, router, styles]
+    ({ item }: { item: Purchase }) => {
+      const due = Math.max(0, item.total_amount - item.paid_amount);
+      return (
+        <ListItem
+          title={item.invoice_no}
+          subtitle={`${item.supplier_name} · ${formatDisplayDate(item.date)}`}
+          amount={item.total_amount}
+          badge={<StatusBadge status={item.status} />}
+          dueAmount={due}
+          onPress={() => router.push(`/(drawer)/purchases/${item.id}`)}
+          accessibilityLabel={`Purchase ${item.invoice_no}`}
+        />
+      );
+    },
+    [router]
   );
 
   if (error) {
@@ -109,22 +102,20 @@ export default function PurchasesListScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={{ paddingHorizontal: spacing.sm, paddingTop: spacing.sm }}>
+      <View style={{ paddingHorizontal: spacing.md, paddingTop: spacing.sm }}>
         <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
-        <View style={[styles.row, { marginBottom: spacing.sm }]}>
-          <Text style={styles.cardTitle}>
-            {search.trim() ? 'Filtered Total' : getPeriodTotalLabel(monthKey)}
-          </Text>
-          <Text style={styles.amount}>{formatCurrency(periodTotal)}</Text>
-        </View>
-        {periodDue > 0.01 && (
-          <View style={[styles.row, { marginBottom: spacing.sm }]}>
-            <Text style={styles.cardSub}>Outstanding in period</Text>
-            <Text style={[styles.amount, { color: colors.danger, fontSize: 15 }]}>
-              {formatCurrency(periodDue)}
-            </Text>
-          </View>
-        )}
+        <MoneyTotalRow
+          label={search.trim() ? 'Filtered Total' : getPeriodTotalLabel(monthKey)}
+          amount={periodTotal}
+        />
+        {periodDue > 0.01 ? (
+          <MoneyTotalRow
+            label="Outstanding in period"
+            amount={periodDue}
+            amountColor={colors.danger}
+            labelStyle={{ fontWeight: '400', fontSize: 13, color: colors.textSecondary }}
+          />
+        ) : null}
       </View>
 
       <FilterRow>

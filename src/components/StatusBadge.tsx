@@ -31,13 +31,13 @@ export function StatusBadge({ status }: Props) {
 function createStyles(_colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
     badge: {
-      paddingHorizontal: 8,
-      paddingVertical: 3,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
       borderRadius: radius.full,
       alignSelf: 'flex-start',
     },
     text: {
-      fontSize: 10,
+      fontSize: 9,
       fontWeight: '700',
       textTransform: 'uppercase',
       letterSpacing: 0.3,

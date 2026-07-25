@@ -80,16 +80,40 @@ export default function DashboardScreen() {
         <FinanceHero
           stats={stats}
           onNetWorthPress={() => router.push('/(drawer)/balance-sheet')}
+          onCashPress={() => router.push('/(drawer)/banking' as never)}
+          onReceivablePress={() => router.push('/(drawer)/reports/receivables' as never)}
+          onPayablePress={() => router.push('/(drawer)/reports/payables' as never)}
+          onInventoryPress={() => router.push('/(drawer)/inventory' as never)}
         />
       ) : null}
 
       <SectionHeader title={getPeriodSectionTitle(monthKey)} />
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        <StatCard label="Revenue" value={stats?.sold ?? 0} color={colors.text} />
-        <StatCard label="Purchased" value={stats?.purchased ?? 0} color={colors.warning} />
-        <StatCard label="Other Income" value={stats?.otherIncome ?? 0} color={colors.success} />
-        <StatCard label="Expenses" value={stats?.expense ?? 0} color={colors.danger} />
+        <StatCard
+          label="Revenue"
+          value={stats?.sold ?? 0}
+          color={colors.text}
+          onPress={() => router.push('/(drawer)/sales' as never)}
+        />
+        <StatCard
+          label="Purchased"
+          value={stats?.purchased ?? 0}
+          color={colors.warning}
+          onPress={() => router.push('/(drawer)/purchases' as never)}
+        />
+        <StatCard
+          label="Other Income"
+          value={stats?.otherIncome ?? 0}
+          color={colors.success}
+          onPress={() => router.push('/(drawer)/other-income' as never)}
+        />
+        <StatCard
+          label="Expenses"
+          value={stats?.expense ?? 0}
+          color={colors.danger}
+          onPress={() => router.push('/(drawer)/expense' as never)}
+        />
       </View>
 
       <DashboardShortcuts />

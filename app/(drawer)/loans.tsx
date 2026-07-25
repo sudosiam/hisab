@@ -10,6 +10,7 @@ import {
   SectionHeader,
   useScreenStyles,
 } from '../../src/components/ui';
+import { MoneyText } from '../../src/components/MoneyText';
 import { addLoan, deleteLoan, getLoans, updateLoan } from '../../src/services/loans';
 import { formatAmountInput, formatCurrency, parseAmountInput, parsePositiveAmount } from '../../src/utils/format';
 import { matchesSearch } from '../../src/utils/search';
@@ -79,17 +80,25 @@ export default function LoansScreen() {
           alignItems: 'center',
         },
         heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
-        heroValue: { ...typography.display, color: colors.text, marginTop: spacing.sm },
+        heroValueWrap: { width: '100%', marginTop: spacing.sm, paddingHorizontal: spacing.sm },
         loanCard: {
           ...cardSurface(colors, isDark),
-          padding: spacing.md,
-          marginBottom: spacing.sm,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm,
+          marginBottom: spacing.xs + 2,
+          minHeight: 52,
+          overflow: 'visible',
         },
-        lenderName: { fontSize: 16, fontWeight: '700', color: colors.text },
-        outstandingValue: { fontSize: 18, fontWeight: '700', color: colors.danger, marginTop: spacing.xs },
-        rowMeta: { fontSize: 12, color: colors.textSecondary, marginTop: spacing.xs },
+        lenderName: { fontSize: 14, fontWeight: '600', color: colors.text },
+        amountCol: { flexShrink: 1, minWidth: 88, maxWidth: '48%', alignItems: 'flex-end' },
+        rowMeta: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
         actions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
-        actionTap: { paddingVertical: spacing.xs, paddingRight: spacing.sm, minHeight: 32, justifyContent: 'center' },
+        actionTap: {
+          paddingVertical: spacing.sm,
+          paddingHorizontal: spacing.sm,
+          minHeight: 40,
+          justifyContent: 'center',
+        },
         form: {
           ...cardSurface(colors, isDark),
           padding: spacing.md,
@@ -276,7 +285,13 @@ export default function LoansScreen() {
     <FormScreen>
       <View style={localStyles.hero}>
         <Text style={localStyles.heroLabel}>Total Outstanding Loans</Text>
-        <Text style={localStyles.heroValue}>{formatCurrency(totalOutstanding)}</Text>
+        <View style={localStyles.heroValueWrap}>
+          <MoneyText
+            amount={totalOutstanding}
+            size="hero"
+            style={{ width: '100%', textAlign: 'center' }}
+          />
+        </View>
         <Text style={{ color: colors.textSecondary, marginTop: spacing.sm, fontSize: 13 }}>
           {loans.length} loan{loans.length === 1 ? '' : 's'}
         </Text>
@@ -352,17 +367,39 @@ export default function LoansScreen() {
         </Text>
       ) : (
         filteredLoans.map((loan) => (
-          <View key={loan.id} style={localStyles.loanCard}>
-            <Text style={localStyles.lenderName}>{loan.lender_name}</Text>
-            <Text style={localStyles.outstandingValue}>
-              Outstanding {formatCurrency(loan.outstanding_amount)}
-            </Text>
-            <Text style={localStyles.rowMeta}>
-              Principal {formatCurrency(loan.principal_amount)}
-              {loan.interest_rate !== null ? ` · ${loan.interest_rate}%` : ''}
-            </Text>
-            {loan.start_date ? <Text style={localStyles.rowMeta}>Start {loan.start_date}</Text> : null}
-            {loan.notes ? <Text style={localStyles.rowMeta}>{loan.notes}</Text> : null}
+          <TouchableOpacity
+            key={loan.id}
+            style={localStyles.loanCard}
+            onPress={() => startEdit(loan)}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit loan from ${loan.lender_name}`}
+          >
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={localStyles.lenderName} numberOfLines={2}>
+                  {loan.lender_name}
+                </Text>
+                <Text style={localStyles.rowMeta} numberOfLines={2}>
+                  Principal {formatCurrency(loan.principal_amount)}
+                  {loan.interest_rate !== null ? ` · ${loan.interest_rate}%` : ''}
+                  {loan.start_date ? ` · ${loan.start_date}` : ''}
+                </Text>
+                {loan.notes ? (
+                  <Text style={localStyles.rowMeta} numberOfLines={2}>
+                    {loan.notes}
+                  </Text>
+                ) : null}
+              </View>
+              <View style={localStyles.amountCol}>
+                <MoneyText
+                  amount={loan.outstanding_amount}
+                  size="md"
+                  color={colors.danger}
+                  style={{ width: '100%' }}
+                />
+              </View>
+            </View>
             <View style={localStyles.actions}>
               <TouchableOpacity
                 style={localStyles.actionTap}
@@ -381,7 +418,7 @@ export default function LoansScreen() {
                 <Text style={{ color: colors.danger, fontWeight: '700' }}>Delete</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </TouchableOpacity>
         ))
       )}
     </FormScreen>

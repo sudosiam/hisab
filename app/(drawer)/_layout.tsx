@@ -12,6 +12,7 @@ export default function DrawerLayout() {
 
   return (
     <Drawer
+      backBehavior="history"
       drawerContent={(props) => <CustomDrawerContent {...props} />}
       screenOptions={{
         ...drawerOptions,
@@ -40,7 +41,7 @@ export default function DrawerLayout() {
       <Drawer.Screen name="other-income" options={{ title: 'Other Income', ...stackGroup }} />
       <Drawer.Screen name="investments" options={{ title: 'Investments', ...hidden }} />
       <Drawer.Screen name="loans" options={{ title: 'Loans', ...hidden }} />
-      <Drawer.Screen name="settings" options={{ title: 'Settings', ...hidden }} />
+      <Drawer.Screen name="settings" options={{ title: 'Settings', ...stackGroup }} />
     </Drawer>
   );
 }

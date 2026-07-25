@@ -9,10 +9,11 @@ import {
   RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { ListItem } from '../../../src/components/ListItem';
+import { MoneyText } from '../../../src/components/MoneyText';
 import { ErrorState, SearchField, useScreenStyles } from '../../../src/components/ui';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 import { getAccounts, getTotalBalance } from '../../../src/services/banking';
-import { formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
@@ -37,22 +38,28 @@ export default function BankingScreen() {
           alignItems: 'center',
         },
         totalLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
-        totalHint: { fontSize: 11, color: colors.textSecondary, marginTop: spacing.xs },
-        totalValue: { ...typography.display, color: colors.primary, marginTop: spacing.sm },
+        totalHint: {
+          fontSize: 11,
+          color: colors.textSecondary,
+          marginTop: spacing.xs,
+          textAlign: 'center',
+          paddingHorizontal: spacing.sm,
+        },
+        totalValueWrap: { width: '100%', marginTop: spacing.sm, paddingHorizontal: spacing.sm },
         actions: {
           flexDirection: 'row',
           flexWrap: 'wrap',
           paddingHorizontal: spacing.md,
           gap: spacing.sm,
-          marginBottom: spacing.md,
+          marginBottom: spacing.sm,
         },
         actionBtn: {
           flexGrow: 1,
           flexBasis: '47%',
           minWidth: 140,
           backgroundColor: colors.primary,
-          paddingVertical: 12,
-          minHeight: 44,
+          paddingVertical: 10,
+          minHeight: 40,
           borderRadius: radius.full,
           alignItems: 'center',
           justifyContent: 'center',
@@ -62,34 +69,8 @@ export default function BankingScreen() {
         actionBtnDanger: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.danger + '55' },
         actionText: { color: colors.onPrimary, fontWeight: '700', fontSize: 13 },
         actionTextAlt: { color: colors.onPrimaryContainer, fontWeight: '700', fontSize: 13 },
-        /** Not onPrimary — success green needs its own contrasting label in light/dark. */
         actionTextSuccess: { color: isDark ? '#0B1F14' : '#FFFFFF', fontWeight: '700', fontSize: 13 },
         actionTextDanger: { color: colors.danger, fontWeight: '700', fontSize: 13 },
-        accountRow: {
-          ...cardSurface(colors, isDark),
-          flexDirection: 'row',
-          alignItems: 'center',
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
-          marginHorizontal: spacing.md,
-          marginBottom: spacing.sm,
-          minHeight: 56,
-        },
-        accountName: { fontSize: 14, fontWeight: '600', color: colors.text },
-        accountType: { fontSize: 12, color: colors.textSecondary, marginTop: 2, textTransform: 'capitalize' },
-        excludedBadge: {
-          alignSelf: 'flex-start',
-          marginTop: 4,
-          paddingHorizontal: 6,
-          paddingVertical: 1,
-          borderRadius: radius.full,
-          backgroundColor: colors.chip,
-          borderWidth: 1,
-          borderColor: colors.border,
-        },
-        excludedText: { fontSize: 10, fontWeight: '600', color: colors.textMuted },
-        accountBalance: { fontSize: 17, fontWeight: '700', color: colors.text },
-        balanceMuted: { color: colors.textMuted },
       }),
     [colors, isDark]
   );
@@ -120,7 +101,14 @@ export default function BankingScreen() {
       <View style={localStyles.totalCard}>
         <Text style={localStyles.totalLabel}>Total Balance</Text>
         <Text style={localStyles.totalHint}>Active accounts only; deactivated accounts are excluded</Text>
-        <Text style={localStyles.totalValue}>{formatCurrency(totalBalance)}</Text>
+        <View style={localStyles.totalValueWrap}>
+          <MoneyText
+            amount={totalBalance}
+            size="hero"
+            color={colors.primary}
+            style={{ width: '100%', textAlign: 'center' }}
+          />
+        </View>
       </View>
 
       <View style={localStyles.actions}>
@@ -172,7 +160,7 @@ export default function BankingScreen() {
         <FlatList
           data={filteredAccounts}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={{ paddingBottom: spacing.xl }}
+          contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -191,31 +179,16 @@ export default function BankingScreen() {
             </Text>
           }
           renderItem={({ item }) => (
-            <TouchableOpacity
-              style={localStyles.accountRow}
+            <ListItem
+              title={item.name}
+              subtitle={item.type}
+              amount={item.current_balance}
+              amountColor={item.is_excluded ? colors.textMuted : undefined}
+              pill={item.is_excluded ? 'Deactivated' : undefined}
+              pillTone="muted"
               onPress={() => router.push(`/(drawer)/banking/${item.id}` as never)}
-              activeOpacity={0.75}
-              accessibilityRole="button"
               accessibilityLabel={`Open account ${item.name}`}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={localStyles.accountName}>{item.name}</Text>
-                <Text style={localStyles.accountType}>{item.type}</Text>
-                {item.is_excluded ? (
-                  <View style={localStyles.excludedBadge}>
-                    <Text style={localStyles.excludedText}>Deactivated</Text>
-                  </View>
-                ) : null}
-              </View>
-              <Text
-                style={[
-                  localStyles.accountBalance,
-                  item.is_excluded ? localStyles.balanceMuted : null,
-                ]}
-              >
-                {formatCurrency(item.current_balance)}
-              </Text>
-            </TouchableOpacity>
+            />
           )}
         />
       )}

@@ -6,5 +6,5 @@ export const FLATLIST_PERF = {
   removeClippedSubviews: true,
 } as const;
 
-/** Approximate card height for list rows (padding + content). */
-export const LIST_CARD_HEIGHT = 96;
+/** Approximate compact card height for list rows (padding + 2 lines). */
+export const LIST_CARD_HEIGHT = 64;

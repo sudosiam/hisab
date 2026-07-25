@@ -253,29 +253,30 @@ export default function PartyDetailScreen() {
           flexDirection: 'row',
           alignItems: 'center',
           paddingHorizontal: spacing.md,
-          paddingVertical: spacing.md,
-          borderBottomWidth: 1,
+          paddingVertical: spacing.sm,
+          minHeight: 52,
+          borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: colors.borderLight,
         },
         historyRowLast: { borderBottomWidth: 0 },
         historyIcon: {
-          width: 40,
-          height: 40,
-          borderRadius: radius.md,
+          width: 32,
+          height: 32,
+          borderRadius: radius.full,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: colors.navActive,
           marginRight: spacing.sm,
         },
-        historyBody: { flex: 1 },
-        historyTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-        historyInvoice: { fontSize: 15, fontWeight: '700', color: colors.text },
-        historyType: { fontSize: 11, fontWeight: '700', color: colors.primary, marginTop: 2 },
+        historyBody: { flex: 1, minWidth: 0 },
+        historyTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm },
+        historyInvoice: { fontSize: 14, fontWeight: '600', color: colors.text, flex: 1 },
+        historyType: { fontSize: 10, fontWeight: '700', color: colors.primary, marginTop: 1 },
         historyTypeBos: { color: colors.warning },
-        historyMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-        historyAmounts: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.xs },
-        historyAmt: { fontSize: 12, color: colors.textSecondary },
-        historyDue: { fontSize: 12, color: colors.danger, fontWeight: '700' },
+        historyMeta: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
+        historyAmounts: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: 2 },
+        historyAmt: { fontSize: 11, color: colors.textSecondary },
+        historyDue: { fontSize: 11, color: colors.danger, fontWeight: '700' },
         form: {
           ...cardSurface(colors, isDark),
           marginBottom: spacing.md,
@@ -821,7 +822,7 @@ export default function PartyDetailScreen() {
                   <View style={localStyles.historyIcon}>
                     <Ionicons
                       name={item.record_type === 'sale' ? 'receipt-outline' : 'bag-outline'}
-                      size={18}
+                      size={16}
                       color={colors.primary}
                     />
                   </View>

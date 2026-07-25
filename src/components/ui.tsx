@@ -47,8 +47,10 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
     card: {
       ...surface,
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm + 2,
-      marginBottom: spacing.sm,
+      paddingVertical: spacing.sm,
+      marginBottom: spacing.xs + 2,
+      minHeight: 52,
+      justifyContent: 'center',
     },
     /** Compact summary / net-worth hero used on finance screens. */
     heroCard: {
@@ -89,7 +91,7 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
     link: { color: colors.accent, fontWeight: '600', fontSize: 13 },
     divider: { height: 1, backgroundColor: colors.borderLight, marginVertical: spacing.sm },
     filters: { flexDirection: 'row', padding: spacing.md, gap: spacing.sm },
-    list: { padding: spacing.md, paddingBottom: 96 },
+    list: { paddingHorizontal: spacing.md, paddingTop: spacing.xs, paddingBottom: 96 },
     fab: {
       position: 'absolute',
       bottom: spacing.lg,
@@ -194,6 +196,9 @@ function createButtonStyles(colors: ThemeColors, _isDark: boolean) {
       borderRadius: radius.full,
       alignItems: 'center',
       justifyContent: 'center',
+      alignSelf: 'stretch',
+      width: '100%',
+      maxWidth: '100%',
       minHeight: 44,
       marginVertical: spacing.xs,
     },
@@ -204,6 +209,9 @@ function createButtonStyles(colors: ThemeColors, _isDark: boolean) {
       borderRadius: radius.full,
       alignItems: 'center',
       justifyContent: 'center',
+      alignSelf: 'stretch',
+      width: '100%',
+      maxWidth: '100%',
       minHeight: 44,
       marginVertical: spacing.xs,
     },
@@ -214,6 +222,9 @@ function createButtonStyles(colors: ThemeColors, _isDark: boolean) {
       borderRadius: radius.full,
       alignItems: 'center',
       justifyContent: 'center',
+      alignSelf: 'stretch',
+      width: '100%',
+      maxWidth: '100%',
       minHeight: 44,
       marginVertical: spacing.xs,
       borderWidth: 1,
@@ -222,16 +233,30 @@ function createButtonStyles(colors: ThemeColors, _isDark: boolean) {
     disabled: { opacity: 0.5 },
     primaryText: { color: colors.onPrimary, fontSize: 14, fontWeight: '600' },
     secondaryText: { color: colors.onPrimaryContainer, fontSize: 14, fontWeight: '600' },
-    dangerText: { color: colors.danger, fontSize: 14, fontWeight: '600' },
+    dangerText: {
+      color: colors.danger,
+      fontSize: 14,
+      fontWeight: '600',
+      textAlign: 'center',
+      flexShrink: 1,
+    },
   });
 }
 
 export function FinanceHero({
   stats,
   onNetWorthPress,
+  onCashPress,
+  onReceivablePress,
+  onPayablePress,
+  onInventoryPress,
 }: {
   stats: DashboardStats;
   onNetWorthPress?: () => void;
+  onCashPress?: () => void;
+  onReceivablePress?: () => void;
+  onPayablePress?: () => void;
+  onInventoryPress?: () => void;
 }) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(
@@ -277,6 +302,8 @@ export function FinanceHero({
           paddingHorizontal: spacing.sm,
           backgroundColor: colors.surfaceContainer,
           borderRadius: radius.md,
+          minHeight: 48,
+          justifyContent: 'center',
         },
         chipLabel: {
           fontSize: 10,
@@ -303,7 +330,7 @@ export function FinanceHero({
             amount={stats.netProfit}
             size="hero"
             color={netProfitColor}
-            style={styles.heroValue}
+            style={[styles.heroValue, { width: '100%' }]}
           />
           <Text style={styles.heroSub} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
             Gross {formatCurrency(stats.grossProfit)}
@@ -318,37 +345,69 @@ export function FinanceHero({
           accessibilityLabel="View balance sheet"
         >
           <Text style={styles.heroLabel}>Net Worth</Text>
-          <MoneyText amount={stats.netWorth} size="hero" style={styles.heroValue} />
+          <MoneyText amount={stats.netWorth} size="hero" style={[styles.heroValue, { width: '100%' }]} />
           <Text style={styles.heroSub}>Balance sheet</Text>
         </TouchableOpacity>
       </View>
       <View style={styles.chipRow}>
-        <View style={styles.chip}>
+        <TouchableOpacity
+          style={styles.chip}
+          onPress={onCashPress}
+          disabled={!onCashPress}
+          activeOpacity={onCashPress ? 0.75 : 1}
+          accessibilityRole={onCashPress ? 'button' : undefined}
+          accessibilityLabel="View banking"
+        >
           <Text style={styles.chipLabel}>Cash & Bank</Text>
-          <MoneyText amount={stats.totalLiquid} size="md" style={styles.chipValue} />
-        </View>
-        <View style={styles.chip}>
+          <MoneyText amount={stats.totalLiquid} size="md" style={[styles.chipValue, { width: '100%', textAlign: 'left' }]} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.chip}
+          onPress={onReceivablePress}
+          disabled={!onReceivablePress}
+          activeOpacity={onReceivablePress ? 0.75 : 1}
+          accessibilityRole={onReceivablePress ? 'button' : undefined}
+          accessibilityLabel="View receivables"
+        >
           <Text style={styles.chipLabel}>Receivable</Text>
           <MoneyText
             amount={stats.receivable}
             size="md"
             color={colors.danger}
-            style={styles.chipValue}
+            style={[styles.chipValue, { width: '100%', textAlign: 'left' }]}
           />
-        </View>
-        <View style={styles.chip}>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.chip}
+          onPress={onPayablePress}
+          disabled={!onPayablePress}
+          activeOpacity={onPayablePress ? 0.75 : 1}
+          accessibilityRole={onPayablePress ? 'button' : undefined}
+          accessibilityLabel="View payables"
+        >
           <Text style={styles.chipLabel}>Payable</Text>
           <MoneyText
             amount={stats.payable}
             size="md"
             color={colors.warning}
-            style={styles.chipValue}
+            style={[styles.chipValue, { width: '100%', textAlign: 'left' }]}
           />
-        </View>
-        <View style={styles.chip}>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.chip}
+          onPress={onInventoryPress}
+          disabled={!onInventoryPress}
+          activeOpacity={onInventoryPress ? 0.75 : 1}
+          accessibilityRole={onInventoryPress ? 'button' : undefined}
+          accessibilityLabel="View inventory"
+        >
           <Text style={styles.chipLabel}>Inventory</Text>
-          <MoneyText amount={stats.inventoryValue} size="md" style={styles.chipValue} />
-        </View>
+          <MoneyText
+            amount={stats.inventoryValue}
+            size="md"
+            style={[styles.chipValue, { width: '100%', textAlign: 'left' }]}
+          />
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -626,7 +685,7 @@ export function FilterRow({ children }: { children: React.ReactNode }) {
       style={{
         flexDirection: 'row',
         paddingHorizontal: spacing.md,
-        paddingVertical: spacing.sm,
+        paddingVertical: spacing.xs + 2,
         gap: spacing.xs,
         backgroundColor: colors.surface,
         borderBottomWidth: 1,
@@ -657,11 +716,11 @@ export function SearchField({
           flexDirection: 'row',
           alignItems: 'center',
           marginHorizontal: spacing.md,
-          marginBottom: spacing.sm,
+          marginBottom: spacing.xs + 2,
           marginTop: spacing.xs,
           paddingHorizontal: spacing.md,
-          paddingVertical: 8,
-          minHeight: 44,
+          paddingVertical: 7,
+          minHeight: 40,
           borderRadius: radius.full,
           borderWidth: 0,
           backgroundColor: colors.surfaceContainer,
@@ -711,13 +770,13 @@ function createChipStyles(colors: ThemeColors) {
     chip: {
       flex: 1,
       minWidth: 0,
-      paddingVertical: 7,
+      paddingVertical: 8,
       paddingHorizontal: spacing.xs,
       borderRadius: radius.full,
       backgroundColor: colors.chip,
       alignItems: 'center',
       justifyContent: 'center',
-      minHeight: 32,
+      minHeight: 36,
     },
     chipActive: {
       backgroundColor: colors.chipActive,
@@ -994,7 +1053,7 @@ function ShortcutRow({
           <TouchableOpacity
             key={item.route}
             style={styles.item}
-            onPress={() => router.navigate(item.route as never)}
+            onPress={() => router.push(item.route as never)}
             activeOpacity={0.75}
             accessibilityLabel={item.label}
             accessibilityRole="button"

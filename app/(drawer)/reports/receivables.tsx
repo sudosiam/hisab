@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { getReceivablesReport } from '../../../src/services/reports';
 import { ReportRow } from '../../../src/components/ReportRow';
 import { MoneyText } from '../../../src/components/MoneyText';
@@ -17,6 +17,7 @@ import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 
 export default function ReceivablesReportScreen() {
+  const router = useRouter();
   const styles = useScreenStyles();
   const { refreshKey } = useDatabase();
   const { colors, isDark } = useTheme();
@@ -27,14 +28,16 @@ export default function ReceivablesReportScreen() {
         row: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
-          marginBottom: spacing.xs,
+          paddingVertical: spacing.sm,
+          marginBottom: spacing.xs + 2,
+          minHeight: 52,
+          justifyContent: 'center',
         },
-        invoice: { fontWeight: '600', color: colors.text },
-        typeMeta: { fontSize: 11, fontWeight: '700', color: colors.primary, marginTop: 2 },
+        invoice: { fontWeight: '600', color: colors.text, fontSize: 14 },
+        typeMeta: { fontSize: 10, fontWeight: '700', color: colors.primary, marginTop: 2 },
         typeMetaBos: { color: colors.warning },
-        party: { fontSize: 13, color: colors.textSecondary },
-        date: { fontSize: 11, color: colors.textSecondary },
+        party: { fontSize: 12, color: colors.textSecondary, marginTop: 1 },
+        date: { fontSize: 11, color: colors.textMuted },
       }),
     [colors, isDark]
   );
@@ -89,7 +92,7 @@ export default function ReceivablesReportScreen() {
       </View>
       <FlatList
         data={rows}
-        keyExtractor={(item, index) => `${item.invoice_no}-${index}`}
+        keyExtractor={(item) => String(item.id)}
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
@@ -97,7 +100,13 @@ export default function ReceivablesReportScreen() {
         ListEmptyComponent={<Text style={styles.empty}>No outstanding customer dues</Text>}
         {...FLATLIST_PERF}
         renderItem={({ item }) => (
-          <ReportRow style={localStyles.row} amount={item.due} amountColor={colors.danger}>
+          <ReportRow
+            style={localStyles.row}
+            amount={item.due}
+            amountColor={colors.danger}
+            onPress={() => router.push(`/(drawer)/sales/${item.id}`)}
+            accessibilityLabel={`Receivable ${item.invoice_no}`}
+          >
             <Text style={localStyles.invoice} numberOfLines={1}>
               {item.invoice_no}
             </Text>

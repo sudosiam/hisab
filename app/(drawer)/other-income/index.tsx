@@ -3,16 +3,15 @@ import {
   View,
   Text,
   FlatList,
-  TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
+import { ListItem } from '../../../src/components/ListItem';
+import { MoneyTotalRow } from '../../../src/components/MoneyText';
 import { ErrorState, Fab, SearchField, SectionHeader, useScreenStyles } from '../../../src/components/ui';
 import { getOtherIncome } from '../../../src/services/otherIncome';
-import { formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
@@ -20,27 +19,14 @@ import { getPeriodTotalLabel, formatDisplayDate } from '../../../src/utils/date'
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { spacing } from '../../../src/constants/theme';
-import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 import type { OtherIncome } from '../../../src/types';
 
 export default function OtherIncomeListScreen() {
   const router = useRouter();
   const { refreshKey } = useDatabase();
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const styles = useScreenStyles();
-  const localStyles = useMemo(
-    () =>
-      StyleSheet.create({
-        row: {
-          ...cardSurface(colors, isDark),
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
-          marginBottom: spacing.sm,
-        },
-      }),
-    [colors, isDark]
-  );
 
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [items, setItems] = useState<OtherIncome[]>([]);
@@ -65,28 +51,17 @@ export default function OtherIncomeListScreen() {
 
   const renderItem = useCallback(
     ({ item }: { item: OtherIncome }) => (
-      <TouchableOpacity
-        style={localStyles.row}
+      <ListItem
+        title={item.category}
+        subtitle={item.description}
+        meta={`${formatDisplayDate(item.date)} · ${item.account_name}`}
+        amount={item.amount}
+        amountColor={colors.success}
         onPress={() => router.push(`/(drawer)/other-income/${item.id}` as never)}
-        activeOpacity={0.75}
-      >
-        <View style={styles.row}>
-          <Text style={styles.cardTitle} numberOfLines={1}>
-            {item.category}
-          </Text>
-          <Text style={[styles.amount, { color: colors.success }]}>
-            {formatCurrency(item.amount)}
-          </Text>
-        </View>
-        <Text style={styles.cardSub} numberOfLines={2}>
-          {item.description}
-        </Text>
-        <Text style={styles.cardSub}>
-          {formatDisplayDate(item.date)} · {item.account_name}
-        </Text>
-      </TouchableOpacity>
+        accessibilityLabel={`Income ${item.category}`}
+      />
     ),
-    [colors.success, localStyles, router, styles]
+    [colors.success, router]
   );
 
   if (error && items.length === 0) {
@@ -103,12 +78,11 @@ export default function OtherIncomeListScreen() {
         placeholder="Search category, description, account..."
       />
 
-      <View style={styles.row}>
-        <Text style={styles.cardTitle}>
-          {search.trim() ? 'Filtered Total' : getPeriodTotalLabel(monthKey)}
-        </Text>
-        <Text style={[styles.amount, { color: colors.success }]}>{formatCurrency(monthTotal)}</Text>
-      </View>
+      <MoneyTotalRow
+        label={search.trim() ? 'Filtered Total' : getPeriodTotalLabel(monthKey)}
+        amount={monthTotal}
+        amountColor={colors.success}
+      />
 
       <SectionHeader title="Other Income" />
       {booting ? <ActivityIndicator color={colors.primary} /> : null}
@@ -121,7 +95,7 @@ export default function OtherIncomeListScreen() {
         data={booting && items.length === 0 ? [] : filtered}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.list, { paddingTop: spacing.sm }]}
         ListHeaderComponent={header}
         refreshControl={
           <RefreshControl

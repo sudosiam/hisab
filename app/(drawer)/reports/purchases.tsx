@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getPurchaseReport, sumReportAmounts } from '../../../src/services/reports';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -19,23 +19,26 @@ import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 
 export default function PurchaseReportScreen() {
+  const router = useRouter();
   const { refreshKey } = useDatabase();
   const styles = useScreenStyles();
   const { colors, isDark } = useTheme();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        header: { padding: spacing.sm },
-        totalWrap: { alignItems: 'center', marginBottom: spacing.xs },
+        header: { paddingHorizontal: spacing.md, paddingTop: spacing.sm },
+        totalWrap: { alignItems: 'center', marginBottom: spacing.sm },
         row: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
-          marginBottom: spacing.xs,
+          paddingVertical: spacing.sm,
+          marginBottom: spacing.xs + 2,
+          minHeight: 52,
+          justifyContent: 'center',
         },
-        invoice: { fontWeight: '600', color: colors.text },
-        party: { fontSize: 13, color: colors.textSecondary },
-        date: { fontSize: 11, color: colors.textSecondary },
+        invoice: { fontWeight: '600', color: colors.text, fontSize: 14 },
+        party: { fontSize: 12, color: colors.textSecondary, marginTop: 1 },
+        date: { fontSize: 11, color: colors.textMuted },
       }),
     [colors, isDark]
   );
@@ -97,7 +100,7 @@ export default function PurchaseReportScreen() {
       </View>
       <FlatList
         data={rows}
-        keyExtractor={(item, index) => `${item.invoice_no}-${index}`}
+        keyExtractor={(item) => String(item.id)}
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
@@ -109,6 +112,8 @@ export default function PurchaseReportScreen() {
             style={localStyles.row}
             amount={item.total_amount}
             trailing={<StatusBadge status={item.status} />}
+            onPress={() => router.push(`/(drawer)/purchases/${item.id}`)}
+            accessibilityLabel={`Purchase ${item.invoice_no}`}
           >
             <Text style={localStyles.invoice} numberOfLines={1}>
               {item.invoice_no}

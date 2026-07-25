@@ -5,7 +5,7 @@ import { useTheme } from '../context/ThemeContext';
 import { formatDisplayDate } from '../utils/date';
 import { spacing } from '../constants/theme';
 import { cardSurface } from '../constants/shadows';
-import { MoneyText } from './MoneyText';
+import { MoneyText, moneyRowStyles } from './MoneyText';
 import type { ActivityItem } from '../services/activity';
 
 const ROUTES: Record<ActivityItem['type'], (id: number) => string> = {
@@ -33,14 +33,16 @@ export function RecentActivityList({ items }: { items: ActivityItem[] }) {
           activeOpacity={0.75}
         >
           <View style={styles.rowLeft}>
-            <Text style={styles.title} numberOfLines={1}>
+            <Text style={styles.title} numberOfLines={2}>
               {item.title}
             </Text>
-            <Text style={styles.subtitle} numberOfLines={1}>
+            <Text style={styles.subtitle} numberOfLines={2}>
               {item.subtitle} · {formatDisplayDate(item.date)}
             </Text>
           </View>
-          <MoneyText amount={item.amount} size="md" style={styles.amount} />
+          <View style={styles.amountCol}>
+            <MoneyText amount={item.amount} size="md" style={{ width: '100%' }} />
+          </View>
         </TouchableOpacity>
       ))}
     </View>
@@ -52,13 +54,14 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     list: {
       ...cardSurface(colors, isDark),
       paddingHorizontal: spacing.md,
+      // Clip only for card radius — rows use visible overflow via padding growth.
       overflow: 'hidden',
     },
     row: {
       flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: spacing.sm,
-      minHeight: 48,
+      alignItems: 'flex-start',
+      paddingVertical: 8,
+      minHeight: 44,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.borderLight,
       gap: spacing.sm,
@@ -67,11 +70,10 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     rowLast: {
       borderBottomWidth: 0,
     },
-    title: { fontSize: 13, fontWeight: '500', color: colors.text },
-    subtitle: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
-    amount: {
-      flexShrink: 0,
-      maxWidth: '46%',
+    title: { fontSize: 13, fontWeight: '600', color: colors.text },
+    subtitle: { fontSize: 11, color: colors.textSecondary, marginTop: 1, lineHeight: 15 },
+    amountCol: {
+      ...moneyRowStyles.right,
     },
     empty: {
       fontSize: 13,

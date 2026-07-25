@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getSalesReport, sumReportAmounts } from '../../../src/services/reports';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -19,26 +19,27 @@ import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 
 export default function SalesReportScreen() {
+  const router = useRouter();
   const { refreshKey } = useDatabase();
   const styles = useScreenStyles();
   const { colors, isDark } = useTheme();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        header: { padding: spacing.sm },
-        total: { fontWeight: '700', textAlign: 'center', marginBottom: spacing.sm, color: colors.text },
+        header: { paddingHorizontal: spacing.md, paddingTop: spacing.sm },
         row: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
-          marginBottom: spacing.xs,
+          paddingVertical: spacing.sm,
+          marginBottom: spacing.xs + 2,
+          minHeight: 52,
+          justifyContent: 'center',
         },
-        invoice: { fontWeight: '600', color: colors.text },
-        typeMeta: { fontSize: 11, fontWeight: '700', color: colors.primary, marginTop: 2 },
+        invoice: { fontWeight: '600', color: colors.text, fontSize: 14 },
+        typeMeta: { fontSize: 10, fontWeight: '700', color: colors.primary, marginTop: 2 },
         typeMetaBos: { color: colors.warning },
-        party: { fontSize: 13, color: colors.textSecondary },
-        date: { fontSize: 11, color: colors.textSecondary },
-        amount: { fontWeight: '700', marginTop: 4, color: colors.text },
+        party: { fontSize: 12, color: colors.textSecondary, marginTop: 1 },
+        date: { fontSize: 11, color: colors.textMuted },
       }),
     [colors, isDark]
   );
@@ -100,7 +101,7 @@ export default function SalesReportScreen() {
       </View>
       <FlatList
         data={rows}
-        keyExtractor={(item, index) => `${item.invoice_no}-${index}`}
+        keyExtractor={(item) => String(item.id)}
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
@@ -112,6 +113,8 @@ export default function SalesReportScreen() {
             style={localStyles.row}
             amount={item.total_amount}
             trailing={<StatusBadge status={item.status} />}
+            onPress={() => router.push(`/(drawer)/sales/${item.id}`)}
+            accessibilityLabel={`Sale ${item.invoice_no}`}
           >
             <Text style={localStyles.invoice} numberOfLines={1}>
               {item.invoice_no}

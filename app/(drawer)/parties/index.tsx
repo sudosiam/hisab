@@ -12,6 +12,8 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { ListItem } from '../../../src/components/ListItem';
+import { MoneyText } from '../../../src/components/MoneyText';
 import {
   ErrorState,
   Fab,
@@ -29,7 +31,6 @@ import {
 import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
-import { formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { spacing, radius } from '../../../src/constants/theme';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
@@ -58,36 +59,8 @@ export default function PartiesScreen() {
           paddingVertical: spacing.sm + 2,
           gap: spacing.sm,
         },
-        summaryItem: { flex: 1, alignItems: 'center' },
-        summaryValue: { fontSize: 18, fontWeight: '700', color: colors.primary },
+        summaryItem: { flex: 1, minWidth: 0, alignItems: 'center' },
         summaryLabel: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
-        partyRow: {
-          ...cardSurface(colors, isDark),
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
-          marginHorizontal: spacing.md,
-          marginBottom: spacing.sm,
-        },
-        partyHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-        partyInfo: { flex: 1, marginRight: spacing.sm },
-        balanceBlock: { alignItems: 'flex-end' },
-        balanceLabel: { fontSize: 10, color: colors.textMuted, textTransform: 'uppercase' },
-        balanceValue: { fontSize: 16, fontWeight: '700', marginTop: 2 },
-        balanceDue: { color: colors.danger },
-        balanceClear: { color: colors.success },
-        badge: {
-          alignSelf: 'flex-start',
-          marginTop: spacing.xs,
-          paddingHorizontal: spacing.sm,
-          paddingVertical: 3,
-          borderRadius: radius.full,
-          backgroundColor: colors.navActive,
-        },
-        badgeVendor: { backgroundColor: colors.warning + '22' },
-        badgeText: { fontSize: 11, fontWeight: '700', color: colors.primary, textTransform: 'capitalize' },
-        badgeTextVendor: { color: colors.warning },
-        metaRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
-        metaText: { fontSize: 12, color: colors.textSecondary },
         form: {
           ...cardSurface(colors, isDark),
           marginHorizontal: spacing.md,
@@ -203,15 +176,21 @@ export default function PartiesScreen() {
     <View style={styles.container}>
       <View style={localStyles.summary}>
         <View style={localStyles.summaryItem}>
-          <Text style={[localStyles.summaryValue, { color: colors.success }]}>
-            {formatCurrency(totalReceivable)}
-          </Text>
+          <MoneyText
+            amount={totalReceivable}
+            size="lg"
+            color={colors.success}
+            style={{ width: '100%', textAlign: 'center' }}
+          />
           <Text style={localStyles.summaryLabel}>To Receive</Text>
         </View>
         <View style={localStyles.summaryItem}>
-          <Text style={[localStyles.summaryValue, { color: colors.danger }]}>
-            {formatCurrency(totalPayable)}
-          </Text>
+          <MoneyText
+            amount={totalPayable}
+            size="lg"
+            color={colors.danger}
+            style={{ width: '100%', textAlign: 'center' }}
+          />
           <Text style={localStyles.summaryLabel}>To Pay</Text>
         </View>
       </View>
@@ -292,7 +271,7 @@ export default function PartiesScreen() {
         <FlatList
           data={filteredParties}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={{ paddingBottom: 96 }}
+          contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -316,46 +295,20 @@ export default function PartiesScreen() {
           }
           renderItem={({ item }) => {
             const dueLabel = item.type === 'customer' ? 'Receivable' : 'Payable';
-            const hasDue = item.balance_due > 0.01;
+            const metaParts = [`${item.invoice_count} invoices`];
+            if (item.last_activity) metaParts.push(`Last ${item.last_activity}`);
             return (
-              <TouchableOpacity
-                style={localStyles.partyRow}
+              <ListItem
+                title={item.name}
+                subtitle={metaParts.join(' · ')}
+                amount={item.balance_due}
+                amountColor={item.balance_due > 0.01 ? colors.danger : colors.success}
+                pill={item.type}
+                pillTone={item.type === 'vendor' ? 'warn' : 'default'}
+                meta={dueLabel}
                 onPress={() => router.push(`/(drawer)/parties/${item.id}` as never)}
-                activeOpacity={0.75}
-              >
-                <View style={localStyles.partyHeader}>
-                  <View style={localStyles.partyInfo}>
-                    <Text style={styles.cardTitle}>{item.name}</Text>
-                    <View style={[localStyles.badge, item.type === 'vendor' && localStyles.badgeVendor]}>
-                      <Text
-                        style={[
-                          localStyles.badgeText,
-                          item.type === 'vendor' && localStyles.badgeTextVendor,
-                        ]}
-                      >
-                        {item.type}
-                      </Text>
-                    </View>
-                    <View style={localStyles.metaRow}>
-                      <Text style={localStyles.metaText}>{item.invoice_count} invoices</Text>
-                      {item.last_activity ? (
-                        <Text style={localStyles.metaText}>Last: {item.last_activity}</Text>
-                      ) : null}
-                    </View>
-                  </View>
-                  <View style={localStyles.balanceBlock}>
-                    <Text style={localStyles.balanceLabel}>{dueLabel}</Text>
-                    <Text
-                      style={[
-                        localStyles.balanceValue,
-                        hasDue ? localStyles.balanceDue : localStyles.balanceClear,
-                      ]}
-                    >
-                      {formatCurrency(item.balance_due)}
-                    </Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
+                accessibilityLabel={`Party ${item.name}`}
+              />
             );
           }}
         />

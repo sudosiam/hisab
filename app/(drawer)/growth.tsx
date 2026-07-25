@@ -51,7 +51,7 @@ export default function GrowthScreen() {
         },
         row: { ...moneyRowStyles.row, paddingVertical: spacing.sm },
         rowLabel: { fontSize: 14, color: colors.text, flex: 1, minWidth: 0, paddingRight: spacing.sm },
-        rowValue: { maxWidth: '52%' },
+        rowValue: { maxWidth: '62%', flexShrink: 1, minWidth: 88, width: '100%', textAlign: 'right' },
         pos: { color: colors.success, fontWeight: '700' },
         neg: { color: colors.danger, fontWeight: '700' },
         bold: { fontWeight: '700' },
@@ -71,7 +71,7 @@ export default function GrowthScreen() {
           marginBottom: spacing.sm,
         },
         monthTitle: { fontSize: 15, fontWeight: '700', color: colors.text, flex: 1, minWidth: 0, paddingRight: spacing.sm },
-        monthProfit: { maxWidth: '48%' },
+        monthProfit: { maxWidth: '58%', flexShrink: 1, minWidth: 80, width: '100%', textAlign: 'right' },
         monthProfitNeg: { color: colors.danger },
         monthProfitMuted: { color: colors.textMuted },
         detailRow: {
@@ -79,7 +79,7 @@ export default function GrowthScreen() {
           paddingVertical: 4,
         },
         detailLabel: { fontSize: 13, color: colors.textSecondary, flex: 1, minWidth: 0 },
-        detailValue: { maxWidth: '52%' },
+        detailValue: { maxWidth: '62%', flexShrink: 1, minWidth: 80, width: '100%', textAlign: 'right' },
         cumulative: {
           borderTopWidth: 1,
           borderTopColor: colors.borderLight,

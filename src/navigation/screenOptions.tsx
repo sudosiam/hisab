@@ -101,18 +101,19 @@ function handleStackBack(navigation: StackNavigation, route?: RouteProp<ParamLis
   const stackIndex = state?.index ?? 0;
   const previousRouteName = stackIndex > 0 ? state?.routes?.[stackIndex - 1]?.name : undefined;
 
+  // Leaving a form (new/edit) should land on the section list, not the blank form.
   if (previousRouteName && FORM_ROUTES.has(previousRouteName)) {
     resetStackToList(navigation);
     return;
   }
 
-  if (stackIndex > 0 && state?.routes) {
-    if (navigation.canGoBack()) {
-      navigation.goBack();
-      return;
-    }
+  // Prefer real history: pop this stack, or the parent drawer (with backBehavior="history").
+  if (navigation.canGoBack()) {
+    navigation.goBack();
+    return;
   }
 
+  // Fallback when nothing is left in history (cold open of a detail URL).
   resetStackToList(navigation);
 }
 

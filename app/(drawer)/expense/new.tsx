@@ -107,6 +107,7 @@ export default function NewExpenseScreen() {
 
   useFocusEffect(
     React.useCallback(() => {
+      void refreshKey;
       void reloadAccounts();
     }, [reloadAccounts, refreshKey])
   );

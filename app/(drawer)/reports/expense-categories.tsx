@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getExpensesByCategoryReport } from '../../../src/services/reports';
 import { ReportRow } from '../../../src/components/ReportRow';
@@ -18,6 +18,7 @@ import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 
 export default function ExpenseCategoriesReportScreen() {
+  const router = useRouter();
   const styles = useScreenStyles();
   const { refreshKey } = useDatabase();
   const { colors, isDark } = useTheme();
@@ -29,11 +30,13 @@ export default function ExpenseCategoriesReportScreen() {
         row: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
-          marginBottom: spacing.xs,
+          paddingVertical: spacing.sm,
+          marginBottom: spacing.xs + 2,
+          minHeight: 48,
+          justifyContent: 'center',
         },
-        category: { fontWeight: '600', color: colors.text },
-        count: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+        category: { fontWeight: '600', color: colors.text, fontSize: 14 },
+        count: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
       }),
     [colors, isDark]
   );
@@ -99,8 +102,14 @@ export default function ExpenseCategoriesReportScreen() {
         ListEmptyComponent={<Text style={styles.empty}>No expenses in this period.</Text>}
         {...FLATLIST_PERF}
         renderItem={({ item }) => (
-          <ReportRow style={localStyles.row} amount={item.total} amountColor={colors.danger}>
-            <Text style={localStyles.category} numberOfLines={2}>
+          <ReportRow
+            style={localStyles.row}
+            amount={item.total}
+            amountColor={colors.danger}
+            onPress={() => router.push('/(drawer)/expense' as never)}
+            accessibilityLabel={`${item.category} expenses`}
+          >
+            <Text style={localStyles.category} numberOfLines={1}>
               {item.category}
             </Text>
             <Text style={localStyles.count}>

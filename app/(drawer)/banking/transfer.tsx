@@ -66,6 +66,7 @@ export default function TransferScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      void refreshKey;
       void reloadAccounts();
     }, [reloadAccounts, refreshKey])
   );
