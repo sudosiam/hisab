@@ -114,6 +114,7 @@ export async function getPartySummary(partyId: number): Promise<PartySummary | n
       totalBilled: stats?.billed ?? 0,
       totalPaid: stats?.paid ?? 0,
       balanceDue: due,
+      advanceCredit: advance,
       lastActivityDate: stats?.last_date ?? null,
     };
   }
@@ -141,6 +142,7 @@ export async function getPartySummary(partyId: number): Promise<PartySummary | n
     totalBilled: stats?.billed ?? 0,
     totalPaid: stats?.paid ?? 0,
     balanceDue: Math.max(0, roundMoney((stats?.due ?? 0) - advance)),
+    advanceCredit: advance,
     lastActivityDate: stats?.last_date ?? null,
   };
 }
@@ -424,29 +426,36 @@ export async function upsertParty(
   name: string,
   type: PartyType,
   dbHandle?: SQLite.SQLiteDatabase,
-  phone?: string
+  phone?: string,
+  options?: { state?: string | null }
 ): Promise<number | null> {
   const trimmed = name.trim();
   if (!trimmed) return null;
 
   const db = dbHandle ?? (await getDatabase());
-  const existing = await db.getFirstAsync<{ id: number }>(
-    'SELECT id FROM parties WHERE name = ? COLLATE NOCASE AND type = ?',
+  const existing = await db.getFirstAsync<{ id: number; state: string | null }>(
+    'SELECT id, state FROM parties WHERE name = ? COLLATE NOCASE AND type = ?',
     [trimmed, type]
   );
   const phoneValue = phone?.trim() || null;
+  const { normalizePartyStateForSave } = await import('./gst');
+  const normalizedState = normalizePartyStateForSave(options?.state, null);
+
   if (existing) {
     if (phoneValue) {
       await db.runAsync('UPDATE parties SET phone = ? WHERE id = ?', [phoneValue, existing.id]);
     }
+    // Fill state only when the party has none yet (e.g. created earlier from a sale).
+    if (normalizedState && !existing.state?.trim()) {
+      await db.runAsync('UPDATE parties SET state = ? WHERE id = ?', [normalizedState, existing.id]);
+    }
     return existing.id;
   }
 
-  const result = await db.runAsync('INSERT INTO parties (name, type, phone) VALUES (?, ?, ?)', [
-    trimmed,
-    type,
-    phoneValue,
-  ]);
+  const result = await db.runAsync(
+    'INSERT INTO parties (name, type, phone, state) VALUES (?, ?, ?, ?)',
+    [trimmed, type, phoneValue, normalizedState]
+  );
   return result.lastInsertRowId;
 }
 
@@ -496,10 +505,8 @@ export async function createParty(params: {
       throw new Error('Enter a valid 15-character GSTIN');
     }
   }
-  const derivedState =
-    params.state?.trim() ||
-    (gstin ? (await import('./gst')).stateCodeFromGstin(gstin) : null) ||
-    null;
+  const { normalizePartyStateForSave } = await import('./gst');
+  const derivedState = normalizePartyStateForSave(params.state, gstin);
 
   const result = await db.runAsync(
     'INSERT INTO parties (name, type, phone, notes, gstin, state, address) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -566,10 +573,8 @@ export async function updateParty(
         throw new Error('Enter a valid 15-character GSTIN');
       }
     }
-    const derivedState =
-      params.state?.trim() ||
-      (gstin ? (await import('./gst')).stateCodeFromGstin(gstin) : null) ||
-      null;
+    const { normalizePartyStateForSave } = await import('./gst');
+    const derivedState = normalizePartyStateForSave(params.state, gstin);
     await db.runAsync(
       'UPDATE parties SET name = ?, type = ?, phone = ?, notes = ?, gstin = ?, state = ?, address = ? WHERE id = ?',
       [

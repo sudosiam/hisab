@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter, useNavigation } from 'expo-router';
+import type { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { getSaleById, getSaleItems, getSalePayments, addSalePayment, removeSalePayment, deleteSale } from '../../../src/services/sales';
 import { calculateSaleCogs, calculateSaleGrossProfit } from '../../../src/services/financials';
 import { formatSqliteError } from '../../../src/db/database';
@@ -30,14 +31,23 @@ import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { todayISO, isValidISODate, formatDisplayDate } from '../../../src/utils/date';
+import { stackDetailBeforeRemove } from '../../../src/navigation/screenOptions';
 import { radius, spacing } from '../../../src/constants/theme';
+import { stateName } from '../../../src/services/gst';
 import type { Account, Sale, SaleItem, SalePayment } from '../../../src/types';
 
 export default function SaleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { refresh } = useDatabase();
+
+  useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', (e) => {
+      stackDetailBeforeRemove(navigation as never, e as never);
+    });
+    return unsub;
+  }, [navigation]);
   const styles = useScreenStyles();
   const { colors } = useTheme();
   const localStyles = useMemo(
@@ -265,6 +275,18 @@ export default function SaleDetailScreen() {
     }
   }, [sale]);
 
+  const handleDownloadPdf = useCallback(async () => {
+    if (!sale) return;
+    try {
+      const { downloadSaleInvoicePdf } = await import('../../../src/services/saleInvoicePdf');
+      const result = await downloadSaleInvoicePdf(sale.id);
+      if (!result.success) Alert.alert('Could not save', result.message);
+      else if (result.message.startsWith('Saved')) Alert.alert('Saved', result.message);
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
+  }, [sale]);
+
   const handleWhatsApp = useCallback(async () => {
     if (!sale) return;
     try {
@@ -300,8 +322,23 @@ export default function SaleDetailScreen() {
             <OverflowMenu
               actions={[
                 { label: 'Preview / Print', onPress: handlePreviewPdf },
+                { label: 'Download PDF', onPress: handleDownloadPdf },
                 { label: 'Share PDF', onPress: handleSharePdf },
                 { label: 'Share on WhatsApp', onPress: handleWhatsApp },
+                {
+                  label: 'Issue credit note',
+                  onPress: () =>
+                    router.push(
+                      `/(drawer)/notes/new?againstSaleId=${sale.id}&kind=credit&direction=sale` as never
+                    ),
+                },
+                {
+                  label: 'Issue debit note',
+                  onPress: () =>
+                    router.push(
+                      `/(drawer)/notes/new?againstSaleId=${sale.id}&kind=debit&direction=sale` as never
+                    ),
+                },
                 {
                   label: 'Delete Sale',
                   destructive: true,
@@ -312,7 +349,16 @@ export default function SaleDetailScreen() {
           )
         : undefined,
     });
-  }, [navigation, sale, handleDelete, handlePreviewPdf, handleSharePdf, handleWhatsApp]);
+  }, [
+    navigation,
+    sale,
+    router,
+    handleDelete,
+    handlePreviewPdf,
+    handleDownloadPdf,
+    handleSharePdf,
+    handleWhatsApp,
+  ]);
 
   if (loading) {
     return (
@@ -341,6 +387,17 @@ export default function SaleDetailScreen() {
   const hasDiscount = (sale.discount_amount ?? 0) > 0;
   const hasServiceCharges = (sale.service_charges ?? 0) > 0;
   const isBos = sale.invoice_type === 'bos';
+  const outputTax =
+    (sale.cgst_amount ?? 0) + (sale.sgst_amount ?? 0) + (sale.igst_amount ?? 0);
+  const withGst = items.filter(
+    (item) =>
+      (item.gst_rate ?? 0) > 0.009 ||
+      (item.cgst_amount ?? 0) + (item.sgst_amount ?? 0) + (item.igst_amount ?? 0) > 0.009
+  );
+  const withoutGst = items.length - withGst.length;
+  const placeLabel = sale.place_of_supply
+    ? stateName(sale.place_of_supply) || sale.place_of_supply
+    : null;
 
   return (
     <FormScreen>
@@ -360,21 +417,15 @@ export default function SaleDetailScreen() {
       </View>
       <Text style={localStyles.party}>{sale.party_name}</Text>
       <Text style={localStyles.date}>{formatDisplayDate(sale.date)}</Text>
+      {placeLabel ? (
+        <Text style={localStyles.date}>Place of supply: {placeLabel}</Text>
+      ) : null}
 
       {hasDiscount || hasServiceCharges ? (
         <Text style={localStyles.discountNote}>
           Subtotal {formatCurrency(sale.subtotal)}
           {hasDiscount ? ` · Discount ${formatCurrency(sale.discount_amount)}` : ''}
           {hasServiceCharges ? ` · Service ${formatCurrency(sale.service_charges)}` : ''}
-        </Text>
-      ) : null}
-
-      {(sale.cgst_amount ?? 0) + (sale.sgst_amount ?? 0) + (sale.igst_amount ?? 0) > 0.009 ? (
-        <Text style={localStyles.discountNote}>
-          Taxable {formatCurrency(sale.taxable_amount ?? 0)}
-          {(sale.igst_amount ?? 0) > 0.009
-            ? ` · IGST ${formatCurrency(sale.igst_amount)}`
-            : ` · CGST ${formatCurrency(sale.cgst_amount ?? 0)} · SGST ${formatCurrency(sale.sgst_amount ?? 0)}`}
         </Text>
       ) : null}
 
@@ -394,19 +445,61 @@ export default function SaleDetailScreen() {
         />
       </View>
 
-      <SectionHeader title="Items" />
-      {items.map((item) => (
-        <View key={item.id} style={localStyles.itemRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={localStyles.itemName}>{item.product_name}</Text>
-            <Text style={localStyles.itemMeta}>
-              {item.qty} × {formatCurrency(item.unit_price)} · Cost{' '}
-              {formatCurrency(item.unit_cost)}
-            </Text>
+      {(sale.cgst_amount ?? 0) + (sale.sgst_amount ?? 0) + (sale.igst_amount ?? 0) > 0.009 ? (
+        <>
+          <SectionHeader title="GST" />
+          <View style={{ marginBottom: spacing.sm }}>
+            <View style={localStyles.kpiRow}>
+              <StatCard
+                label="Output tax"
+                value={outputTax}
+                color={outputTax > 0 ? colors.primary : colors.textSecondary}
+                subtitle={
+                  (sale.igst_amount ?? 0) > 0.009
+                    ? 'IGST'
+                    : outputTax > 0
+                      ? 'CGST + SGST'
+                      : 'No tax'
+                }
+              />
+              <StatCard
+                label="Taxable"
+                value={sale.taxable_amount ?? sale.subtotal}
+                color={colors.primary}
+              />
+              <StatCard
+                label="Lines"
+                displayValue={`${withGst.length}/${items.length}`}
+                color={withoutGst > 0 ? colors.warning : colors.success}
+                subtitle={withoutGst > 0 ? `${withoutGst} without GST` : 'All lines have GST'}
+              />
+            </View>
           </View>
-          <Text style={localStyles.itemTotal}>{formatCurrency(item.total)}</Text>
-        </View>
-      ))}
+        </>
+      ) : null}
+
+      <SectionHeader title="Items" />
+      {items.map((item) => {
+        const lineTax =
+          (item.cgst_amount ?? 0) + (item.sgst_amount ?? 0) + (item.igst_amount ?? 0);
+        const hasGst = (item.gst_rate ?? 0) > 0.009 || lineTax > 0.009;
+        return (
+          <View key={item.id} style={localStyles.itemRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={localStyles.itemName}>{item.product_name}</Text>
+              <Text style={localStyles.itemMeta}>
+                {item.qty} × {formatCurrency(item.unit_price)} · Cost{' '}
+                {formatCurrency(item.unit_cost)}
+                {item.hsn_sac ? ` · HSN ${item.hsn_sac}` : ''}
+                {hasGst
+                  ? ` · GST ${item.gst_rate ?? 0}% · Tax ${formatCurrency(lineTax)}`
+                  : ' · No GST'}
+              </Text>
+            </View>
+            <Text style={localStyles.itemTotal}>{formatCurrency(item.total)}</Text>
+          </View>
+        );
+      })}
 
       <SectionHeader title="Payments" />
       {payments.length === 0 ? (

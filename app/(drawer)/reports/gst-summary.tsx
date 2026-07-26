@@ -1,5 +1,14 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  RefreshControl,
+  ActivityIndicator,
+  TouchableOpacity,
+  Alert,
+} from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getGstSummary } from '../../../src/services/gstReports';
@@ -9,9 +18,10 @@ import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
+import { shareGstr1Helper, shareGstr3bHelper } from '../../../src/services/gstReturnExport';
 import { shareGstSummaryPdf } from '../../../src/services/reportPdf';
+import { radius, spacing } from '../../../src/constants/theme';
 import { formatSqliteError } from '../../../src/db/database';
-import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 
 export default function GstSummaryScreen() {
@@ -37,6 +47,24 @@ export default function GstSummaryScreen() {
         label: { flex: 1, color: colors.text, fontSize: 14, paddingRight: spacing.sm },
         bold: { fontWeight: '700' },
         hint: { color: colors.textSecondary, fontSize: 12, marginBottom: spacing.md, lineHeight: 18 },
+        actions: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: spacing.sm,
+          marginBottom: spacing.md,
+        },
+        actionBtn: {
+          flexGrow: 1,
+          flexBasis: '47%',
+          minWidth: 140,
+          backgroundColor: colors.primaryContainer,
+          paddingVertical: 10,
+          minHeight: 40,
+          borderRadius: radius.full,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        actionText: { color: colors.onPrimaryContainer, fontWeight: '700', fontSize: 13 },
       }),
     [colors, isDark]
   );
@@ -71,6 +99,28 @@ export default function GstSummaryScreen() {
   }, [monthKey, data]);
 
   useReportPdfHeader({ disabled: !!error || !data, onExport: exportPdf });
+
+  const exportGstr1Helper = useCallback(async () => {
+    try {
+      await shareGstr1Helper(monthKey);
+    } catch (e) {
+      Alert.alert(
+        'Export failed',
+        e instanceof Error ? e.message : 'Could not export GSTR-1 helper.'
+      );
+    }
+  }, [monthKey]);
+
+  const exportGstr3bHelper = useCallback(async () => {
+    try {
+      await shareGstr3bHelper(monthKey);
+    } catch (e) {
+      Alert.alert(
+        'Export failed',
+        e instanceof Error ? e.message : 'Could not export GSTR-3B helper.'
+      );
+    }
+  }, [monthKey]);
 
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (booting || !data) {
@@ -107,7 +157,27 @@ export default function GstSummaryScreen() {
       <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
       <Text style={localStyles.hint}>
         GSTR-3B style summary for this business. Net payable = output tax − input tax credit.
+        Export JSON helpers below to cross-check before filing — not for direct portal upload.
       </Text>
+
+      <View style={localStyles.actions}>
+        <TouchableOpacity
+          style={localStyles.actionBtn}
+          onPress={() => void exportGstr1Helper()}
+          accessibilityRole="button"
+          accessibilityLabel="Export GSTR-1 helper JSON"
+        >
+          <Text style={localStyles.actionText}>Export GSTR-1 helper (JSON)</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={localStyles.actionBtn}
+          onPress={() => void exportGstr3bHelper()}
+          accessibilityRole="button"
+          accessibilityLabel="Export GSTR-3B helper JSON"
+        >
+          <Text style={localStyles.actionText}>Export GSTR-3B helper (JSON)</Text>
+        </TouchableOpacity>
+      </View>
 
       <SectionHeader title="Outward supplies" />
       <View style={localStyles.section}>

@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  Switch,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import {
@@ -25,7 +26,8 @@ import { createPurchase } from '../../../src/services/purchases';
 import { getNextPurchaseInvoiceNo } from '../../../src/services/invoiceNumbers';
 import { getPartyByName } from '../../../src/services/parties';
 import { getBusinessState, isGstEnabled, isTaxInclusivePricing } from '../../../src/services/appSettings';
-import { computeGstDocument } from '../../../src/services/gst';
+import { computeGstDocument, isPlausibleHsnSac, resolveStateFromPartyFields } from '../../../src/services/gst';
+import { GstRateChips } from '../../../src/components/GstRateChips';
 import { DRAFT_KEYS, loadDraft, type PurchaseFormDraft } from '../../../src/services/formDrafts';
 import { useFormDraft } from '../../../src/hooks/useFormDraft';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -127,6 +129,14 @@ export default function NewPurchaseScreen() {
           fontVariant: ['tabular-nums'],
         },
         hint: { color: colors.warning },
+        hsnWarning: { fontSize: 12, color: colors.textMuted, marginTop: -4, marginBottom: spacing.xs },
+        rcmRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginVertical: spacing.sm,
+        },
+        rcmLabel: { fontSize: 14, fontWeight: '600', color: colors.text, flex: 1 },
       }),
     [colors, isDark]
   );
@@ -148,6 +158,7 @@ export default function NewPurchaseScreen() {
   const [gstEnabled, setGstEnabled] = useState(true);
   const [taxInclusive, setTaxInclusive] = useState(false);
   const [partyState, setPartyState] = useState<string | null>(null);
+  const [isReverseCharge, setIsReverseCharge] = useState(false);
   const productsRef = React.useRef<Product[]>([]);
   productsRef.current = products;
 
@@ -311,7 +322,7 @@ export default function NewPurchaseScreen() {
     }
     getPartyByName(name, 'vendor')
       .then((party) => {
-        if (!cancelled) setPartyState(party?.state ?? null);
+        if (!cancelled) setPartyState(resolveStateFromPartyFields(party?.state, party?.gstin));
       })
       .catch(() => {});
     return () => {
@@ -447,6 +458,7 @@ export default function NewPurchaseScreen() {
           vendor_invoice_no: vendorInvoiceNo.trim() || undefined,
           notes: notes.trim() || undefined,
           discount_amount: discountAmount,
+          is_reverse_charge: isReverseCharge,
           items: items.map((i) => ({
             product_id: i.product_id,
             qty: parseAmountInput(i.qty) || 0,
@@ -506,6 +518,17 @@ export default function NewPurchaseScreen() {
       />
       <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
 
+      <View style={localStyles.rcmRow}>
+        <Text style={localStyles.rcmLabel}>Reverse charge (RCM)</Text>
+        <Switch
+          value={isReverseCharge}
+          onValueChange={setIsReverseCharge}
+          trackColor={{ false: colors.border, true: colors.primary }}
+          thumbColor={colors.surface}
+          accessibilityLabel="Reverse charge"
+        />
+      </View>
+
       <View style={styles.section}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <SectionHeader title="Line Items" />
@@ -562,6 +585,11 @@ export default function NewPurchaseScreen() {
                     placeholder="Optional"
                     keyboardType="number-pad"
                   />
+                  {item.hsn_sac.trim() && !isPlausibleHsnSac(item.hsn_sac) ? (
+                    <Text style={localStyles.hsnWarning}>
+                      Usual HSN is 4, 6, or 8 digits
+                    </Text>
+                  ) : null}
                 </View>
                 <View style={localStyles.costField}>
                   <FormInput
@@ -570,6 +598,10 @@ export default function NewPurchaseScreen() {
                     onChangeText={(v) => updateItem(index, 'gst_rate', v)}
                     money
                     placeholder="0"
+                  />
+                  <GstRateChips
+                    value={item.gst_rate}
+                    onChange={(v) => updateItem(index, 'gst_rate', v)}
                   />
                 </View>
               </View>

@@ -37,6 +37,13 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Sales', route: '/sales', icon: 'cart-outline', activeIcon: 'cart', match: ['/sales'] },
       { label: 'Purchases', route: '/purchases', icon: 'bag-handle-outline', activeIcon: 'bag-handle', match: ['/purchases'] },
+      {
+        label: 'Credit Notes',
+        route: '/notes',
+        icon: 'document-text-outline',
+        activeIcon: 'document-text',
+        match: ['/notes'],
+      },
       { label: 'Inventory', route: '/inventory', icon: 'cube-outline', activeIcon: 'cube', match: ['/inventory'] },
     ],
   },

@@ -66,24 +66,20 @@ async function resolveVendorState(
   supplierName: string,
   partyId?: number | null
 ): Promise<string | null> {
-  const { normalizeStateToCode, stateCodeFromGstin } = await import('./gst');
+  const { resolveStateFromPartyFields } = await import('./gst');
   if (partyId) {
     const row = await db.getFirstAsync<{ state: string | null; gstin: string | null }>(
       'SELECT state, gstin FROM parties WHERE id = ?',
       [partyId]
     );
-    const fromState = normalizeStateToCode(row?.state);
-    if (fromState) return fromState;
-    if (row?.gstin) return stateCodeFromGstin(row.gstin);
+    const resolved = resolveStateFromPartyFields(row?.state, row?.gstin);
+    if (resolved) return resolved;
   }
   const byName = await db.getFirstAsync<{ state: string | null; gstin: string | null }>(
     `SELECT state, gstin FROM parties WHERE name = ? COLLATE NOCASE AND type = 'vendor' LIMIT 1`,
     [supplierName.trim()]
   );
-  const fromNameState = normalizeStateToCode(byName?.state);
-  if (fromNameState) return fromNameState;
-  if (byName?.gstin) return stateCodeFromGstin(byName.gstin);
-  return null;
+  return resolveStateFromPartyFields(byName?.state, byName?.gstin);
 }
 
 async function buildPurchaseGst(
@@ -206,6 +202,7 @@ export async function createPurchase(params: {
   items: PurchaseItemInput[];
   payments: PaymentInput[];
   discount_amount?: number;
+  is_reverse_charge?: boolean;
   notes?: string;
   vendor_invoice_no?: string;
   invoice_no?: string;
@@ -228,6 +225,7 @@ export async function createPurchase(params: {
   }
 
   const status = getPaymentStatus(totalAmount, paidAmount);
+  const isReverseCharge = !!params.is_reverse_charge;
   let purchaseId = 0;
 
   await db.withTransactionAsync(async () => {
@@ -238,8 +236,8 @@ export async function createPurchase(params: {
       `INSERT INTO purchases (
          invoice_no, party_id, supplier_name, vendor_invoice_no, date, subtotal, discount_amount,
          taxable_amount, cgst_amount, sgst_amount, igst_amount, is_inter_state, place_of_supply,
-         total_amount, paid_amount, status, notes
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         is_reverse_charge, total_amount, paid_amount, status, notes
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         invoiceNo,
         partyId,
@@ -254,6 +252,7 @@ export async function createPurchase(params: {
         gst.igst_amount,
         gst.is_inter_state ? 1 : 0,
         gst.place_of_supply,
+        isReverseCharge ? 1 : 0,
         totalAmount,
         paidAmount,
         status,
@@ -440,6 +439,7 @@ export async function updatePurchase(
     invoice_no?: string;
     vendor_invoice_no?: string;
     discount_amount: number;
+    is_reverse_charge?: boolean;
     notes?: string;
     items?: PurchaseItemInput[];
   }
@@ -461,6 +461,10 @@ export async function updatePurchase(
   const supplierName = params.supplier_name.trim();
   const vendorInvoiceNo = params.vendor_invoice_no?.trim() || null;
   const invoiceChanged = invoiceNo !== purchase.invoice_no;
+  const isReverseCharge =
+    params.is_reverse_charge !== undefined
+      ? !!params.is_reverse_charge
+      : !!(purchase.is_reverse_charge ?? 0);
 
   await db.withTransactionAsync(async () => {
     let subtotal = purchase.subtotal;
@@ -544,7 +548,7 @@ export async function updatePurchase(
       `UPDATE purchases SET invoice_no = ?, party_id = ?, supplier_name = ?, vendor_invoice_no = ?, date = ?,
        subtotal = ?, discount_amount = ?,
        taxable_amount = ?, cgst_amount = ?, sgst_amount = ?, igst_amount = ?,
-       is_inter_state = ?, place_of_supply = ?,
+       is_inter_state = ?, place_of_supply = ?, is_reverse_charge = ?,
        total_amount = ?, status = ?, notes = ? WHERE id = ?`,
       [
         invoiceNo,
@@ -560,6 +564,7 @@ export async function updatePurchase(
         gstFields.igst_amount,
         gstFields.is_inter_state,
         gstFields.place_of_supply,
+        isReverseCharge ? 1 : 0,
         totalAmount,
         status,
         params.notes ?? null,

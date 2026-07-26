@@ -1,27 +1,34 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import {
+  View,
+  Text,
+  FlatList,
+  StyleSheet,
+  RefreshControl,
+  ActivityIndicator,
+} from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
-import { getGstHsnSummary, type GstHsnLine } from '../../../src/services/gstReports';
+import { getGstInwardSupplies, type GstInwardLine } from '../../../src/services/gstReports';
 import { ReportRow } from '../../../src/components/ReportRow';
 import { formatCurrency } from '../../../src/utils/format';
+import { formatDisplayDate } from '../../../src/utils/date';
 import { ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
-import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
-import { shareGstHsnPdf } from '../../../src/services/reportPdf';
 import { formatSqliteError } from '../../../src/db/database';
-import { spacing } from '../../../src/constants/theme';
+import { spacing, radius } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF } from '../../../src/constants/listPerf';
 
-export default function GstHsnScreen() {
+export default function GstInwardScreen() {
   const styles = useScreenStyles();
+  const router = useRouter();
   const { refreshKey } = useDatabase();
   const { colors, isDark } = useTheme();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
-  const [rows, setRows] = useState<GstHsnLine[]>([]);
+  const [rows, setRows] = useState<GstInwardLine[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [booting, setBooting] = useState(true);
@@ -32,11 +39,22 @@ export default function GstHsnScreen() {
         row: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
-          marginBottom: spacing.xs,
+          paddingVertical: spacing.sm,
+          marginBottom: spacing.xs + 2,
+          minHeight: 52,
+          justifyContent: 'center',
         },
-        title: { fontWeight: '600', color: colors.text },
-        meta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+        title: { fontWeight: '600', color: colors.text, fontSize: 14 },
+        meta: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
+        rcmBadge: {
+          alignSelf: 'flex-start',
+          marginTop: 4,
+          paddingHorizontal: spacing.xs + 2,
+          paddingVertical: 1,
+          borderRadius: radius.sm,
+          backgroundColor: colors.warning + '22',
+        },
+        rcmText: { fontSize: 10, fontWeight: '700', color: colors.warning },
       }),
     [colors, isDark]
   );
@@ -44,7 +62,7 @@ export default function GstHsnScreen() {
   const load = useCallback(async () => {
     void refreshKey;
     try {
-      setRows(await getGstHsnSummary(monthKey));
+      setRows(await getGstInwardSupplies(monthKey));
       setError(null);
     } catch (e) {
       setError(formatSqliteError(e));
@@ -65,9 +83,6 @@ export default function GstHsnScreen() {
     setRefreshing(false);
   }, [load]);
 
-  const exportPdf = useCallback(async () => shareGstHsnPdf(monthKey, rows), [monthKey, rows]);
-  useReportPdfHeader({ disabled: !!error, onExport: exportPdf });
-
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (booting) {
     return (
@@ -84,19 +99,38 @@ export default function GstHsnScreen() {
       </View>
       <FlatList
         data={rows}
-        keyExtractor={(item) => `${item.hsn_sac}-${item.gst_rate}`}
+        keyExtractor={(item) => String(item.id)}
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
-        ListEmptyComponent={<Text style={styles.empty}>No HSN data in this period.</Text>}
+        ListEmptyComponent={<Text style={styles.empty}>No inward supplies in this period.</Text>}
         {...FLATLIST_PERF}
         renderItem={({ item }) => (
-          <ReportRow style={localStyles.row} amount={item.tax_amount}>
-            <Text style={localStyles.title}>HSN {item.hsn_sac} · {item.gst_rate}%</Text>
-            <Text style={localStyles.meta}>
-              Qty {item.qty} · Taxable {formatCurrency(item.taxable_amount)}
+          <ReportRow
+            style={localStyles.row}
+            amount={item.total_amount}
+            onPress={() => router.push(`/(drawer)/purchases/${item.id}`)}
+            accessibilityLabel={`Purchase ${item.invoice_no}`}
+          >
+            <Text style={localStyles.title} numberOfLines={1}>
+              {item.invoice_no} · {item.supplier_name}
             </Text>
+            <Text style={localStyles.meta}>
+              {formatDisplayDate(item.date)}
+              {item.party_gstin ? ` · GSTIN ${item.party_gstin}` : ' · Unregistered'}
+            </Text>
+            <Text style={localStyles.meta}>
+              Taxable {formatCurrency(item.taxable_amount)}
+              {item.igst_amount > 0
+                ? ` · IGST ${formatCurrency(item.igst_amount)}`
+                : ` · CGST ${formatCurrency(item.cgst_amount)} · SGST ${formatCurrency(item.sgst_amount)}`}
+            </Text>
+            {item.is_reverse_charge ? (
+              <View style={localStyles.rcmBadge}>
+                <Text style={localStyles.rcmText}>RCM</Text>
+              </View>
+            ) : null}
           </ReportRow>
         )}
       />

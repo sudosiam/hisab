@@ -6,6 +6,7 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
+  Switch,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import {
@@ -22,7 +23,8 @@ import { getProducts } from '../../../src/services/inventory';
 import { getPurchaseById, getPurchaseItems, updatePurchase } from '../../../src/services/purchases';
 import { getPartyByName } from '../../../src/services/parties';
 import { getBusinessState, isGstEnabled, isTaxInclusivePricing } from '../../../src/services/appSettings';
-import { computeGstDocument } from '../../../src/services/gst';
+import { computeGstDocument, isPlausibleHsnSac, resolveStateFromPartyFields } from '../../../src/services/gst';
+import { GstRateChips } from '../../../src/components/GstRateChips';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
@@ -98,6 +100,14 @@ export default function EditPurchaseScreen() {
           fontVariant: ['tabular-nums'],
         },
         hint: { color: colors.warning },
+        hsnWarning: { fontSize: 12, color: colors.textMuted, marginTop: -4, marginBottom: spacing.xs },
+        rcmRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginVertical: spacing.sm,
+        },
+        rcmLabel: { fontSize: 14, fontWeight: '600', color: colors.text, flex: 1 },
         paidHint: { fontSize: 12, color: colors.textSecondary, marginBottom: spacing.sm },
       }),
     [colors, isDark]
@@ -121,6 +131,7 @@ export default function EditPurchaseScreen() {
   const [gstEnabled, setGstEnabled] = useState(true);
   const [taxInclusive, setTaxInclusive] = useState(false);
   const [partyState, setPartyState] = useState<string | null>(null);
+  const [isReverseCharge, setIsReverseCharge] = useState(false);
 
   const purchaseId = React.useMemo(() => {
     const raw = Array.isArray(id) ? id[0] : id;
@@ -147,6 +158,7 @@ export default function EditPurchaseScreen() {
         const grossFactor = taxableBase > 0.009 ? p.subtotal / taxableBase : 1;
         const inclusiveNow = await isTaxInclusivePricing();
         setPurchase(p);
+        setIsReverseCharge(!!(p.is_reverse_charge ?? 0));
         setSupplierName(p.supplier_name);
         setInvoiceNo(p.invoice_no);
         setVendorInvoiceNo(p.vendor_invoice_no ?? '');
@@ -178,7 +190,7 @@ export default function EditPurchaseScreen() {
               : [];
         setItems(mappedItems);
         getPartyByName(p.supplier_name, 'vendor')
-          .then((party) => setPartyState(party?.state ?? null))
+          .then((party) => setPartyState(resolveStateFromPartyFields(party?.state, party?.gstin)))
           .catch(() => {});
         savedSnapshotRef.current = JSON.stringify({
           supplierName: p.supplier_name,
@@ -186,6 +198,7 @@ export default function EditPurchaseScreen() {
           vendorInvoiceNo: p.vendor_invoice_no ?? '',
           date: p.date,
           notes: p.notes ?? '',
+          isReverseCharge: !!(p.is_reverse_charge ?? 0),
           items: mappedItems.map((item) => ({
             product_id: item.product_id,
             qty: item.qty,
@@ -254,7 +267,7 @@ export default function EditPurchaseScreen() {
     }
     getPartyByName(name, 'vendor')
       .then((party) => {
-        if (!cancelled) setPartyState(party?.state ?? null);
+        if (!cancelled) setPartyState(resolveStateFromPartyFields(party?.state, party?.gstin));
       })
       .catch(() => {});
     return () => {
@@ -295,6 +308,7 @@ export default function EditPurchaseScreen() {
         vendorInvoiceNo,
         date,
         notes,
+        isReverseCharge,
         items: items.map((item) => ({
           product_id: item.product_id,
           qty: item.qty,
@@ -303,7 +317,7 @@ export default function EditPurchaseScreen() {
           hsn_sac: item.hsn_sac,
         })),
       }),
-    [supplierName, invoiceNo, vendorInvoiceNo, date, notes, items]
+    [supplierName, invoiceNo, vendorInvoiceNo, date, notes, isReverseCharge, items]
   );
   const isDirty =
     savedSnapshotRef.current !== null && formSnapshot !== savedSnapshotRef.current;
@@ -399,6 +413,7 @@ export default function EditPurchaseScreen() {
             date,
             discount_amount: purchase.discount_amount ?? 0,
             notes: notes.trim() || undefined,
+            is_reverse_charge: isReverseCharge,
             items: items.map((item) => ({
               product_id: item.product_id,
               qty: parseAmountInput(item.qty) || 0,
@@ -467,6 +482,17 @@ export default function EditPurchaseScreen() {
       <DatePickerField label="Date" value={date} onChange={setDate} />
       <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
 
+      <View style={localStyles.rcmRow}>
+        <Text style={localStyles.rcmLabel}>Reverse charge (RCM)</Text>
+        <Switch
+          value={isReverseCharge}
+          onValueChange={setIsReverseCharge}
+          trackColor={{ false: colors.border, true: colors.primary }}
+          thumbColor={colors.surface}
+          accessibilityLabel="Reverse charge"
+        />
+      </View>
+
       <View style={styles.section}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <SectionHeader title="Line Items" />
@@ -523,6 +549,11 @@ export default function EditPurchaseScreen() {
                     placeholder="Optional"
                     keyboardType="number-pad"
                   />
+                  {item.hsn_sac.trim() && !isPlausibleHsnSac(item.hsn_sac) ? (
+                    <Text style={localStyles.hsnWarning}>
+                      Usual HSN is 4, 6, or 8 digits
+                    </Text>
+                  ) : null}
                 </View>
                 <View style={localStyles.costField}>
                   <FormInput
@@ -531,6 +562,10 @@ export default function EditPurchaseScreen() {
                     onChangeText={(v) => updateItem(index, 'gst_rate', v)}
                     money
                     placeholder="0"
+                  />
+                  <GstRateChips
+                    value={item.gst_rate}
+                    onChange={(v) => updateItem(index, 'gst_rate', v)}
                   />
                 </View>
               </View>

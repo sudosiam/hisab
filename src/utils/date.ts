@@ -10,9 +10,15 @@ export function monthKeyToLabel(monthKey: string): string {
 }
 
 export const FY_PERIOD_PREFIX = 'fy:';
+/** Period key for unscoped lists (all dates). */
+export const ALL_PERIOD_KEY = 'all';
 
 export function isFinancialYearPeriodKey(periodKey: string): boolean {
   return periodKey.startsWith(FY_PERIOD_PREFIX);
+}
+
+export function isAllPeriodKey(periodKey: string): boolean {
+  return periodKey === ALL_PERIOD_KEY;
 }
 
 export function makeFinancialYearPeriodKey(fyStartYear: number): string {
@@ -21,6 +27,7 @@ export function makeFinancialYearPeriodKey(fyStartYear: number): string {
 
 /** When viewing FY totals, keep the period key aligned with settings FY. */
 export function syncPeriodKeyWithFinancialYear(periodKey: string, fyStartYear: number): string {
+  if (isAllPeriodKey(periodKey)) return ALL_PERIOD_KEY;
   if (isFinancialYearPeriodKey(periodKey)) {
     return makeFinancialYearPeriodKey(fyStartYear);
   }
@@ -55,6 +62,9 @@ export function getPeriodRange(
   periodKey: string,
   fyStartMonth = 4
 ): { start: string; end: string } {
+  if (isAllPeriodKey(periodKey)) {
+    return { start: '1970-01-01', end: '9999-12-31' };
+  }
   const fyStartYear = parseFinancialYearPeriodKey(periodKey);
   if (fyStartYear !== null) {
     return getFinancialYearRange(fyStartYear, fyStartMonth);
@@ -63,6 +73,7 @@ export function getPeriodRange(
 }
 
 export function shiftPeriod(periodKey: string, delta: number): string {
+  if (isAllPeriodKey(periodKey)) return ALL_PERIOD_KEY;
   const fyStartYear = parseFinancialYearPeriodKey(periodKey);
   if (fyStartYear !== null) {
     return makeFinancialYearPeriodKey(fyStartYear + delta);
@@ -71,6 +82,7 @@ export function shiftPeriod(periodKey: string, delta: number): string {
 }
 
 export function periodKeyToLabel(periodKey: string): string {
+  if (isAllPeriodKey(periodKey)) return 'All time';
   const fyStartYear = parseFinancialYearPeriodKey(periodKey);
   if (fyStartYear !== null) {
     return `FY ${formatFinancialYearShortLabel(fyStartYear)}`;
@@ -79,10 +91,12 @@ export function periodKeyToLabel(periodKey: string): string {
 }
 
 export function getPeriodSectionTitle(periodKey: string): string {
+  if (isAllPeriodKey(periodKey)) return 'All time';
   return isFinancialYearPeriodKey(periodKey) ? 'This Financial Year' : 'This Month';
 }
 
 export function getPeriodTotalLabel(periodKey: string): string {
+  if (isAllPeriodKey(periodKey)) return 'All-time Total';
   return isFinancialYearPeriodKey(periodKey) ? 'FY Total' : 'Month Total';
 }
 

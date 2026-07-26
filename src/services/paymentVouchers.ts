@@ -664,3 +664,339 @@ export async function getPartyUnallocatedPaymentCredit(
   );
   return roundMoney(row?.total ?? 0);
 }
+
+type OpenAdvanceRow = {
+  alloc_id: number;
+  voucher_id: number;
+  account_id: number | null;
+  bill_name: string;
+  bill_type: PaymentBillType;
+  amount: number;
+};
+
+async function listOpenAdvanceAllocations(
+  partyName: string,
+  partyType: PartyType
+): Promise<OpenAdvanceRow[]> {
+  const db = await getDatabase();
+  const voucherType = partyType === 'customer' ? 'receipt' : 'payment';
+  return db.getAllAsync<OpenAdvanceRow>(
+    `SELECT a.id as alloc_id, a.voucher_id, v.account_id, a.bill_name, a.bill_type, a.amount
+     FROM payment_voucher_allocations a
+     JOIN payment_vouchers v ON v.id = a.voucher_id
+     WHERE v.party_name = ? COLLATE NOCASE
+       AND v.party_type = ?
+       AND v.voucher_type = ?
+       AND a.bill_type IN ('advance', 'on_account', 'new_ref')
+       AND a.sale_payment_id IS NULL
+       AND a.purchase_payment_id IS NULL
+     ORDER BY v.date ASC, a.id ASC`,
+    [partyName.trim(), partyType, voucherType]
+  );
+}
+
+/**
+ * Apply party advance/on-account credit to a sale. Cash already moved on the
+ * original receipt — this only links allocations and updates invoice paid.
+ */
+export async function applyPartyAdvanceToSale(
+  saleId: number,
+  amount: number,
+  date: string
+): Promise<number> {
+  const applyAmount = roundMoney(Math.abs(amount));
+  if (!(applyAmount > 0.009)) return 0;
+
+  const db = await getDatabase();
+  const sale = await db.getFirstAsync<{
+    id: number;
+    invoice_no: string;
+    party_name: string;
+    total_amount: number;
+    paid_amount: number;
+  }>('SELECT id, invoice_no, party_name, total_amount, paid_amount FROM sales WHERE id = ?', [
+    saleId,
+  ]);
+  if (!sale) throw new Error('Sale not found');
+
+  const due = roundMoney(Math.max(0, sale.total_amount - sale.paid_amount));
+  const toApply = roundMoney(Math.min(applyAmount, due));
+  if (!(toApply > 0.009)) return 0;
+
+  const opens = await listOpenAdvanceAllocations(sale.party_name, 'customer');
+  if (opens.length === 0) throw new Error('No advance credit available for this customer');
+
+  let remaining = toApply;
+  let applied = 0;
+  const accountId =
+    opens.find((o) => o.account_id)?.account_id ??
+    (await ensureCashBankAccount('Cash'));
+
+  await db.withTransactionAsync(async () => {
+    for (const open of opens) {
+      if (remaining <= 0.009) break;
+      const slice = roundMoney(Math.min(remaining, open.amount));
+      if (!(slice > 0.009)) continue;
+
+      const payResult = await db.runAsync(
+        `INSERT INTO sale_payments (sale_id, account_id, amount, date, notes)
+         VALUES (?, ?, ?, ?, ?)`,
+        [saleId, accountId, slice, date, 'Advance applied']
+      );
+      const salePaymentId = payResult.lastInsertRowId;
+
+      if (slice + 0.009 >= open.amount) {
+        await db.runAsync(
+          `UPDATE payment_voucher_allocations
+           SET bill_type = 'agst_ref', bill_name = ?, sale_id = ?, sale_payment_id = ?
+           WHERE id = ?`,
+          [sale.invoice_no, saleId, salePaymentId, open.alloc_id]
+        );
+      } else {
+        const leftover = roundMoney(open.amount - slice);
+        await db.runAsync(
+          `UPDATE payment_voucher_allocations SET amount = ? WHERE id = ?`,
+          [leftover, open.alloc_id]
+        );
+        await db.runAsync(
+          `INSERT INTO payment_voucher_allocations (
+             voucher_id, bill_name, bill_type, amount,
+             sale_id, purchase_id, sale_payment_id, purchase_payment_id
+           ) VALUES (?, ?, 'agst_ref', ?, ?, NULL, ?, NULL)`,
+          [open.voucher_id, sale.invoice_no, slice, saleId, salePaymentId]
+        );
+      }
+
+      // No cash transaction — money already recorded on the advance receipt.
+      remaining = roundMoney(remaining - slice);
+      applied = roundMoney(applied + slice);
+    }
+
+    const sumRow = await db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(amount), 0) AS total FROM sale_payments WHERE sale_id = ?`,
+      [saleId]
+    );
+    const newPaid = roundMoney(sumRow?.total ?? 0);
+    await db.runAsync('UPDATE sales SET paid_amount = ?, status = ? WHERE id = ?', [
+      newPaid,
+      getPaymentStatus(sale.total_amount, newPaid),
+      saleId,
+    ]);
+  });
+
+  try {
+    const { scheduleGeneralLedgerRefresh } = await import('./ledger');
+    scheduleGeneralLedgerRefresh();
+  } catch {
+    // best-effort
+  }
+
+  return applied;
+}
+
+/**
+ * Apply vendor advance/on-account credit to a purchase (mirror of sale apply).
+ */
+export async function applyPartyAdvanceToPurchase(
+  purchaseId: number,
+  amount: number,
+  date: string
+): Promise<number> {
+  const applyAmount = roundMoney(Math.abs(amount));
+  if (!(applyAmount > 0.009)) return 0;
+
+  const db = await getDatabase();
+  const purchase = await db.getFirstAsync<{
+    id: number;
+    invoice_no: string;
+    supplier_name: string;
+    total_amount: number;
+    paid_amount: number;
+  }>(
+    'SELECT id, invoice_no, supplier_name, total_amount, paid_amount FROM purchases WHERE id = ?',
+    [purchaseId]
+  );
+  if (!purchase) throw new Error('Purchase not found');
+
+  const due = roundMoney(Math.max(0, purchase.total_amount - purchase.paid_amount));
+  const toApply = roundMoney(Math.min(applyAmount, due));
+  if (!(toApply > 0.009)) return 0;
+
+  const opens = await listOpenAdvanceAllocations(purchase.supplier_name, 'vendor');
+  if (opens.length === 0) throw new Error('No advance credit available for this vendor');
+
+  let remaining = toApply;
+  let applied = 0;
+  const accountId =
+    opens.find((o) => o.account_id)?.account_id ??
+    (await ensureCashBankAccount('Cash'));
+
+  await db.withTransactionAsync(async () => {
+    for (const open of opens) {
+      if (remaining <= 0.009) break;
+      const slice = roundMoney(Math.min(remaining, open.amount));
+      if (!(slice > 0.009)) continue;
+
+      const payResult = await db.runAsync(
+        `INSERT INTO purchase_payments (purchase_id, account_id, amount, date, notes)
+         VALUES (?, ?, ?, ?, ?)`,
+        [purchaseId, accountId, slice, date, 'Advance applied']
+      );
+      const purchasePaymentId = payResult.lastInsertRowId;
+
+      if (slice + 0.009 >= open.amount) {
+        await db.runAsync(
+          `UPDATE payment_voucher_allocations
+           SET bill_type = 'agst_ref', bill_name = ?, purchase_id = ?, purchase_payment_id = ?
+           WHERE id = ?`,
+          [purchase.invoice_no, purchaseId, purchasePaymentId, open.alloc_id]
+        );
+      } else {
+        const leftover = roundMoney(open.amount - slice);
+        await db.runAsync(
+          `UPDATE payment_voucher_allocations SET amount = ? WHERE id = ?`,
+          [leftover, open.alloc_id]
+        );
+        await db.runAsync(
+          `INSERT INTO payment_voucher_allocations (
+             voucher_id, bill_name, bill_type, amount,
+             sale_id, purchase_id, sale_payment_id, purchase_payment_id
+           ) VALUES (?, ?, 'agst_ref', ?, NULL, ?, NULL, ?)`,
+          [open.voucher_id, purchase.invoice_no, slice, purchaseId, purchasePaymentId]
+        );
+      }
+
+      remaining = roundMoney(remaining - slice);
+      applied = roundMoney(applied + slice);
+    }
+
+    const sumRow = await db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_payments WHERE purchase_id = ?`,
+      [purchaseId]
+    );
+    const newPaid = roundMoney(sumRow?.total ?? 0);
+    await db.runAsync('UPDATE purchases SET paid_amount = ?, status = ? WHERE id = ?', [
+      newPaid,
+      getPaymentStatus(purchase.total_amount, newPaid),
+      purchaseId,
+    ]);
+  });
+
+  try {
+    const { scheduleGeneralLedgerRefresh } = await import('./ledger');
+    scheduleGeneralLedgerRefresh();
+  } catch {
+    // best-effort
+  }
+
+  return applied;
+}
+
+/** Invoice-level payments not linked to a Payment voucher (legacy / sale screen). */
+export async function getOrphanInvoicePayments(options?: {
+  periodKey?: string;
+  direction?: 'receipt' | 'payment' | 'all';
+}): Promise<
+  {
+    id: string;
+    voucher_type: PaymentVoucherType;
+    voucher_no: string;
+    date: string;
+    party_name: string;
+    amount: number;
+    allocation_kind: 'against_invoice';
+    ref_path: string;
+  }[]
+> {
+  const db = await getDatabase();
+  let start = '1970-01-01';
+  let end = '9999-12-31';
+  if (options?.periodKey) {
+    const range = await resolvePeriodRange(options.periodKey);
+    start = range.start;
+    end = range.end;
+  }
+  const out: {
+    id: string;
+    voucher_type: PaymentVoucherType;
+    voucher_no: string;
+    date: string;
+    party_name: string;
+    amount: number;
+    allocation_kind: 'against_invoice';
+    ref_path: string;
+  }[] = [];
+
+  if (options?.direction !== 'payment') {
+    const rows = await db.getAllAsync<{
+      id: number;
+      amount: number;
+      date: string;
+      invoice_no: string;
+      party_name: string;
+      sale_id: number;
+    }>(
+      `SELECT sp.id, sp.amount, sp.date, s.invoice_no, s.party_name, s.id as sale_id
+       FROM sale_payments sp
+       JOIN sales s ON s.id = sp.sale_id
+       WHERE sp.date >= ? AND sp.date <= ?
+         AND NOT EXISTS (
+           SELECT 1 FROM payment_voucher_allocations a
+           WHERE a.sale_payment_id = sp.id
+         )
+       ORDER BY sp.date DESC, sp.id DESC`,
+      [start, end]
+    );
+    for (const row of rows) {
+      out.push({
+        id: `sale-pay-${row.id}`,
+        voucher_type: 'receipt',
+        voucher_no: row.invoice_no,
+        date: row.date,
+        party_name: row.party_name,
+        amount: row.amount,
+        allocation_kind: 'against_invoice',
+        ref_path: `/(drawer)/sales/${row.sale_id}`,
+      });
+    }
+  }
+
+  if (options?.direction !== 'receipt') {
+    const rows = await db.getAllAsync<{
+      id: number;
+      amount: number;
+      date: string;
+      invoice_no: string;
+      supplier_name: string;
+      purchase_id: number;
+    }>(
+      `SELECT pp.id, pp.amount, pp.date, p.invoice_no, p.supplier_name, p.id as purchase_id
+       FROM purchase_payments pp
+       JOIN purchases p ON p.id = pp.purchase_id
+       WHERE pp.date >= ? AND pp.date <= ?
+         AND NOT EXISTS (
+           SELECT 1 FROM payment_voucher_allocations a
+           WHERE a.purchase_payment_id = pp.id
+         )
+       ORDER BY pp.date DESC, pp.id DESC`,
+      [start, end]
+    );
+    for (const row of rows) {
+      out.push({
+        id: `purchase-pay-${row.id}`,
+        voucher_type: 'payment',
+        voucher_no: row.invoice_no,
+        date: row.date,
+        party_name: row.supplier_name,
+        amount: row.amount,
+        allocation_kind: 'against_invoice',
+        ref_path: `/(drawer)/purchases/${row.purchase_id}`,
+      });
+    }
+  }
+
+  return out.sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+    return a.id < b.id ? 1 : -1;
+  });
+}

@@ -17,7 +17,8 @@ export async function hapticLight(): Promise<void> {
   if (!(await resolveEnabled())) return;
   try {
     const Haptics = await import('expo-haptics');
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    // Medium is noticeably stronger than Light on most Android devices.
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   } catch {
     // Native module missing (Expo Go / web) — ignore.
   }
@@ -27,6 +28,7 @@ export async function hapticWarning(): Promise<void> {
   if (!(await resolveEnabled())) return;
   try {
     const Haptics = await import('expo-haptics');
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
   } catch {
     // ignore

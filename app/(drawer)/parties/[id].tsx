@@ -736,6 +736,14 @@ export default function PartyDetailScreen() {
             color={colors.success}
             subtitle={`${summary.invoiceCount} invoice${summary.invoiceCount === 1 ? '' : 's'}`}
           />
+          {(summary.advanceCredit ?? 0) > 0.009 ? (
+            <StatCard
+              label="Advance"
+              value={summary.advanceCredit}
+              color={colors.primary}
+              subtitle={isCustomer ? 'Credit on account' : 'Prepaid to vendor'}
+            />
+          ) : null}
         </View>
       </View>
 

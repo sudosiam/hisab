@@ -7,6 +7,7 @@ import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuar
 import { useTheme } from '../../../src/context/ThemeContext';
 import {
   getBusinessProfile,
+  getBusinessState,
   setBusinessName,
   setBusinessAddress,
   setBusinessGstin,
@@ -101,6 +102,9 @@ export default function BusinessSettingsScreen() {
       const cleaned = businessGstin.trim().toUpperCase().slice(0, 15);
       setBusinessGstinState(cleaned);
       setSavedBusinessGstin(cleaned);
+      const syncedState = await getBusinessState();
+      setBusinessStateState(syncedState);
+      setSavedBusinessState(syncedState);
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not save GSTIN');
     }

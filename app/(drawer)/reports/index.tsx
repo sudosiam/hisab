@@ -81,12 +81,17 @@ const GST_REPORTS: ReportItem[] = [
   {
     title: 'GST Summary',
     route: '/(drawer)/reports/gst-summary',
-    desc: 'GSTR-3B style output vs input tax',
+    desc: 'Books GST summary with GSTR-1/3B helper JSON export',
   },
   {
     title: 'Outward Supplies',
     route: '/(drawer)/reports/gst-outward',
-    desc: 'GSTR-1 style B2B / B2C list',
+    desc: 'Outward supplies register',
+  },
+  {
+    title: 'Inward Supplies',
+    route: '/(drawer)/reports/gst-inward',
+    desc: 'Inward supplies register',
   },
   {
     title: 'Customers by State',
@@ -96,7 +101,7 @@ const GST_REPORTS: ReportItem[] = [
   {
     title: 'HSN Summary',
     route: '/(drawer)/reports/gst-hsn',
-    desc: 'Taxable value and tax by HSN',
+    desc: 'HSN summary by rate',
   },
 ];
 

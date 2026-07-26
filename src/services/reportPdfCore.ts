@@ -2,9 +2,9 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { format } from 'date-fns';
-import { APP_VERSION } from '../constants/appVersion';
 import { formatCurrency, formatIndianMoney, formatSignedCurrency } from '../utils/format';
 import { deferDeleteCacheFile } from '../utils/tempShareFiles';
+import { savePdfToDevice } from '../utils/pdfExport';
 import { getBusinessName } from './appSettings';
 
 export function escapeHtml(text: string): string {
@@ -50,90 +50,96 @@ export interface PdfTableColumn {
   width?: string;
 }
 
-/** Classic Tally-style report chrome (Times, black rules, centered headers). */
+/** Clean professional report chrome (serif, clear rules, no brand watermark). */
 const BASE_CSS = `
-  @page { margin: 12mm 10mm; size: A4 portrait; }
+  @page { margin: 14mm 12mm; size: A4 portrait; }
   * { box-sizing: border-box; }
   body {
-    font-family: 'Times New Roman', Times, serif;
-    font-size: 9.5pt;
-    color: #000;
+    font-family: 'Times New Roman', Times, Georgia, serif;
+    font-size: 10pt;
+    color: #111;
     margin: 0;
     padding: 0;
-    line-height: 1.3;
+    line-height: 1.35;
+    background: #fff;
   }
   .company {
     text-align: center;
-    font-size: 14pt;
+    font-size: 15pt;
     font-weight: 700;
-    letter-spacing: 0.4px;
+    letter-spacing: 0.5px;
     text-transform: uppercase;
-    margin: 0 0 2px;
+    margin: 0 0 4px;
+    color: #0b1731;
   }
   .report-title {
     text-align: center;
-    font-size: 11pt;
+    font-size: 11.5pt;
     font-weight: 700;
     margin: 0 0 2px;
     text-transform: uppercase;
+    letter-spacing: 0.3px;
   }
   .period {
     text-align: center;
     font-size: 9pt;
-    margin: 0 0 8px;
+    margin: 0 0 10px;
+    color: #333;
   }
   .subtitle {
     text-align: center;
     font-size: 8.5pt;
     margin: 0 0 8px;
-    color: #222;
+    color: #444;
   }
   .meta-row {
     display: flex;
     justify-content: space-between;
     font-size: 8pt;
-    margin-bottom: 8px;
-    border-top: 1px solid #000;
-    border-bottom: 1px solid #000;
-    padding: 4px 0;
+    margin-bottom: 10px;
+    border-top: 1.5px solid #0b1731;
+    border-bottom: 1px solid #0b1731;
+    padding: 5px 0;
+    color: #222;
   }
   table {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     table-layout: fixed;
   }
   th, td {
-    border: 1px solid #000;
-    padding: 4px 5px;
+    border: 1px solid #333;
+    padding: 5px 6px;
     vertical-align: top;
     word-wrap: break-word;
   }
   th {
-    background: #f0f0f0;
+    background: #eef2f7;
     font-weight: 700;
     text-align: center;
     font-size: 8pt;
+    color: #0b1731;
   }
   td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   td.c, th.c { text-align: center; }
   td.l, th.l { text-align: left; }
   tr.total td {
     font-weight: 700;
-    background: #f5f5f5;
-    border-top: 2px solid #000;
+    background: #f3f6fa;
+    border-top: 2px solid #0b1731;
   }
   tr.bold td { font-weight: 700; }
   .lines {
     width: 100%;
-    border: 1px solid #000;
+    border: 1px solid #333;
     margin-bottom: 12px;
   }
   .line {
     display: flex;
     justify-content: space-between;
-    padding: 4px 8px;
-    border-bottom: 1px solid #ccc;
+    padding: 5px 8px;
+    border-bottom: 1px solid #ddd;
     font-size: 9.5pt;
   }
   .line:last-child { border-bottom: none; }
@@ -141,27 +147,28 @@ const BASE_CSS = `
   .line.highlight {
     font-size: 10.5pt;
     font-weight: 700;
-    background: #f5f5f5;
-    border-top: 2px solid #000;
+    background: #f3f6fa;
+    border-top: 2px solid #0b1731;
   }
   .section-title {
     font-size: 9.5pt;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.3px;
-    margin: 12px 0 4px;
-    border-bottom: 1px solid #000;
-    padding-bottom: 2px;
+    margin: 14px 0 4px;
+    border-bottom: 1px solid #0b1731;
+    padding-bottom: 3px;
+    color: #0b1731;
   }
-  .empty { color: #333; font-style: italic; padding: 8px 0; text-align: center; }
+  .empty { color: #555; font-style: italic; padding: 10px 0; text-align: center; }
   .footer {
-    margin-top: 14px;
-    padding-top: 6px;
-    border-top: 1px solid #999;
+    margin-top: 16px;
+    padding-top: 8px;
+    border-top: 1px solid #bbb;
     display: flex;
     justify-content: space-between;
-    font-size: 7.5pt;
-    color: #333;
+    font-size: 8pt;
+    color: #555;
   }
 `;
 
@@ -188,7 +195,7 @@ export async function wrapReportHtml(meta: ReportPdfMeta, bodyContent: string): 
   ${bodyContent}
   <div class="footer">
     <span>Generated on ${escapeHtml(generatedAt)}</span>
-    <span>Hisab v${escapeHtml(APP_VERSION)}</span>
+    <span>${escapeHtml(company)}</span>
   </div>
 </body>
 </html>`;
@@ -305,6 +312,20 @@ export function buildLedgerTableHtml(
 
 export { formatSignedCurrency };
 
+async function writeReportPdfFile(options: {
+  html: string;
+  fileName: string;
+}): Promise<string> {
+  const { uri } = await Print.printToFileAsync({
+    html: options.html,
+    width: 595,
+    height: 842,
+  });
+  const dest = `${FileSystem.cacheDirectory}${Date.now()}-${options.fileName}`;
+  await FileSystem.copyAsync({ from: uri, to: dest });
+  return dest;
+}
+
 export async function shareReportPdf(options: {
   html: string;
   fileName: string;
@@ -312,15 +333,45 @@ export async function shareReportPdf(options: {
   /** When set, opens WhatsApp on this number with PDF + message. */
   whatsappPhone?: string | null;
   whatsappMessage?: string | null;
+  /** Save to device folder instead of opening the share sheet. */
+  saveOnly?: boolean;
+  /** Skip Share/Save prompt (used by the prompt itself). */
+  shareOnly?: boolean;
 }): Promise<{ success: boolean; message: string }> {
   try {
-    const { uri } = await Print.printToFileAsync({
-      html: options.html,
-      width: 595,
-      height: 842,
-    });
-    const dest = `${FileSystem.cacheDirectory}${options.fileName}`;
-    await FileSystem.copyAsync({ from: uri, to: dest });
+    // Ask Share vs Save unless a specific path was requested.
+    if (
+      !options.saveOnly &&
+      !options.shareOnly &&
+      !(options.whatsappPhone?.trim() && options.whatsappMessage?.trim())
+    ) {
+      const { Alert } = await import('react-native');
+      return await new Promise((resolve) => {
+        Alert.alert(options.dialogTitle || 'PDF', 'Share or save this PDF?', [
+          { text: 'Cancel', style: 'cancel', onPress: () => resolve({ success: true, message: 'Cancelled.' }) },
+          {
+            text: 'Save',
+            onPress: () => {
+              void shareReportPdf({ ...options, saveOnly: true }).then(resolve);
+            },
+          },
+          {
+            text: 'Share',
+            onPress: () => {
+              void shareReportPdf({ ...options, shareOnly: true }).then(resolve);
+            },
+          },
+        ]);
+      });
+    }
+
+    const dest = await writeReportPdfFile(options);
+
+    if (options.saveOnly) {
+      const saved = await savePdfToDevice(dest, options.fileName);
+      deferDeleteCacheFile(dest);
+      return saved;
+    }
 
     if (options.whatsappPhone?.trim() && options.whatsappMessage?.trim()) {
       const { sharePdfToWhatsApp } = await import('../utils/whatsappShare');
@@ -352,4 +403,12 @@ export async function shareReportPdf(options: {
       message: error instanceof Error ? error.message : 'Could not create PDF.',
     };
   }
+}
+
+export async function downloadReportPdf(options: {
+  html: string;
+  fileName: string;
+  dialogTitle: string;
+}): Promise<{ success: boolean; message: string }> {
+  return shareReportPdf({ ...options, saveOnly: true });
 }

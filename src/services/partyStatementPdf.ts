@@ -1,13 +1,7 @@
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { format } from 'date-fns';
-import { APP_VERSION } from '../constants/appVersion';
 import { formatIndianMoney } from '../utils/format';
-import { formatDisplayDate, isValidISODate, parseISODate } from '../utils/date';
+import { isValidISODate, parseISODate } from '../utils/date';
 import { roundMoney } from '../utils/money';
-import { deferDeleteCacheFile } from '../utils/tempShareFiles';
-import { sharePdfToWhatsApp } from '../utils/whatsappShare';
 import { getBusinessName } from './appSettings';
 import type { PartyStatementLine, PartyType } from '../types';
 
@@ -307,63 +301,24 @@ export async function buildPartyStatementHtml(input: PartyStatementPdfInput): Pr
 
   <div class="footer">
     <span>Generated on ${escapeHtml(generatedAt)}</span>
-    <span>Hisab v${escapeHtml(APP_VERSION)} · Tally-style Ledger</span>
+    <span>${escapeHtml(company)}</span>
   </div>
 </body>
 </html>`;
 }
 
-function buildPartyStatementWhatsAppMessage(input: PartyStatementPdfInput): string {
-  const label = input.partyType === 'customer' ? 'account statement' : 'vendor ledger';
-  const from = formatDisplayDate(input.fromDate);
-  const to = formatDisplayDate(input.toDate);
-  return `Hi ${input.partyName}, please find your ${label} from ${from} to ${to}. Thank you.`;
-}
-
 export async function sharePartyStatementPdf(
   input: PartyStatementPdfInput
 ): Promise<{ success: boolean; message: string }> {
-  try {
-    const html = await buildPartyStatementHtml(input);
-    const { uri } = await Print.printToFileAsync({
-      html,
-      width: 595,
-      height: 842,
-    });
-    const prefix = input.partyType === 'customer' ? 'Customer-Ledger' : 'Vendor-Ledger';
-    const fileName = `${prefix}-${safeFilePart(input.partyName)}-${input.fromDate}-to-${input.toDate}.pdf`;
-    const dest = `${FileSystem.cacheDirectory}${fileName}`;
-    await FileSystem.copyAsync({ from: uri, to: dest });
-
-    const dialogTitle = `Download ${input.partyType === 'customer' ? 'Customer' : 'Vendor'} Ledger PDF`;
-
-    if (input.partyPhone?.trim()) {
-      await sharePdfToWhatsApp({
-        fileUri: dest,
-        phone: input.partyPhone,
-        message: buildPartyStatementWhatsAppMessage(input),
-        title: dialogTitle,
-      });
-      deferDeleteCacheFile(dest);
-      return { success: true, message: 'Opened WhatsApp with ledger PDF.' };
-    }
-
-    if (!(await Sharing.isAvailableAsync())) {
-      await FileSystem.deleteAsync(dest, { idempotent: true });
-      return { success: false, message: 'Sharing is not available on this device.' };
-    }
-
-    await Sharing.shareAsync(dest, {
-      mimeType: 'application/pdf',
-      dialogTitle,
-      UTI: 'com.adobe.pdf',
-    });
-    deferDeleteCacheFile(dest);
-    return { success: true, message: 'PDF ready to save or share.' };
-  } catch (error) {
-    return {
-      success: false,
-      message: error instanceof Error ? error.message : 'Could not create PDF.',
-    };
-  }
+  const html = await buildPartyStatementHtml(input);
+  const prefix = input.partyType === 'customer' ? 'Customer-Ledger' : 'Vendor-Ledger';
+  const fileName = `${prefix}-${safeFilePart(input.partyName)}-${input.fromDate}-to-${input.toDate}.pdf`;
+  const dialogTitle = `${input.partyType === 'customer' ? 'Customer' : 'Vendor'} Ledger PDF`;
+  const { shareReportPdf } = await import('./reportPdfCore');
+  // Share vs Save prompt; WhatsApp is available from the system share sheet.
+  return shareReportPdf({
+    html,
+    fileName,
+    dialogTitle,
+  });
 }

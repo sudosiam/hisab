@@ -110,6 +110,8 @@ function handleStackBack(navigation: StackNavigation, route?: RouteProp<ParamLis
   const previousRouteName = stackIndex > 0 ? state?.routes?.[stackIndex - 1]?.name : undefined;
 
   // Leaving a form (new/edit) should land on the section list, not the blank form.
+  // Also skip form screens when popping detail (gesture or header) — avoids
+  // Dashboard → Sale details → back landing on New Sale.
   if (previousRouteName && FORM_ROUTES.has(previousRouteName)) {
     resetStackToList(navigation);
     return;
@@ -123,6 +125,24 @@ function handleStackBack(navigation: StackNavigation, route?: RouteProp<ParamLis
 
   // Fallback when nothing is left in history (cold open of a detail URL).
   resetStackToList(navigation);
+}
+
+/**
+ * Attach to detail screens so swipe-back also skips stale new/edit routes
+ * (native gestures bypass headerLeft onPress).
+ */
+export function stackDetailBeforeRemove(
+  navigation: StackNavigation,
+  e: { preventDefault: () => void; data: { action: { type: string } } }
+): void {
+  if (e.data.action.type !== 'GO_BACK' && e.data.action.type !== 'POP') return;
+  const state = readNavState(navigation);
+  const stackIndex = state?.index ?? 0;
+  const previousRouteName = stackIndex > 0 ? state?.routes?.[stackIndex - 1]?.name : undefined;
+  if (previousRouteName && FORM_ROUTES.has(previousRouteName)) {
+    e.preventDefault();
+    resetStackToList(navigation);
+  }
 }
 
 function DrawerMenuButton({ tintColor }: { tintColor: string }) {

@@ -19,6 +19,7 @@ import {
   useScreenStyles,
 } from '../../../src/components/ui';
 import {
+  getOrphanInvoicePayments,
   getPaymentVouchers,
   type PaymentVoucherListItem,
 } from '../../../src/services/paymentVouchers';
@@ -34,7 +35,24 @@ import { spacing } from '../../../src/constants/theme';
 
 type Filter = 'all' | 'receipt' | 'payment' | 'advance';
 
-function allocationPill(kind: PaymentVoucherListItem['allocation_kind']): string | undefined {
+type HistoryRow =
+  | (PaymentVoucherListItem & { kind: 'voucher'; ref_path?: undefined })
+  | {
+      kind: 'orphan';
+      id: string;
+      voucher_type: 'receipt' | 'payment';
+      voucher_no: string;
+      date: string;
+      party_name: string;
+      amount: number;
+      allocation_kind: 'against_invoice';
+      narration?: null;
+      payment_mode?: null;
+      instrument_no?: null;
+      ref_path: string;
+    };
+
+function allocationPill(kind: HistoryRow['allocation_kind']): string | undefined {
   switch (kind) {
     case 'against_invoice':
       return 'Invoice';
@@ -55,7 +73,7 @@ export default function PaymentsListScreen() {
   const { colors } = useTheme();
   const styles = useScreenStyles();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
-  const [items, setItems] = useState<PaymentVoucherListItem[]>([]);
+  const [items, setItems] = useState<HistoryRow[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -67,11 +85,12 @@ export default function PaymentsListScreen() {
           item.voucher_no,
           item.party_name,
           item.date,
-          item.narration,
+          item.kind === 'voucher' ? item.narration : '',
           item.voucher_type,
           item.allocation_kind,
-          item.payment_mode,
-          item.instrument_no,
+          item.kind === 'voucher' ? item.payment_mode : '',
+          item.kind === 'voucher' ? item.instrument_no : '',
+          item.kind === 'orphan' ? 'invoice payment' : 'voucher',
         ])
       ),
     [items, search]
@@ -94,19 +113,34 @@ export default function PaymentsListScreen() {
   const load = useCallback(async () => {
     const voucherType =
       filter === 'receipt' || filter === 'payment' ? filter : 'all';
-    setItems(
-      await getPaymentVouchers({
+    const vouchers = await getPaymentVouchers({
+      periodKey: monthKey,
+      voucherType,
+      advanceOnly: filter === 'advance',
+    });
+    const voucherRows: HistoryRow[] = vouchers.map((v) => ({ ...v, kind: 'voucher' as const }));
+
+    // Include sale/purchase screen payments so In/Out history is complete.
+    let orphanRows: HistoryRow[] = [];
+    if (filter !== 'advance') {
+      const orphans = await getOrphanInvoicePayments({
         periodKey: monthKey,
-        voucherType,
-        advanceOnly: filter === 'advance',
-      })
-    );
+        direction: filter === 'all' ? 'all' : filter,
+      });
+      orphanRows = orphans.map((o) => ({ ...o, kind: 'orphan' as const }));
+    }
+
+    const merged = [...voucherRows, ...orphanRows].sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return String(a.id) < String(b.id) ? 1 : -1;
+    });
+    setItems(merged);
   }, [filter, monthKey]);
 
   const { booting, error, retry } = useFocusRefresh(load, [refreshKey, filter, monthKey]);
 
   const renderItem = useCallback(
-    ({ item }: { item: PaymentVoucherListItem }) => {
+    ({ item }: { item: HistoryRow }) => {
       const isIn = item.voucher_type === 'receipt';
       return (
         <ListItem
@@ -126,10 +160,17 @@ export default function PaymentsListScreen() {
                 }}
               >
                 {allocationPill(item.allocation_kind)}
+                {item.kind === 'orphan' ? ' · Sale/Purchase' : ''}
               </Text>
             ) : null
           }
-          onPress={() => router.push(`/(drawer)/payments/${item.id}` as never)}
+          onPress={() =>
+            router.push(
+              (item.kind === 'orphan'
+                ? item.ref_path
+                : `/(drawer)/payments/${item.id}`) as never
+            )
+          }
           accessibilityLabel={`${isIn ? 'Receipt' : 'Payment'} ${item.voucher_no}`}
         />
       );
@@ -144,7 +185,7 @@ export default function PaymentsListScreen() {
   return (
     <View style={styles.container}>
       <View style={{ paddingHorizontal: spacing.md, paddingTop: spacing.sm }}>
-        <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
+        <MonthPicker monthKey={monthKey} onChange={setMonthKey} allowAllTime />
         <MoneyTotalRow
           label={search.trim() ? 'Filtered Total' : getPeriodTotalLabel(monthKey)}
           amount={periodTotal}
@@ -211,7 +252,7 @@ export default function PaymentsListScreen() {
             <Text style={styles.empty}>
               {search.trim() || filter !== 'all'
                 ? 'No payments match your filters.'
-                : 'No receipts or payments in this period. Add one to record money in/out, including advances.'}
+                : 'No receipts or payments in this period. Tap the period label for FY or All time.'}
             </Text>
           }
         />

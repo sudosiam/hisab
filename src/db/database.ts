@@ -3,7 +3,7 @@ import { waitForDatabaseAccess } from '../services/dbMaintenance';
 import { roundMoney } from '../utils/money';
 
 export const DB_NAME = 'hisab.db';
-const SCHEMA_VERSION = 26;
+const SCHEMA_VERSION = 27;
 
 /** Removes the legacy attachment media folder left over from the removed attachments feature. */
 async function clearLegacyMediaFolder(): Promise<void> {
@@ -359,6 +359,7 @@ async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Pr
   await ensurePerformanceIndexes(db);
   await ensureLedgerTables(db);
   await ensureGstColumns(db);
+  await ensureAdjustmentNoteTables(db);
   await ensurePaymentVoucherTables(db);
 
   if (fromVersion < SCHEMA_VERSION) {
@@ -945,6 +946,9 @@ async function ensureGstColumns(db: SQLite.SQLiteDatabase): Promise<void> {
     { name: 'sgst_amount', ddl: 'sgst_amount REAL NOT NULL DEFAULT 0' },
     { name: 'igst_amount', ddl: 'igst_amount REAL NOT NULL DEFAULT 0' },
     { name: 'is_inter_state', ddl: 'is_inter_state INTEGER NOT NULL DEFAULT 0' },
+    // null = legacy untaxed service charges; number = GST % applied
+    { name: 'service_charges_gst_rate', ddl: 'service_charges_gst_rate REAL' },
+    { name: 'is_reverse_charge', ddl: 'is_reverse_charge INTEGER NOT NULL DEFAULT 0' },
   ]);
 
   await addMissingColumns(db, 'sale_items', [
@@ -963,6 +967,7 @@ async function ensureGstColumns(db: SQLite.SQLiteDatabase): Promise<void> {
     { name: 'sgst_amount', ddl: 'sgst_amount REAL NOT NULL DEFAULT 0' },
     { name: 'igst_amount', ddl: 'igst_amount REAL NOT NULL DEFAULT 0' },
     { name: 'is_inter_state', ddl: 'is_inter_state INTEGER NOT NULL DEFAULT 0' },
+    { name: 'is_reverse_charge', ddl: 'is_reverse_charge INTEGER NOT NULL DEFAULT 0' },
   ]);
 
   await addMissingColumns(db, 'purchase_items', [
@@ -1010,6 +1015,63 @@ async function ensureGstColumns(db: SQLite.SQLiteDatabase): Promise<void> {
       AND COALESCE(sgst_amount, 0) = 0
       AND COALESCE(igst_amount, 0) = 0
       AND total > 0
+  `);
+}
+
+/** Credit / debit notes for GST adjustments (schema v27). */
+async function ensureAdjustmentNoteTables(db: SQLite.SQLiteDatabase): Promise<void> {
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS adjustment_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      note_no TEXT NOT NULL,
+      note_kind TEXT NOT NULL CHECK(note_kind IN ('credit', 'debit')),
+      direction TEXT NOT NULL CHECK(direction IN ('sale', 'purchase')),
+      against_sale_id INTEGER,
+      against_purchase_id INTEGER,
+      party_id INTEGER,
+      party_name TEXT NOT NULL,
+      date TEXT NOT NULL,
+      reason TEXT,
+      taxable_amount REAL NOT NULL DEFAULT 0,
+      cgst_amount REAL NOT NULL DEFAULT 0,
+      sgst_amount REAL NOT NULL DEFAULT 0,
+      igst_amount REAL NOT NULL DEFAULT 0,
+      is_inter_state INTEGER NOT NULL DEFAULT 0,
+      place_of_supply TEXT,
+      is_reverse_charge INTEGER NOT NULL DEFAULT 0,
+      total_amount REAL NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (against_sale_id) REFERENCES sales(id),
+      FOREIGN KEY (against_purchase_id) REFERENCES purchases(id),
+      FOREIGN KEY (party_id) REFERENCES parties(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS adjustment_note_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      note_id INTEGER NOT NULL,
+      product_id INTEGER,
+      description TEXT,
+      qty REAL NOT NULL DEFAULT 0,
+      unit_price REAL NOT NULL DEFAULT 0,
+      total REAL NOT NULL DEFAULT 0,
+      hsn_sac TEXT,
+      gst_rate REAL NOT NULL DEFAULT 0,
+      taxable_amount REAL NOT NULL DEFAULT 0,
+      cgst_amount REAL NOT NULL DEFAULT 0,
+      sgst_amount REAL NOT NULL DEFAULT 0,
+      igst_amount REAL NOT NULL DEFAULT 0,
+      FOREIGN KEY (note_id) REFERENCES adjustment_notes(id) ON DELETE CASCADE,
+      FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_adjustment_notes_no_kind
+      ON adjustment_notes(note_no, note_kind);
+    CREATE INDEX IF NOT EXISTS idx_adjustment_notes_date ON adjustment_notes(date);
+    CREATE INDEX IF NOT EXISTS idx_adjustment_notes_against_sale
+      ON adjustment_notes(against_sale_id);
+    CREATE INDEX IF NOT EXISTS idx_adjustment_notes_against_purchase
+      ON adjustment_notes(against_purchase_id);
   `);
 }
 
@@ -1447,10 +1509,10 @@ async function verifySchema(db: SQLite.SQLiteDatabase): Promise<boolean> {
       'SELECT opening_qty, opening_cost, avg_cost, sell_price, current_qty, category, is_hidden, hsn_sac, gst_rate FROM products LIMIT 1'
     );
     await db.getFirstAsync(
-      'SELECT paid_amount, status, discount_amount, service_charges, invoice_type, taxable_amount, cgst_amount, sgst_amount, igst_amount, is_inter_state, place_of_supply FROM sales LIMIT 1'
+      'SELECT paid_amount, status, discount_amount, service_charges, service_charges_gst_rate, invoice_type, taxable_amount, cgst_amount, sgst_amount, igst_amount, is_inter_state, place_of_supply, is_reverse_charge FROM sales LIMIT 1'
     );
     await db.getFirstAsync(
-      'SELECT paid_amount, status, vendor_invoice_no, subtotal, discount_amount, taxable_amount, cgst_amount, sgst_amount, igst_amount, is_inter_state, place_of_supply FROM purchases LIMIT 1'
+      'SELECT paid_amount, status, vendor_invoice_no, subtotal, discount_amount, taxable_amount, cgst_amount, sgst_amount, igst_amount, is_inter_state, place_of_supply, is_reverse_charge FROM purchases LIMIT 1'
     );
     await db.getFirstAsync(
       'SELECT hsn_sac, gst_rate, taxable_amount, cgst_amount, sgst_amount, igst_amount FROM sale_items LIMIT 1'
@@ -1478,6 +1540,12 @@ async function verifySchema(db: SQLite.SQLiteDatabase): Promise<boolean> {
     await db.getFirstAsync(
       'SELECT voucher_id, bill_name, bill_type, amount FROM payment_voucher_allocations LIMIT 1'
     );
+    await db.getFirstAsync(
+      'SELECT note_no, note_kind, direction, party_name, taxable_amount, total_amount FROM adjustment_notes LIMIT 1'
+    );
+    await db.getFirstAsync(
+      'SELECT note_id, qty, unit_price, gst_rate, taxable_amount FROM adjustment_note_items LIMIT 1'
+    );
     return true;
   } catch {
     return false;
@@ -1495,6 +1563,8 @@ async function rebuildSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     DROP TABLE IF EXISTS payment_voucher_allocations;
     DROP TABLE IF EXISTS payment_voucher_lines;
     DROP TABLE IF EXISTS payment_vouchers;
+    DROP TABLE IF EXISTS adjustment_note_items;
+    DROP TABLE IF EXISTS adjustment_notes;
     DROP TABLE IF EXISTS sale_payments;
     DROP TABLE IF EXISTS sale_items;
     DROP TABLE IF EXISTS sales;
@@ -1629,12 +1699,14 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       subtotal REAL NOT NULL DEFAULT 0,
       discount_amount REAL NOT NULL DEFAULT 0,
       service_charges REAL NOT NULL DEFAULT 0,
+      service_charges_gst_rate REAL,
       taxable_amount REAL NOT NULL DEFAULT 0,
       cgst_amount REAL NOT NULL DEFAULT 0,
       sgst_amount REAL NOT NULL DEFAULT 0,
       igst_amount REAL NOT NULL DEFAULT 0,
       is_inter_state INTEGER NOT NULL DEFAULT 0,
       place_of_supply TEXT,
+      is_reverse_charge INTEGER NOT NULL DEFAULT 0,
       total_amount REAL NOT NULL DEFAULT 0,
       paid_amount REAL NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'unpaid',
@@ -1687,6 +1759,7 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       igst_amount REAL NOT NULL DEFAULT 0,
       is_inter_state INTEGER NOT NULL DEFAULT 0,
       place_of_supply TEXT,
+      is_reverse_charge INTEGER NOT NULL DEFAULT 0,
       total_amount REAL NOT NULL DEFAULT 0,
       paid_amount REAL NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'unpaid',
@@ -1843,11 +1916,57 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       FOREIGN KEY (party_id) REFERENCES parties(id)
     );
 
+    CREATE TABLE adjustment_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      note_no TEXT NOT NULL,
+      note_kind TEXT NOT NULL CHECK(note_kind IN ('credit', 'debit')),
+      direction TEXT NOT NULL CHECK(direction IN ('sale', 'purchase')),
+      against_sale_id INTEGER,
+      against_purchase_id INTEGER,
+      party_id INTEGER,
+      party_name TEXT NOT NULL,
+      date TEXT NOT NULL,
+      reason TEXT,
+      taxable_amount REAL NOT NULL DEFAULT 0,
+      cgst_amount REAL NOT NULL DEFAULT 0,
+      sgst_amount REAL NOT NULL DEFAULT 0,
+      igst_amount REAL NOT NULL DEFAULT 0,
+      is_inter_state INTEGER NOT NULL DEFAULT 0,
+      place_of_supply TEXT,
+      is_reverse_charge INTEGER NOT NULL DEFAULT 0,
+      total_amount REAL NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (against_sale_id) REFERENCES sales(id),
+      FOREIGN KEY (against_purchase_id) REFERENCES purchases(id),
+      FOREIGN KEY (party_id) REFERENCES parties(id)
+    );
+
+    CREATE TABLE adjustment_note_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      note_id INTEGER NOT NULL,
+      product_id INTEGER,
+      description TEXT,
+      qty REAL NOT NULL DEFAULT 0,
+      unit_price REAL NOT NULL DEFAULT 0,
+      total REAL NOT NULL DEFAULT 0,
+      hsn_sac TEXT,
+      gst_rate REAL NOT NULL DEFAULT 0,
+      taxable_amount REAL NOT NULL DEFAULT 0,
+      cgst_amount REAL NOT NULL DEFAULT 0,
+      sgst_amount REAL NOT NULL DEFAULT 0,
+      igst_amount REAL NOT NULL DEFAULT 0,
+      FOREIGN KEY (note_id) REFERENCES adjustment_notes(id) ON DELETE CASCADE,
+      FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+
     CREATE UNIQUE INDEX idx_ledger_accounts_cash ON ledger_accounts(cash_account_id)
       WHERE cash_account_id IS NOT NULL;
     CREATE INDEX idx_journal_entries_date ON journal_entries(entry_date);
     CREATE INDEX idx_journal_lines_party ON journal_lines(party_id);
     CREATE INDEX idx_journal_lines_account ON journal_lines(ledger_account_id);
+    CREATE UNIQUE INDEX idx_adjustment_notes_no_kind ON adjustment_notes(note_no, note_kind);
+    CREATE INDEX idx_adjustment_notes_date ON adjustment_notes(date);
 
     CREATE UNIQUE INDEX idx_products_name_visible_unique
       ON products(name COLLATE NOCASE) WHERE COALESCE(is_hidden, 0) = 0;

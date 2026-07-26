@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { useRouter } from 'expo-router';
+import { CommonActions, useNavigation } from '@react-navigation/native';
+import type { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 import { formatDisplayDate } from '../utils/date';
 import { spacing } from '../constants/theme';
@@ -8,10 +9,10 @@ import { cardSurface } from '../constants/shadows';
 import { MoneyText, moneyRowStyles } from './MoneyText';
 import type { ActivityItem, GroupedRecentActivity } from '../services/activity';
 
-const ROUTES: Record<ActivityItem['type'], (id: number) => string> = {
-  sale: (id) => `/(drawer)/sales/${id}`,
-  purchase: (id) => `/(drawer)/purchases/${id}`,
-  expense: (id) => `/(drawer)/expense/${id}`,
+const DRAWER_STACK: Record<ActivityItem['type'], string> = {
+  sale: 'sales',
+  purchase: 'purchases',
+  expense: 'expense',
 };
 
 const SECTIONS: { key: keyof GroupedRecentActivity; title: string }[] = [
@@ -19,6 +20,29 @@ const SECTIONS: { key: keyof GroupedRecentActivity; title: string }[] = [
   { key: 'purchases', title: 'Purchases' },
   { key: 'expenses', title: 'Expenses' },
 ];
+
+function openActivityDetail(
+  navigation: NavigationProp<ParamListBase>,
+  item: ActivityItem
+): void {
+  const stack = DRAWER_STACK[item.type];
+  // Open detail with a clean nested stack [list → detail] so back never hits a
+  // stale New/Edit screen left from an earlier visit.
+  navigation.dispatch(
+    CommonActions.navigate({
+      name: stack,
+      params: {
+        state: {
+          routes: [
+            { name: 'index' },
+            { name: '[id]', params: { id: String(item.refId) } },
+          ],
+          index: 1,
+        },
+      },
+    })
+  );
+}
 
 function ActivityRow({
   item,
@@ -31,11 +55,11 @@ function ActivityRow({
   styles: ReturnType<typeof createStyles>;
   amountsHidden?: boolean;
 }) {
-  const router = useRouter();
+  const navigation = useNavigation<NavigationProp<ParamListBase>>();
   return (
     <TouchableOpacity
       style={[styles.row, isLast && styles.rowLast]}
-      onPress={() => router.push(ROUTES[item.type](item.refId) as never)}
+      onPress={() => openActivityDetail(navigation, item)}
       activeOpacity={0.75}
     >
       <View style={styles.rowLeft}>

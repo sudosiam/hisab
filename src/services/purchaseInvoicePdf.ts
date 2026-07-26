@@ -2,7 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { getBusinessProfile } from './appSettings';
-import { getSaleById, getSaleItems } from './sales';
+import { getPurchaseById, getPurchaseItems } from './purchases';
 import { getPartyById } from './parties';
 import { formatCurrency } from '../utils/format';
 import { formatDisplayDate } from '../utils/date';
@@ -10,8 +10,6 @@ import { stateName } from './gst';
 import { roundMoney } from '../utils/money';
 import { deferDeleteCacheFile } from '../utils/tempShareFiles';
 import { savePdfToDevice } from '../utils/pdfExport';
-import { sharePdfToWhatsApp } from '../utils/whatsappShare';
-import { buildUpiQrDataUri } from '../utils/upiQr';
 
 function escapeHtml(text: string): string {
   return text
@@ -23,28 +21,6 @@ function escapeHtml(text: string): string {
 
 function money(n: number): string {
   return formatCurrency(n);
-}
-
-function buildUpiQrUrl(params: {
-  upiId: string;
-  payeeName: string;
-  amount: number;
-  note: string;
-}): { upi: string; qrDataUri: string | null } | null {
-  const pa = params.upiId.trim();
-  if (!pa) return null;
-  const am = params.amount > 0.009 ? params.amount.toFixed(2) : '';
-  const query = [
-    `pa=${encodeURIComponent(pa)}`,
-    `pn=${encodeURIComponent(params.payeeName.slice(0, 50))}`,
-    am ? `am=${encodeURIComponent(am)}` : '',
-    'cu=INR',
-    `tn=${encodeURIComponent(params.note.slice(0, 50))}`,
-  ]
-    .filter(Boolean)
-    .join('&');
-  const upi = `upi://pay?${query}`;
-  return { upi, qrDataUri: buildUpiQrDataUri(upi) };
 }
 
 function amountInWordsInr(amount: number): string {
@@ -79,46 +55,37 @@ function amountInWordsInr(amount: number): string {
   return `${rupeeWords}${paiseWords} Only`.replace(/\s+/g, ' ').trim();
 }
 
-export async function buildSaleInvoiceHtml(saleId: number): Promise<{
+export async function buildPurchaseInvoiceHtml(purchaseId: number): Promise<{
   html: string;
   fileName: string;
   docLabel: string;
-  message: string;
-  sale: NonNullable<Awaited<ReturnType<typeof getSaleById>>>;
-  pdfUriReady?: never;
+  purchase: NonNullable<Awaited<ReturnType<typeof getPurchaseById>>>;
 }> {
-  const sale = await getSaleById(saleId);
-  if (!sale) throw new Error('Sale not found');
+  const purchase = await getPurchaseById(purchaseId);
+  if (!purchase) throw new Error('Purchase not found');
   const [items, profile, party] = await Promise.all([
-    getSaleItems(saleId),
+    getPurchaseItems(purchaseId),
     getBusinessProfile(),
-    sale.party_id ? getPartyById(sale.party_id) : Promise.resolve(null),
+    purchase.party_id ? getPartyById(purchase.party_id) : Promise.resolve(null),
   ]);
 
-  const isBos = sale.invoice_type === 'bos';
-  const docLabel = isBos ? 'Bill of Supply' : 'Tax Invoice';
-  const businessName = profile.business_name || 'Hisab';
   const taxTotal =
-    (sale.cgst_amount ?? 0) + (sale.sgst_amount ?? 0) + (sale.igst_amount ?? 0);
+    (purchase.cgst_amount ?? 0) + (purchase.sgst_amount ?? 0) + (purchase.igst_amount ?? 0);
   const showTax = taxTotal > 0.009;
-  const due = roundMoney(Math.max(0, sale.total_amount - sale.paid_amount));
+  const docLabel = showTax ? 'Tax Invoice (Purchase)' : 'Purchase Bill';
+  const businessName = profile.business_name || 'Hisab';
+  const due = roundMoney(Math.max(0, purchase.total_amount - purchase.paid_amount));
   const taxInclusive = profile.tax_inclusive;
   const partyStateLabel = party?.state
     ? stateName(party.state) || party.state
-    : sale.place_of_supply
-      ? stateName(sale.place_of_supply) || sale.place_of_supply
+    : purchase.place_of_supply
+      ? stateName(purchase.place_of_supply) || purchase.place_of_supply
       : '';
-
-  const qr = buildUpiQrUrl({
-    upiId: profile.business_upi_id,
-    payeeName: businessName,
-    amount: due > 0.009 ? due : sale.total_amount,
-    note: sale.invoice_no,
-  });
-  const placeOfSupplyLabel = sale.place_of_supply
-    ? `${stateName(sale.place_of_supply) || sale.place_of_supply} (${sale.place_of_supply})`
+  const placeOfSupplyLabel = purchase.place_of_supply
+    ? `${stateName(purchase.place_of_supply) || purchase.place_of_supply} (${purchase.place_of_supply})`
     : partyStateLabel || '—';
-  const words = amountInWordsInr(sale.total_amount);
+  const words = amountInWordsInr(purchase.total_amount);
+  const reverseChargeLabel = (purchase.is_reverse_charge ?? 0) ? 'Yes' : 'No';
 
   const statusLabel = due > 0.009 ? 'Balance due' : 'Paid in full';
   const statusTone = due > 0.009 ? 'due' : 'paid';
@@ -136,7 +103,7 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
           ${item.hsn_sac ? `<div class="hsn">HSN/SAC ${escapeHtml(item.hsn_sac)}</div>` : ''}
         </td>
         <td class="num mono">${item.qty}</td>
-        <td class="num mono">${money(item.unit_price)}</td>
+        <td class="num mono">${money(item.unit_cost)}</td>
         <td class="num mono">${item.gst_rate ?? 0}%</td>
         <td class="num mono">${money(item.taxable_amount ?? item.total)}</td>
         ${showTax ? `<td class="num mono">${money(tax)}</td>` : ''}
@@ -144,24 +111,6 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
       </tr>`;
     })
     .join('');
-
-  const payBlock = qr?.qrDataUri
-    ? `<div class="pay-card">
-        <div class="pay-title">Pay with UPI</div>
-        <img src="${qr.qrDataUri}" alt="UPI QR" width="118" height="118"/>
-        <div class="pay-upi mono">${escapeHtml(profile.business_upi_id)}</div>
-        ${due > 0.009 ? `<div class="pay-due">Due ${money(due)}</div>` : `<div class="pay-ok">No balance due</div>`}
-      </div>`
-    : qr
-      ? `<div class="pay-card">
-          <div class="pay-title">Pay with UPI</div>
-          <div class="pay-upi mono" style="margin-top:10px;word-break:break-all">${escapeHtml(profile.business_upi_id)}</div>
-          ${due > 0.009 ? `<div class="pay-due">Due ${money(due)}</div>` : `<div class="pay-ok">No balance due</div>`}
-        </div>`
-      : `<div class="pay-card muted-card">
-          <div class="pay-title">Payment</div>
-          <div class="pay-note">Add a UPI ID in Settings → Business to show a QR on invoices.</div>
-        </div>`;
 
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/>
@@ -179,8 +128,6 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
   }
   .mono { font-variant-numeric: tabular-nums; }
   .sheet { padding: 0; }
-
-  /* —— Header —— */
   .top-bar {
     height: 5px;
     background: linear-gradient(90deg, #0B1731 0%, #1e3a5f 55%, #c9a227 100%);
@@ -209,10 +156,7 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
     max-width: 340px;
   }
   .brand-meta strong { color: #2a3548; font-weight: 600; }
-  .doc-badge {
-    text-align: right;
-    min-width: 200px;
-  }
+  .doc-badge { text-align: right; min-width: 200px; }
   .doc-type {
     display: inline-block;
     background: #0B1731;
@@ -225,7 +169,6 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
     border-radius: 2px;
     margin-bottom: 10px;
   }
-  .doc-type.bos { background: #5c4a1f; }
   .inv-no {
     font-size: 13pt;
     font-weight: 700;
@@ -244,13 +187,7 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
   }
   .status-pill.paid { background: #e6f6ec; color: #0d7a3e; }
   .status-pill.due { background: #fff1e8; color: #b54708; }
-
-  /* —— Parties / meta —— */
-  .grid-2 {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 16px;
-  }
+  .grid-2 { display: flex; gap: 12px; margin-bottom: 16px; }
   .card {
     flex: 1;
     background: #f7f9fc;
@@ -277,8 +214,6 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
   .meta-kv { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 5px; font-size: 8.5pt; }
   .meta-kv .k { color: #7a8699; font-weight: 600; }
   .meta-kv .v { color: #1a2332; font-weight: 600; text-align: right; }
-
-  /* —— Items table —— */
   table.items {
     width: 100%;
     border-collapse: collapse;
@@ -309,54 +244,15 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
   .item-name { font-weight: 600; color: #1a2332; }
   .hsn { font-size: 7.5pt; color: #7a8699; margin-top: 2px; }
   .strong { font-weight: 700; }
-
-  /* —— Bottom: pay + totals —— */
   .bottom {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: 14px;
     align-items: stretch;
     margin-bottom: 12px;
   }
-  .pay-card {
-    width: 168px;
-    text-align: center;
-    border: 1px solid #e2e8f0;
-    border-radius: 6px;
-    padding: 12px 10px;
-    background: #fff;
-  }
-  .pay-card.muted-card { background: #f7f9fc; }
-  .pay-card img {
-    width: 118px;
-    height: 118px;
-    margin: 6px 0;
-  }
-  .pay-title {
-    font-size: 7.5pt;
-    font-weight: 700;
-    letter-spacing: 0.8px;
-    text-transform: uppercase;
-    color: #7a8699;
-  }
-  .pay-upi { font-size: 8pt; color: #2a3548; font-weight: 600; }
-  .pay-due {
-    margin-top: 6px;
-    font-size: 9pt;
-    font-weight: 700;
-    color: #b54708;
-  }
-  .pay-ok {
-    margin-top: 6px;
-    font-size: 8.5pt;
-    font-weight: 600;
-    color: #0d7a3e;
-  }
-  .pay-note { font-size: 8pt; color: #7a8699; margin-top: 10px; line-height: 1.35; }
-
   .totals {
     width: 280px;
-    margin-left: auto;
     border: 1px solid #e2e8f0;
     border-radius: 6px;
     overflow: hidden;
@@ -381,7 +277,6 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
   }
   .totals .row.grand span:last-child { color: #fff; font-weight: 700; }
   .totals .row.due-row span:last-child { color: #b54708; }
-
   .words {
     background: #f7f9fc;
     border-left: 3px solid #c9a227;
@@ -392,13 +287,8 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
     margin-bottom: 8px;
   }
   .words strong { color: #0B1731; }
-  .notes {
-    font-size: 8.5pt;
-    color: #5a6577;
-    padding: 6px 2px 10px;
-  }
+  .notes { font-size: 8.5pt; color: #5a6577; padding: 6px 2px 10px; }
   .notes strong { color: #2a3548; }
-
   .footer {
     margin-top: 18px;
     padding-top: 12px;
@@ -408,15 +298,8 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
     align-items: flex-end;
     gap: 16px;
   }
-  .thanks {
-    font-size: 9pt;
-    color: #5a6577;
-    font-style: italic;
-  }
-  .sign {
-    text-align: right;
-    min-width: 190px;
-  }
+  .thanks { font-size: 9pt; color: #5a6577; font-style: italic; }
+  .sign { text-align: right; min-width: 190px; }
   .sign-for {
     font-size: 8.5pt;
     font-weight: 600;
@@ -446,30 +329,31 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
       }
     </div>
     <div class="doc-badge">
-      <div class="doc-type${isBos ? ' bos' : ''}">${escapeHtml(docLabel)}</div>
-      <div class="inv-no mono">${escapeHtml(sale.invoice_no)}</div>
-      <div class="inv-date">${escapeHtml(formatDisplayDate(sale.date))}</div>
+      <div class="doc-type">${escapeHtml(docLabel)}</div>
+      <div class="inv-no mono">${escapeHtml(purchase.invoice_no)}</div>
+      <div class="inv-date">${escapeHtml(formatDisplayDate(purchase.date))}</div>
       <span class="status-pill ${statusTone}">${statusLabel}${due > 0.009 ? ` · ${money(due)}` : ''}</span>
     </div>
   </div>
 
   <div class="grid-2">
     <div class="card">
-      <div class="card-label">Bill to</div>
-      <div class="party-name">${escapeHtml(sale.party_name)}</div>
+      <div class="card-label">Vendor</div>
+      <div class="party-name">${escapeHtml(purchase.supplier_name)}</div>
       ${party?.address ? `<div class="card-line">${escapeHtml(party.address)}</div>` : ''}
       ${party?.gstin ? `<div class="card-line"><strong>GSTIN</strong> ${escapeHtml(party.gstin)}</div>` : ''}
       ${partyStateLabel ? `<div class="card-line"><strong>State</strong> ${escapeHtml(partyStateLabel)}</div>` : ''}
       ${party?.phone ? `<div class="card-line"><strong>Phone</strong> ${escapeHtml(party.phone)}</div>` : ''}
     </div>
     <div class="card">
-      <div class="card-label">Invoice details</div>
+      <div class="card-label">Bill details</div>
+      ${purchase.vendor_invoice_no ? `<div class="meta-kv"><span class="k">Vendor invoice</span><span class="v mono">${escapeHtml(purchase.vendor_invoice_no)}</span></div>` : ''}
       <div class="meta-kv"><span class="k">Place of supply</span><span class="v">${escapeHtml(placeOfSupplyLabel)}</span></div>
-      <div class="meta-kv"><span class="k">Reverse charge</span><span class="v">${(sale.is_reverse_charge ?? 0) ? 'Yes' : 'No'}</span></div>
+      <div class="meta-kv"><span class="k">Reverse charge</span><span class="v">${reverseChargeLabel}</span></div>
       ${taxInclusive && showTax ? `<div class="meta-kv"><span class="k">Pricing</span><span class="v">Tax-inclusive</span></div>` : ''}
-      <div class="meta-kv"><span class="k">Taxable</span><span class="v mono">${money(sale.taxable_amount ?? sale.subtotal)}</span></div>
+      <div class="meta-kv"><span class="k">Taxable</span><span class="v mono">${money(purchase.taxable_amount ?? purchase.subtotal)}</span></div>
       ${showTax ? `<div class="meta-kv"><span class="k">Tax</span><span class="v mono">${money(taxTotal)}</span></div>` : ''}
-      <div class="meta-kv"><span class="k">Grand total</span><span class="v mono">${money(sale.total_amount)}</span></div>
+      <div class="meta-kv"><span class="k">Grand total</span><span class="v mono">${money(purchase.total_amount)}</span></div>
     </div>
   </div>
 
@@ -490,25 +374,23 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
   </table>
 
   <div class="bottom">
-    ${payBlock}
     <div class="totals">
-      <div class="row"><span>Subtotal</span><span class="mono">${money(sale.subtotal)}</span></div>
-      ${sale.discount_amount > 0 ? `<div class="row"><span>Discount</span><span class="mono">− ${money(sale.discount_amount)}</span></div>` : ''}
-      <div class="row"><span>Taxable value</span><span class="mono">${money(sale.taxable_amount ?? sale.subtotal)}</span></div>
-      ${showTax && (sale.cgst_amount ?? 0) > 0 ? `<div class="row"><span>CGST</span><span class="mono">${money(sale.cgst_amount)}</span></div>` : ''}
-      ${showTax && (sale.sgst_amount ?? 0) > 0 ? `<div class="row"><span>SGST</span><span class="mono">${money(sale.sgst_amount)}</span></div>` : ''}
-      ${showTax && (sale.igst_amount ?? 0) > 0 ? `<div class="row"><span>IGST</span><span class="mono">${money(sale.igst_amount)}</span></div>` : ''}
-      ${(sale.service_charges ?? 0) > 0 ? `<div class="row"><span>Service charges</span><span class="mono">${money(sale.service_charges)}</span></div>` : ''}
-      <div class="row grand"><span>Grand Total</span><span class="mono">${money(sale.total_amount)}</span></div>
+      <div class="row"><span>Subtotal</span><span class="mono">${money(purchase.subtotal)}</span></div>
+      ${purchase.discount_amount > 0 ? `<div class="row"><span>Discount</span><span class="mono">− ${money(purchase.discount_amount)}</span></div>` : ''}
+      <div class="row"><span>Taxable value</span><span class="mono">${money(purchase.taxable_amount ?? purchase.subtotal)}</span></div>
+      ${showTax && (purchase.cgst_amount ?? 0) > 0 ? `<div class="row"><span>CGST</span><span class="mono">${money(purchase.cgst_amount)}</span></div>` : ''}
+      ${showTax && (purchase.sgst_amount ?? 0) > 0 ? `<div class="row"><span>SGST</span><span class="mono">${money(purchase.sgst_amount)}</span></div>` : ''}
+      ${showTax && (purchase.igst_amount ?? 0) > 0 ? `<div class="row"><span>IGST</span><span class="mono">${money(purchase.igst_amount)}</span></div>` : ''}
+      <div class="row grand"><span>Grand Total</span><span class="mono">${money(purchase.total_amount)}</span></div>
       ${due > 0.009 ? `<div class="row due-row"><span>Balance due</span><span class="mono">${money(due)}</span></div>` : ''}
     </div>
   </div>
 
   <div class="words"><strong>Amount in words</strong> · ${escapeHtml(words)}</div>
-  ${sale.notes ? `<div class="notes"><strong>Notes:</strong> ${escapeHtml(sale.notes)}</div>` : ''}
+  ${purchase.notes ? `<div class="notes"><strong>Notes:</strong> ${escapeHtml(purchase.notes)}</div>` : ''}
 
   <div class="footer">
-    <div class="thanks">Thank you for your business.</div>
+    <div class="thanks">Purchase record for ${escapeHtml(businessName)}.</div>
     <div class="sign">
       <div class="sign-for">For ${escapeHtml(businessName)}</div>
       <div class="sign-line">Authorised Signatory</div>
@@ -517,59 +399,31 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
 </div>
 </body></html>`;
 
-  const message = profile.whatsapp_message_template
-    .replace(/\{party\}/gi, sale.party_name)
-    .replace(/\{invoice_no\}/gi, sale.invoice_no)
-    .replace(/\{amount\}/gi, formatCurrency(sale.total_amount))
-    .replace(/\{doc_type\}/gi, docLabel);
-
-  const fileName = `${isBos ? 'BOS' : 'Tax-Invoice'}-${sale.invoice_no.replace(/[^\w-]/g, '_')}.pdf`;
-  return { html, fileName, docLabel, message, sale };
+  const fileName = `${showTax ? 'Tax-Invoice-Purchase' : 'Purchase-Bill'}-${purchase.invoice_no.replace(/[^\w-]/g, '_')}.pdf`;
+  return { html, fileName, docLabel, purchase };
 }
 
-async function writeInvoicePdfFile(saleId: number): Promise<{
+async function writePurchaseInvoicePdfFile(purchaseId: number): Promise<{
   dest: string;
   fileName: string;
   docLabel: string;
-  message: string;
-  sale: NonNullable<Awaited<ReturnType<typeof getSaleById>>>;
-  partyPhone: string;
 }> {
-  const built = await buildSaleInvoiceHtml(saleId);
+  const built = await buildPurchaseInvoiceHtml(purchaseId);
   const { uri } = await Print.printToFileAsync({ html: built.html });
-  // Unique cache name avoids Android file-lock races on rapid re-share.
   const stamp = Date.now();
   const dest = `${FileSystem.cacheDirectory}${stamp}-${built.fileName}`;
   await FileSystem.copyAsync({ from: uri, to: dest });
   const info = await FileSystem.getInfoAsync(dest);
   if (!info.exists || (typeof info.size === 'number' && info.size < 32)) {
-    throw new Error('Failed to create invoice PDF');
+    throw new Error('Failed to create purchase invoice PDF');
   }
-  const party = built.sale.party_id ? await getPartyById(built.sale.party_id) : null;
-  return {
-    dest,
-    fileName: built.fileName,
-    docLabel: built.docLabel,
-    message: built.message,
-    sale: built.sale,
-    partyPhone: party?.phone || '',
-  };
+  return { dest, fileName: built.fileName, docLabel: built.docLabel };
 }
 
-export async function shareSaleInvoicePdf(saleId: number): Promise<void> {
-  const { dest, docLabel, message, partyPhone } = await writeInvoicePdfFile(saleId);
-  // When the customer has a phone, open WhatsApp with PDF + message on their chat.
-  if (partyPhone?.trim()) {
-    await sharePdfToWhatsApp({
-      fileUri: dest,
-      phone: partyPhone,
-      message,
-      title: `Share ${docLabel}`,
-    });
-    deferDeleteCacheFile(dest);
-    return;
-  }
+export async function sharePurchaseInvoicePdf(purchaseId: number): Promise<void> {
+  const { dest, docLabel } = await writePurchaseInvoicePdfFile(purchaseId);
   if (!(await Sharing.isAvailableAsync())) {
+    deferDeleteCacheFile(dest);
     throw new Error('Sharing is not available on this device');
   }
   await Sharing.shareAsync(dest, {
@@ -580,32 +434,15 @@ export async function shareSaleInvoicePdf(saleId: number): Promise<void> {
   deferDeleteCacheFile(dest);
 }
 
-export async function previewSaleInvoicePdf(saleId: number): Promise<void> {
-  const { html } = await buildSaleInvoiceHtml(saleId);
+export async function previewPurchaseInvoicePdf(purchaseId: number): Promise<void> {
+  const { html } = await buildPurchaseInvoiceHtml(purchaseId);
   await Print.printAsync({ html });
 }
 
-/**
- * Open WhatsApp on the customer's number with invoice PDF attached and message filled.
- */
-export async function shareSaleInvoiceWhatsApp(saleId: number): Promise<void> {
-  const { dest, docLabel, message, partyPhone } = await writeInvoicePdfFile(saleId);
-  try {
-    await sharePdfToWhatsApp({
-      fileUri: dest,
-      phone: partyPhone,
-      message,
-      title: `Share ${docLabel}`,
-    });
-  } finally {
-    deferDeleteCacheFile(dest);
-  }
-}
-
-export async function downloadSaleInvoicePdf(
-  saleId: number
+export async function downloadPurchaseInvoicePdf(
+  purchaseId: number
 ): Promise<{ success: boolean; message: string }> {
-  const { dest, fileName } = await writeInvoicePdfFile(saleId);
+  const { dest, fileName } = await writePurchaseInvoicePdfFile(purchaseId);
   try {
     return await savePdfToDevice(dest, fileName);
   } finally {

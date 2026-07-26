@@ -37,7 +37,13 @@ export function createListItemStyles(colors: ThemeColors, isDark: boolean) {
       alignItems: 'flex-start',
     },
     left: moneyRowStyles.left,
-    right: moneyRowStyles.right,
+    right: {
+      width: 118,
+      flexGrow: 0,
+      flexShrink: 0,
+      alignItems: 'flex-end',
+      gap: 4,
+    },
     title: {
       ...typography.bodyMedium,
       fontWeight: '600',
@@ -182,7 +188,7 @@ export function ListItem({
   showChevron = false,
   pill,
   pillTone = 'default',
-  subtitleLines = 2,
+  subtitleLines: _subtitleLines = 2,
   metaLines = 2,
 }: ListItemProps) {
   const styles = useListItemStyles();
@@ -191,30 +197,33 @@ export function ListItem({
   const content = (
     <View style={styles.top}>
       <View style={styles.left}>
-        <Text style={styles.title} numberOfLines={2}>
-          {title}
-        </Text>
-        {pill ? (
-          <View
-            style={[
-              styles.pill,
-              pillTone === 'warn' && styles.pillWarn,
-              pillTone === 'muted' && styles.pillMuted,
-            ]}
-          >
-            <Text
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <Text style={[styles.title, { flexShrink: 1 }]} numberOfLines={1}>
+            {title}
+          </Text>
+          {pill ? (
+            <View
               style={[
-                styles.pillText,
-                pillTone === 'warn' && styles.pillTextWarn,
-                pillTone === 'muted' && styles.pillTextMuted,
+                styles.pill,
+                { marginTop: 0, alignSelf: 'center' },
+                pillTone === 'warn' && styles.pillWarn,
+                pillTone === 'muted' && styles.pillMuted,
               ]}
             >
-              {pill}
-            </Text>
-          </View>
-        ) : null}
+              <Text
+                style={[
+                  styles.pillText,
+                  pillTone === 'warn' && styles.pillTextWarn,
+                  pillTone === 'muted' && styles.pillTextMuted,
+                ]}
+              >
+                {pill}
+              </Text>
+            </View>
+          ) : null}
+        </View>
         {subtitle ? (
-          <Text style={styles.subtitle} numberOfLines={subtitleLines}>
+          <Text style={styles.subtitle} numberOfLines={1}>
             {subtitle}
           </Text>
         ) : null}
@@ -222,18 +231,6 @@ export function ListItem({
           <Text style={styles.meta} numberOfLines={metaLines}>
             {meta}
           </Text>
-        ) : null}
-        {dueAmount != null && dueAmount > 0.01 ? (
-          <View style={styles.dueRow}>
-            <Text style={styles.dueLabel}>{dueLabel}</Text>
-            <MoneyText
-              amount={dueAmount}
-              size="sm"
-              color={colors.danger}
-              lines={2}
-              style={{ flexShrink: 1, textAlign: 'left' }}
-            />
-          </View>
         ) : null}
       </View>
       <View style={styles.right}>
@@ -243,10 +240,22 @@ export function ListItem({
             size={amountSize}
             color={amountColor}
             style={{ width: '100%' }}
-            lines={2}
+            lines={1}
           />
         ) : null}
         {badge}
+        {dueAmount != null && dueAmount > 0.01 ? (
+          <View style={[styles.dueRow, { justifyContent: 'flex-end', marginTop: 0 }]}>
+            <Text style={styles.dueLabel}>{dueLabel}</Text>
+            <MoneyText
+              amount={dueAmount}
+              size="sm"
+              color={colors.danger}
+              lines={1}
+              style={{ textAlign: 'right' }}
+            />
+          </View>
+        ) : null}
         {trailing}
       </View>
     </View>

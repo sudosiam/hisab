@@ -34,7 +34,7 @@ function createStyles(_colors: ReturnType<typeof useTheme>['colors']) {
       paddingHorizontal: 8,
       paddingVertical: 3,
       borderRadius: radius.full,
-      alignSelf: 'flex-start',
+      alignSelf: 'flex-end',
     },
     text: {
       fontSize: 11,

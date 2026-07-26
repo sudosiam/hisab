@@ -6,6 +6,7 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
+  Switch,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import {
@@ -22,8 +23,9 @@ import { getProducts, getProductSellPrice } from '../../../src/services/inventor
 import { getSaleById, getSaleItems, updateSale } from '../../../src/services/sales';
 import { getPartyByName } from '../../../src/services/parties';
 import { getNextSaleDocumentNo } from '../../../src/services/invoiceNumbers';
-import { getBusinessState, isGstEnabled, isTaxInclusivePricing } from '../../../src/services/appSettings';
-import { computeGstDocument } from '../../../src/services/gst';
+import { getBusinessState, getServiceChargeGstRate, isGstEnabled, isTaxInclusivePricing } from '../../../src/services/appSettings';
+import { computeGstDocument, isPlausibleHsnSac, resolveStateFromPartyFields } from '../../../src/services/gst';
+import { GstRateChips } from '../../../src/components/GstRateChips';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
@@ -80,6 +82,13 @@ export default function EditSaleScreen() {
         typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
         typeChipText: { fontWeight: '600', color: colors.text },
         typeChipTextActive: { color: colors.onPrimary },
+        rcmRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: spacing.sm,
+        },
+        rcmLabel: { fontSize: 13, fontWeight: '600', color: colors.text, flex: 1 },
         itemCard: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.sm + 2,
@@ -94,6 +103,10 @@ export default function EditSaleScreen() {
         removeText: { color: colors.danger, fontSize: 16 },
         hsnToggle: { marginTop: 2, marginBottom: spacing.xs },
         hsnToggleText: { fontSize: 12, color: colors.primary, fontWeight: '600' },
+        hsnWarning: { fontSize: 12, color: colors.textMuted, marginTop: -4, marginBottom: spacing.xs },
+        discountRow: { flexDirection: 'row', gap: spacing.sm },
+        discountField: { flex: 1 },
+        svcGstField: { flex: 0.75 },
         totals: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
@@ -147,6 +160,9 @@ export default function EditSaleScreen() {
   const [date, setDate] = useState('');
   const [discount, setDiscount] = useState('0');
   const [serviceCharges, setServiceCharges] = useState('');
+  const [serviceChargeGstRate, setServiceChargeGstRate] = useState('');
+  const legacyUntaxedServiceChargesRef = useRef(false);
+  const initialServiceChargesRef = useRef(0);
   const [notes, setNotes] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [items, setItems] = useState<LineItem[]>([]);
@@ -160,6 +176,7 @@ export default function EditSaleScreen() {
   const [gstEnabled, setGstEnabled] = useState(true);
   const [taxInclusive, setTaxInclusive] = useState(false);
   const [partyState, setPartyState] = useState<string | null>(null);
+  const [isReverseCharge, setIsReverseCharge] = useState(false);
   const [showHsnByLine, setShowHsnByLine] = useState<Record<string, boolean>>({});
 
   const saleId = React.useMemo(() => {
@@ -189,7 +206,16 @@ export default function EditSaleScreen() {
         setDate(s.date);
         setDiscount(formatAmountInput(s.discount_amount ?? 0));
         setServiceCharges(s.service_charges > 0 ? formatAmountInput(s.service_charges) : '');
+        initialServiceChargesRef.current = s.service_charges;
+        legacyUntaxedServiceChargesRef.current =
+          s.service_charges > 0 && s.service_charges_gst_rate == null;
+        if (s.service_charges_gst_rate != null) {
+          setServiceChargeGstRate(formatAmountInput(s.service_charges_gst_rate));
+        } else {
+          setServiceChargeGstRate('');
+        }
         setNotes(s.notes ?? '');
+        setIsReverseCharge(!!(s.is_reverse_charge ?? 0));
         setProducts(productList);
         productsRef.current = productList;
         setItems(
@@ -215,7 +241,10 @@ export default function EditSaleScreen() {
           date: s.date,
           discount: formatAmountInput(s.discount_amount ?? 0),
           serviceCharges: s.service_charges > 0 ? formatAmountInput(s.service_charges) : '',
+          serviceChargeGstRate:
+            s.service_charges_gst_rate != null ? formatAmountInput(s.service_charges_gst_rate) : '',
           notes: s.notes ?? '',
+          isReverseCharge: !!(s.is_reverse_charge ?? 0),
           items:
             saleItems.length > 0
               ? saleItems.map((item) => ({
@@ -232,7 +261,7 @@ export default function EditSaleScreen() {
           .then((party) => {
             const phone = party?.phone ?? '';
             if (phone) setPartyPhone(phone);
-            setPartyState(party?.state ?? null);
+            setPartyState(resolveStateFromPartyFields(party?.state, party?.gstin));
             // Align dirty-check baseline with async-loaded phone so load isn't marked dirty.
             if (savedSnapshotRef.current) {
               try {
@@ -305,7 +334,7 @@ export default function EditSaleScreen() {
     }
     getPartyByName(name, 'customer')
       .then((party) => {
-        if (!cancelled) setPartyState(party?.state ?? null);
+        if (!cancelled) setPartyState(resolveStateFromPartyFields(party?.state, party?.gstin));
       })
       .catch(() => {});
     return () => {
@@ -315,6 +344,24 @@ export default function EditSaleScreen() {
 
   const discountAmount = roundMoney(Math.max(0, parseAmountInput(discount) || 0));
   const serviceChargesAmount = roundMoney(Math.max(0, parseAmountInput(serviceCharges) || 0));
+
+  React.useEffect(() => {
+    if (serviceChargesAmount <= 0) return;
+    if (legacyUntaxedServiceChargesRef.current) return;
+    if (initialServiceChargesRef.current === 0 && !serviceChargeGstRate.trim()) {
+      getServiceChargeGstRate()
+        .then((r) => setServiceChargeGstRate(String(r)))
+        .catch(() => {});
+    }
+  }, [serviceChargesAmount, serviceChargeGstRate]);
+
+  const parsedServiceChargeGstRate = useMemo(() => {
+    if (serviceChargesAmount <= 0) return null;
+    const trimmed = serviceChargeGstRate.trim();
+    if (!trimmed) return null;
+    const n = parseAmountInput(trimmed);
+    return Number.isFinite(n) ? n : null;
+  }, [serviceChargesAmount, serviceChargeGstRate]);
 
   const gstDoc = useMemo(() => {
     try {
@@ -327,6 +374,7 @@ export default function EditSaleScreen() {
         })),
         discount_amount: discountAmount,
         service_charges: serviceChargesAmount,
+        service_charges_gst_rate: parsedServiceChargeGstRate,
         business_state: businessState || null,
         party_state: partyState,
         gst_enabled: gstEnabled,
@@ -335,7 +383,16 @@ export default function EditSaleScreen() {
     } catch {
       return null;
     }
-  }, [items, discountAmount, serviceChargesAmount, businessState, partyState, gstEnabled, taxInclusive]);
+  }, [
+    items,
+    discountAmount,
+    serviceChargesAmount,
+    parsedServiceChargeGstRate,
+    businessState,
+    partyState,
+    gstEnabled,
+    taxInclusive,
+  ]);
 
   const subtotal = gstDoc?.subtotal ?? 0;
   const total = gstDoc?.total_amount ?? 0;
@@ -350,7 +407,9 @@ export default function EditSaleScreen() {
         date,
         discount,
         serviceCharges,
+        serviceChargeGstRate,
         notes,
+        isReverseCharge,
         items: items.map((item) => ({
           product_id: item.product_id,
           qty: item.qty,
@@ -359,7 +418,19 @@ export default function EditSaleScreen() {
           hsn_sac: item.hsn_sac,
         })),
       }),
-    [partyName, partyPhone, invoiceNo, invoiceType, date, discount, serviceCharges, notes, items]
+    [
+      partyName,
+      partyPhone,
+      invoiceNo,
+      invoiceType,
+      date,
+      discount,
+      serviceCharges,
+      serviceChargeGstRate,
+      notes,
+      isReverseCharge,
+      items,
+    ]
   );
   const isDirty =
     savedSnapshotRef.current !== null && formSnapshot !== savedSnapshotRef.current;
@@ -461,6 +532,8 @@ export default function EditSaleScreen() {
             date,
             discount_amount: discountAmount,
             service_charges: serviceChargesAmount,
+            service_charges_gst_rate: parsedServiceChargeGstRate,
+            is_reverse_charge: isReverseCharge,
             notes: notes.trim() || undefined,
             items: items.map((item) => ({
               product_id: item.product_id,
@@ -546,6 +619,18 @@ export default function EditSaleScreen() {
           </TouchableOpacity>
         ))}
       </View>
+      {gstEnabled ? (
+        <View style={localStyles.rcmRow}>
+          <Text style={localStyles.rcmLabel}>Reverse charge (RCM)</Text>
+          <Switch
+            value={isReverseCharge}
+            onValueChange={setIsReverseCharge}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            thumbColor={colors.surface}
+            accessibilityLabel="Reverse charge"
+          />
+        </View>
+      ) : null}
       <FormInput
         label={invoiceType === 'bos' ? 'BOS Number' : 'Invoice Number'}
         value={invoiceNo}
@@ -596,6 +681,10 @@ export default function EditSaleScreen() {
                     money
                     placeholder="0"
                   />
+                  <GstRateChips
+                    value={item.gst_rate}
+                    onChange={(v) => updateItem(index, 'gst_rate', v)}
+                  />
                 </View>
                 <TouchableOpacity
                   onPress={() => removeItem(index)}
@@ -615,13 +704,20 @@ export default function EditSaleScreen() {
                   <Text style={localStyles.hsnToggleText}>+ HSN/SAC</Text>
                 </TouchableOpacity>
               ) : (
-                <FormInput
-                  label="HSN/SAC"
-                  value={item.hsn_sac}
-                  onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
-                  placeholder="Optional"
-                  keyboardType="number-pad"
-                />
+                <>
+                  <FormInput
+                    label="HSN/SAC"
+                    value={item.hsn_sac}
+                    onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
+                    placeholder="Optional"
+                    keyboardType="number-pad"
+                  />
+                  {item.hsn_sac.trim() && !isPlausibleHsnSac(item.hsn_sac) ? (
+                    <Text style={localStyles.hsnWarning}>
+                      Usual HSN is 4, 6, or 8 digits
+                    </Text>
+                  ) : null}
+                </>
               )}
             </View>
           );
@@ -653,12 +749,27 @@ export default function EditSaleScreen() {
             onChangeText={setDiscount}
             money
           />
-          <FormInput
-            label="Service Charges (₹, optional)"
-            value={serviceCharges}
-            onChangeText={setServiceCharges}
-            money
-          />
+          <View style={localStyles.discountRow}>
+            <View style={localStyles.discountField}>
+              <FormInput
+                label="Service Charges (₹, optional)"
+                value={serviceCharges}
+                onChangeText={setServiceCharges}
+                money
+              />
+            </View>
+            {serviceChargesAmount > 0 ? (
+              <View style={localStyles.svcGstField}>
+                <FormInput
+                  label="Svc GST%"
+                  value={serviceChargeGstRate}
+                  onChangeText={setServiceChargeGstRate}
+                  money
+                  placeholder="0"
+                />
+              </View>
+            ) : null}
+          </View>
           {gstEnabled && gstDoc && gstDoc.tax_amount > 0.009 ? (
             <>
               <View style={localStyles.totalRow}>
@@ -682,6 +793,33 @@ export default function EditSaleScreen() {
                   </View>
                 </>
               )}
+              {gstDoc.service_charges_cgst > 0.009 ||
+              gstDoc.service_charges_sgst > 0.009 ||
+              gstDoc.service_charges_igst > 0.009 ? (
+                gstDoc.is_inter_state ? (
+                  <View style={localStyles.totalRow}>
+                    <Text style={localStyles.totalLabel}>Service IGST</Text>
+                    <Text style={localStyles.totalValue}>
+                      {formatCurrency(gstDoc.service_charges_igst)}
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={localStyles.totalRow}>
+                      <Text style={localStyles.totalLabel}>Service CGST</Text>
+                      <Text style={localStyles.totalValue}>
+                        {formatCurrency(gstDoc.service_charges_cgst)}
+                      </Text>
+                    </View>
+                    <View style={localStyles.totalRow}>
+                      <Text style={localStyles.totalLabel}>Service SGST</Text>
+                      <Text style={localStyles.totalValue}>
+                        {formatCurrency(gstDoc.service_charges_sgst)}
+                      </Text>
+                    </View>
+                  </>
+                )
+              ) : null}
             </>
           ) : null}
           <View style={[localStyles.totalRow, { marginTop: spacing.sm }]}>

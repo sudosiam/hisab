@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter, useNavigation } from 'expo-router';
+import type { NavigationProp, ParamListBase } from '@react-navigation/native';
 import {
   getPurchaseById,
   getPurchaseItems,
@@ -36,16 +37,24 @@ import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { todayISO, isValidISODate, formatDisplayDate } from '../../../src/utils/date';
+import { stackDetailBeforeRemove } from '../../../src/navigation/screenOptions';
 import { spacing } from '../../../src/constants/theme';
 import type { Account, Purchase, PurchaseItem, PurchasePayment } from '../../../src/types';
 
 export default function PurchaseDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { refresh } = useDatabase();
   const styles = useScreenStyles();
   const { colors } = useTheme();
+
+  useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', (e) => {
+      stackDetailBeforeRemove(navigation as never, e as never);
+    });
+    return unsub;
+  }, [navigation]);
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
@@ -217,12 +226,61 @@ export default function PurchaseDetailScreen() {
     );
   }, [purchase, refresh, router]);
 
+  const handlePreviewPdf = useCallback(async () => {
+    if (!purchase) return;
+    try {
+      const { previewPurchaseInvoicePdf } = await import('../../../src/services/purchaseInvoicePdf');
+      await previewPurchaseInvoicePdf(purchase.id);
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
+  }, [purchase]);
+
+  const handleSharePdf = useCallback(async () => {
+    if (!purchase) return;
+    try {
+      const { sharePurchaseInvoicePdf } = await import('../../../src/services/purchaseInvoicePdf');
+      await sharePurchaseInvoicePdf(purchase.id);
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
+  }, [purchase]);
+
+  const handleDownloadPdf = useCallback(async () => {
+    if (!purchase) return;
+    try {
+      const { downloadPurchaseInvoicePdf } = await import('../../../src/services/purchaseInvoicePdf');
+      const result = await downloadPurchaseInvoicePdf(purchase.id);
+      if (!result.success) Alert.alert('Could not save', result.message);
+      else if (result.message.startsWith('Saved')) Alert.alert('Saved', result.message);
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
+  }, [purchase]);
+
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: purchase
         ? () => (
             <OverflowMenu
               actions={[
+                { label: 'Preview / Print', onPress: handlePreviewPdf },
+                { label: 'Download PDF', onPress: handleDownloadPdf },
+                { label: 'Share PDF', onPress: handleSharePdf },
+                {
+                  label: 'Issue credit note',
+                  onPress: () =>
+                    router.push(
+                      `/(drawer)/notes/new?againstPurchaseId=${purchase.id}&kind=credit&direction=purchase` as never
+                    ),
+                },
+                {
+                  label: 'Issue debit note',
+                  onPress: () =>
+                    router.push(
+                      `/(drawer)/notes/new?againstPurchaseId=${purchase.id}&kind=debit&direction=purchase` as never
+                    ),
+                },
                 {
                   label: 'Delete Purchase',
                   destructive: true,
@@ -233,7 +291,7 @@ export default function PurchaseDetailScreen() {
           )
         : undefined,
     });
-  }, [navigation, purchase, handleDelete]);
+  }, [navigation, purchase, router, handleDelete, handlePreviewPdf, handleDownloadPdf, handleSharePdf]);
 
   if (loading) {
     return (

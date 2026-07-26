@@ -26,8 +26,9 @@ export function useReportPdfHeader(options: {
               const result = await onExportRef.current();
               if (!result.success) {
                 Alert.alert('Could not create PDF', result.message);
+              } else if (result.message.startsWith('Saved')) {
+                Alert.alert('Saved', result.message);
               }
-              // Success: system share sheet is the confirmation; avoid a second alert.
             } catch (error) {
               Alert.alert(
                 'PDF',

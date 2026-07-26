@@ -95,6 +95,48 @@ export function stateCodeFromGstin(gstin: string | null | undefined): string | n
   return /^\d{2}$/.test(code) ? code : null;
 }
 
+/**
+ * Resolve place-of-supply state the same way for UI preview and save paths:
+ * normalize free-text/code state, else fall back to GSTIN prefix.
+ */
+export function resolveStateFromPartyFields(
+  state?: string | null,
+  gstin?: string | null
+): string | null {
+  const fromState = normalizeStateToCode(state);
+  if (fromState) return fromState;
+  if (gstin) return stateCodeFromGstin(gstin);
+  return null;
+}
+
+/**
+ * Soft HSN/SAC check — 4, 6, or 8 digits. Empty is ok; other lengths are
+ * "implausible" (warn in UI, do not hard-block save).
+ */
+export function isPlausibleHsnSac(hsn: string | null | undefined): boolean {
+  const cleaned = (hsn ?? '').trim();
+  if (!cleaned) return true;
+  return /^(?:\d{4}|\d{6}|\d{8})$/.test(cleaned);
+}
+
+/**
+ * Normalize party/business state for persistence. Prefers explicit state when
+ * it normalizes; otherwise GSTIN prefix. Throws if both present and disagree.
+ */
+export function normalizePartyStateForSave(
+  state?: string | null,
+  gstin?: string | null
+): string | null {
+  const fromState = normalizeStateToCode(state);
+  const fromGstin = gstin ? stateCodeFromGstin(gstin) : null;
+  if (fromState && fromGstin && fromState !== fromGstin) {
+    throw new Error(
+      `State code ${fromState} does not match GSTIN prefix ${fromGstin}`
+    );
+  }
+  return fromState ?? fromGstin ?? null;
+}
+
 export function isValidGstin(gstin: string): boolean {
   const cleaned = gstin.trim().toUpperCase();
   if (!cleaned) return true;
@@ -186,6 +228,12 @@ export interface GstDocumentResult {
   tax_amount: number;
   discount_amount: number;
   service_charges: number;
+  /** null = legacy untaxed service charges; number = rate applied */
+  service_charges_gst_rate: number | null;
+  service_charges_taxable: number;
+  service_charges_cgst: number;
+  service_charges_sgst: number;
+  service_charges_igst: number;
   total_amount: number;
   suggested_invoice_type: 'invoice' | 'bos';
 }
@@ -206,10 +254,28 @@ export function isInterStateSupply(
  * Allocate invoice-level discount across lines by share, then compute tax.
  * When tax_inclusive is true, unit prices include GST and taxable is reverse-calculated.
  */
+function splitTaxBySupply(
+  taxTotal: number,
+  inter: boolean
+): { cgst: number; sgst: number; igst: number } {
+  if (taxTotal <= 0) return { cgst: 0, sgst: 0, igst: 0 };
+  if (inter) return { cgst: 0, sgst: 0, igst: taxTotal };
+  const cgst = roundMoney(taxTotal / 2);
+  return { cgst, sgst: subMoney(taxTotal, cgst), igst: 0 };
+}
+
 export function computeGstDocument(params: {
   lines: GstLineInput[];
   discount_amount?: number;
   service_charges?: number;
+  /**
+   * null/undefined with service_charges > 0 and legacy callers: untaxed.
+   * Pass a number (including 0) to tax service charges at that rate.
+   * Use `tax_service_charges: true` with omitted rate to default to 18.
+   */
+  service_charges_gst_rate?: number | null;
+  /** When true and rate omitted, apply default 18% on service charges. */
+  tax_service_charges?: boolean;
   business_state?: string | null;
   party_state?: string | null;
   place_of_supply?: string | null;
@@ -268,38 +334,77 @@ export function computeGstDocument(params: {
       taxTotal = mulMoney(taxable, rate / 100);
     }
 
-    let cgst = 0;
-    let sgst = 0;
-    let igst = 0;
-    if (taxTotal > 0) {
-      if (inter) {
-        igst = taxTotal;
-      } else {
-        cgst = roundMoney(taxTotal / 2);
-        sgst = subMoney(taxTotal, cgst);
-      }
-    }
-
+    const split = splitTaxBySupply(taxTotal, inter);
     return {
       line_total: raw.line_total,
       taxable_amount: taxable,
       gst_rate: rate,
       hsn_sac: raw.hsn_sac,
-      cgst_amount: cgst,
-      sgst_amount: sgst,
-      igst_amount: igst,
-      tax_amount: addMoney(cgst, sgst, igst),
+      cgst_amount: split.cgst,
+      sgst_amount: split.sgst,
+      igst_amount: split.igst,
+      tax_amount: addMoney(split.cgst, split.sgst, split.igst),
     };
   });
 
-  const taxable_amount = lines.reduce((sum, l) => addMoney(sum, l.taxable_amount), 0);
-  const cgst_amount = lines.reduce((sum, l) => addMoney(sum, l.cgst_amount), 0);
-  const sgst_amount = lines.reduce((sum, l) => addMoney(sum, l.sgst_amount), 0);
-  const igst_amount = lines.reduce((sum, l) => addMoney(sum, l.igst_amount), 0);
+  let lineTaxable = lines.reduce((sum, l) => addMoney(sum, l.taxable_amount), 0);
+  let cgst_amount = lines.reduce((sum, l) => addMoney(sum, l.cgst_amount), 0);
+  let sgst_amount = lines.reduce((sum, l) => addMoney(sum, l.sgst_amount), 0);
+  let igst_amount = lines.reduce((sum, l) => addMoney(sum, l.igst_amount), 0);
+
+  // Service charges: null rate = legacy untaxed; explicit rate (or tax_service_charges) = taxable.
+  let serviceRate: number | null = null;
+  if (params.service_charges_gst_rate != null && Number.isFinite(params.service_charges_gst_rate)) {
+    serviceRate = normalizeGstRate(params.service_charges_gst_rate);
+  } else if (params.tax_service_charges && serviceCharges > 0) {
+    serviceRate = 18;
+  }
+
+  let service_charges_taxable = 0;
+  let service_charges_cgst = 0;
+  let service_charges_sgst = 0;
+  let service_charges_igst = 0;
+
+  if (gstEnabled && serviceCharges > 0 && serviceRate != null) {
+    let svcTaxable: number;
+    let svcTax: number;
+    if (serviceRate <= 0) {
+      svcTaxable = serviceCharges;
+      svcTax = 0;
+    } else if (taxInclusive) {
+      svcTaxable = roundMoney(serviceCharges / (1 + serviceRate / 100));
+      svcTax = subMoney(serviceCharges, svcTaxable);
+    } else {
+      svcTaxable = serviceCharges;
+      svcTax = mulMoney(svcTaxable, serviceRate / 100);
+    }
+    const svcSplit = splitTaxBySupply(svcTax, inter);
+    service_charges_taxable = svcTaxable;
+    service_charges_cgst = svcSplit.cgst;
+    service_charges_sgst = svcSplit.sgst;
+    service_charges_igst = svcSplit.igst;
+    lineTaxable = addMoney(lineTaxable, svcTaxable);
+    cgst_amount = addMoney(cgst_amount, svcSplit.cgst);
+    sgst_amount = addMoney(sgst_amount, svcSplit.sgst);
+    igst_amount = addMoney(igst_amount, svcSplit.igst);
+  }
+
   const tax_amount = addMoney(cgst_amount, sgst_amount, igst_amount);
-  const total_amount = taxInclusive
-    ? roundMoney(Math.max(0, addMoney(netBase, serviceCharges)))
-    : roundMoney(Math.max(0, addMoney(taxable_amount, tax_amount, serviceCharges)));
+
+  let total_amount: number;
+  if (taxInclusive) {
+    // Inclusive amounts already include tax; serviceCharges includes svc tax when taxed.
+    total_amount = roundMoney(Math.max(0, addMoney(netBase, serviceCharges)));
+  } else if (serviceRate != null && serviceCharges > 0) {
+    // Taxed service charges already folded into taxable_amount + tax_amount.
+    total_amount = roundMoney(Math.max(0, addMoney(lineTaxable, tax_amount)));
+  } else {
+    // Legacy: untaxed service charges added on top of line taxable + tax.
+    total_amount = roundMoney(
+      Math.max(0, addMoney(lineTaxable, tax_amount, serviceCharges))
+    );
+  }
+
   const hasTax = tax_amount > 0.009;
 
   return {
@@ -307,13 +412,18 @@ export function computeGstDocument(params: {
     place_of_supply: placeOfSupply,
     lines,
     subtotal,
-    taxable_amount,
+    taxable_amount: lineTaxable,
     cgst_amount,
     sgst_amount,
     igst_amount,
     tax_amount,
     discount_amount: discount,
     service_charges: serviceCharges,
+    service_charges_gst_rate: serviceRate,
+    service_charges_taxable,
+    service_charges_cgst,
+    service_charges_sgst,
+    service_charges_igst,
     total_amount,
     suggested_invoice_type: hasTax ? 'invoice' : 'bos',
   };

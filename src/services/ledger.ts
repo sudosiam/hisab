@@ -178,7 +178,7 @@ export async function hasGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<bool
   return (row?.count ?? 0) > 0;
 }
 
-const LEDGER_CODE_VERSION = '6';
+const LEDGER_CODE_VERSION = '7';
 let rebuildInFlight: Promise<void> | null = null;
 /** Set when a rebuild is requested while another is already running. */
 let rebuildQueued = false;
@@ -319,9 +319,11 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     sgst_amount: number | null;
     igst_amount: number | null;
     service_charges: number | null;
+    is_reverse_charge: number | null;
   }>(
     `SELECT s.id, s.invoice_no, s.invoice_type, s.party_name, s.party_id, s.date, s.total_amount,
-            s.taxable_amount, s.cgst_amount, s.sgst_amount, s.igst_amount, s.service_charges
+            s.taxable_amount, s.cgst_amount, s.sgst_amount, s.igst_amount, s.service_charges,
+            s.is_reverse_charge
      FROM sales s
      WHERE EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id)
        AND s.total_amount > 0`
@@ -334,20 +336,24 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     const sgst = roundMoney(sale.sgst_amount ?? 0);
     const igst = roundMoney(sale.igst_amount ?? 0);
     const taxTotal = roundMoney(cgst + sgst + igst);
-    const salesCredit = roundMoney(amount - taxTotal);
+    const isReverseCharge = !!(sale.is_reverse_charge ?? 0);
+    // RCM sale: buyer pays GST; we post AR + full sales revenue, no output tax liability.
+    const salesCredit = isReverseCharge ? amount : roundMoney(amount - taxTotal);
     const docLabel = sale.invoice_type === 'bos' ? 'Bill of Supply' : 'Tax Invoice';
     const lines: JournalLineInput[] = [
       { ledgerAccountId: arAccount, partyId, debit: amount, credit: 0 },
       { ledgerAccountId: salesAccount, debit: 0, credit: salesCredit },
     ];
-    if (cgst > 0.009) {
-      lines.push({ ledgerAccountId: outputCgst, debit: 0, credit: cgst });
-    }
-    if (sgst > 0.009) {
-      lines.push({ ledgerAccountId: outputSgst, debit: 0, credit: sgst });
-    }
-    if (igst > 0.009) {
-      lines.push({ ledgerAccountId: outputIgst, debit: 0, credit: igst });
+    if (!isReverseCharge) {
+      if (cgst > 0.009) {
+        lines.push({ ledgerAccountId: outputCgst, debit: 0, credit: cgst });
+      }
+      if (sgst > 0.009) {
+        lines.push({ ledgerAccountId: outputSgst, debit: 0, credit: sgst });
+      }
+      if (igst > 0.009) {
+        lines.push({ ledgerAccountId: outputIgst, debit: 0, credit: igst });
+      }
     }
     await postJournalEntry(database, {
       date: sale.date,
@@ -434,9 +440,10 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     cgst_amount: number | null;
     sgst_amount: number | null;
     igst_amount: number | null;
+    is_reverse_charge: number | null;
   }>(
     `SELECT p.id, p.invoice_no, p.supplier_name, p.party_id, p.date, p.total_amount,
-            p.taxable_amount, p.cgst_amount, p.sgst_amount, p.igst_amount
+            p.taxable_amount, p.cgst_amount, p.sgst_amount, p.igst_amount, p.is_reverse_charge
      FROM purchases p
      WHERE EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = p.id)
        AND p.total_amount > 0`
@@ -449,6 +456,7 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     const sgst = roundMoney(purchase.sgst_amount ?? 0);
     const igst = roundMoney(purchase.igst_amount ?? 0);
     const taxTotal = roundMoney(cgst + sgst + igst);
+    const isReverseCharge = !!(purchase.is_reverse_charge ?? 0);
     const inventoryDebit = roundMoney(amount - taxTotal);
     const lines: JournalLineInput[] = [
       { ledgerAccountId: inventoryAccount, debit: inventoryDebit, credit: 0 },
@@ -462,12 +470,126 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     if (igst > 0.009) {
       lines.push({ ledgerAccountId: inputIgst, debit: igst, credit: 0 });
     }
-    lines.push({ ledgerAccountId: apAccount, partyId, debit: 0, credit: amount });
+    // RCM: Input ITC + Output liability — self-assess GST on reverse-charge purchases.
+    if (isReverseCharge && taxTotal > 0.009) {
+      if (cgst > 0.009) {
+        lines.push({ ledgerAccountId: outputCgst, debit: 0, credit: cgst });
+      }
+      if (sgst > 0.009) {
+        lines.push({ ledgerAccountId: outputSgst, debit: 0, credit: sgst });
+      }
+      if (igst > 0.009) {
+        lines.push({ ledgerAccountId: outputIgst, debit: 0, credit: igst });
+      }
+    }
+    const apCredit = isReverseCharge && taxTotal > 0.009 ? inventoryDebit : amount;
+    lines.push({ ledgerAccountId: apAccount, partyId, debit: 0, credit: apCredit });
     await postJournalEntry(database, {
       date: purchase.date,
       description: `Bill ${purchase.invoice_no}`,
       referenceType: 'purchase',
       referenceId: purchase.id,
+      lines,
+    });
+  }
+
+  const adjustmentNotes = await database.getAllAsync<{
+    id: number;
+    note_no: string;
+    note_kind: string;
+    direction: string;
+    party_name: string;
+    party_id: number | null;
+    date: string;
+    taxable_amount: number;
+    cgst_amount: number;
+    sgst_amount: number;
+    igst_amount: number;
+    is_reverse_charge: number;
+    total_amount: number;
+  }>(
+    `SELECT n.id, n.note_no, n.note_kind, n.direction, n.party_name, n.party_id, n.date,
+            n.taxable_amount, n.cgst_amount, n.sgst_amount, n.igst_amount,
+            n.is_reverse_charge, n.total_amount
+     FROM adjustment_notes n
+     WHERE n.total_amount > 0
+       AND EXISTS (SELECT 1 FROM adjustment_note_items ani WHERE ani.note_id = n.id)`
+  );
+
+  for (const note of adjustmentNotes) {
+    const isSale = note.direction === 'sale';
+    const partyType = isSale ? 'customer' : 'vendor';
+    const partyId = await resolvePartyId(database, note.party_name, partyType, note.party_id);
+    const controlAccount = isSale ? arAccount : apAccount;
+    const revenueOrInventoryAccount = isSale ? salesAccount : inventoryAccount;
+    const amount = roundMoney(note.total_amount);
+    const taxable = roundMoney(note.taxable_amount);
+    const cgst = roundMoney(note.cgst_amount ?? 0);
+    const sgst = roundMoney(note.sgst_amount ?? 0);
+    const igst = roundMoney(note.igst_amount ?? 0);
+    const isReverseCharge = !!(note.is_reverse_charge ?? 0);
+    const isCreditNote = note.note_kind === 'credit';
+    const taxTotal = roundMoney(cgst + sgst + igst);
+    const apOrArAmount =
+      !isSale && isReverseCharge && taxTotal > 0.009 ? taxable : amount;
+    const lines: JournalLineInput[] = [];
+
+    if (isSale) {
+      if (isCreditNote) {
+        // Reverse of sale: reduce AR, sales, and output tax (if applicable).
+        lines.push({ ledgerAccountId: revenueOrInventoryAccount, debit: isReverseCharge ? amount : taxable, credit: 0 });
+        if (!isReverseCharge) {
+          if (cgst > 0.009) lines.push({ ledgerAccountId: outputCgst, debit: cgst, credit: 0 });
+          if (sgst > 0.009) lines.push({ ledgerAccountId: outputSgst, debit: sgst, credit: 0 });
+          if (igst > 0.009) lines.push({ ledgerAccountId: outputIgst, debit: igst, credit: 0 });
+        }
+        lines.push({ ledgerAccountId: controlAccount, partyId, debit: 0, credit: amount });
+      } else {
+        // Debit note on sale: same as sale posting.
+        lines.push({ ledgerAccountId: controlAccount, partyId, debit: amount, credit: 0 });
+        lines.push({
+          ledgerAccountId: revenueOrInventoryAccount,
+          debit: 0,
+          credit: isReverseCharge ? amount : taxable,
+        });
+        if (!isReverseCharge) {
+          if (cgst > 0.009) lines.push({ ledgerAccountId: outputCgst, debit: 0, credit: cgst });
+          if (sgst > 0.009) lines.push({ ledgerAccountId: outputSgst, debit: 0, credit: sgst });
+          if (igst > 0.009) lines.push({ ledgerAccountId: outputIgst, debit: 0, credit: igst });
+        }
+      }
+    } else if (isCreditNote) {
+      // Vendor credit note: reduce AP, input ITC, and inventory.
+      lines.push({ ledgerAccountId: controlAccount, partyId, debit: apOrArAmount, credit: 0 });
+      if (cgst > 0.009) lines.push({ ledgerAccountId: inputCgst, debit: 0, credit: cgst });
+      if (sgst > 0.009) lines.push({ ledgerAccountId: inputSgst, debit: 0, credit: sgst });
+      if (igst > 0.009) lines.push({ ledgerAccountId: inputIgst, debit: 0, credit: igst });
+      lines.push({ ledgerAccountId: revenueOrInventoryAccount, debit: 0, credit: taxable });
+      if (isReverseCharge) {
+        if (cgst > 0.009) lines.push({ ledgerAccountId: outputCgst, debit: cgst, credit: 0 });
+        if (sgst > 0.009) lines.push({ ledgerAccountId: outputSgst, debit: sgst, credit: 0 });
+        if (igst > 0.009) lines.push({ ledgerAccountId: outputIgst, debit: igst, credit: 0 });
+      }
+    } else {
+      // Vendor debit note: same as purchase posting.
+      lines.push({ ledgerAccountId: revenueOrInventoryAccount, debit: taxable, credit: 0 });
+      if (cgst > 0.009) lines.push({ ledgerAccountId: inputCgst, debit: cgst, credit: 0 });
+      if (sgst > 0.009) lines.push({ ledgerAccountId: inputSgst, debit: sgst, credit: 0 });
+      if (igst > 0.009) lines.push({ ledgerAccountId: inputIgst, debit: igst, credit: 0 });
+      if (isReverseCharge) {
+        if (cgst > 0.009) lines.push({ ledgerAccountId: outputCgst, debit: 0, credit: cgst });
+        if (sgst > 0.009) lines.push({ ledgerAccountId: outputSgst, debit: 0, credit: sgst });
+        if (igst > 0.009) lines.push({ ledgerAccountId: outputIgst, debit: 0, credit: igst });
+      }
+      lines.push({ ledgerAccountId: controlAccount, partyId, debit: 0, credit: apOrArAmount });
+    }
+
+    const description = isCreditNote ? `Credit Note ${note.note_no}` : `Debit Note ${note.note_no}`;
+    await postJournalEntry(database, {
+      date: note.date,
+      description,
+      referenceType: 'adjustment_note',
+      referenceId: note.id,
       lines,
     });
   }

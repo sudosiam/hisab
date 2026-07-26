@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  Switch,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import {
@@ -23,9 +24,24 @@ import { getProducts, getProductSellPrice } from '../../../src/services/inventor
 import { getSelectableAccounts } from '../../../src/services/banking';
 import { createSale } from '../../../src/services/sales';
 import { getPartyByName } from '../../../src/services/parties';
+import {
+  applyPartyAdvanceToSale,
+  getPartyUnallocatedPaymentCredit,
+} from '../../../src/services/paymentVouchers';
 import { getNextSaleDocumentNo } from '../../../src/services/invoiceNumbers';
-import { getBusinessState, isGstEnabled, isTaxInclusivePricing } from '../../../src/services/appSettings';
-import { computeGstDocument } from '../../../src/services/gst';
+import {
+  getBusinessState,
+  getServiceChargeGstRate,
+  isGstEnabled,
+  isTaxInclusivePricing,
+} from '../../../src/services/appSettings';
+import {
+  computeGstDocument,
+  isPlausibleHsnSac,
+  resolveStateFromPartyFields,
+  stateName,
+} from '../../../src/services/gst';
+import { GstRateChips } from '../../../src/components/GstRateChips';
 import { DRAFT_KEYS, loadDraft, type SaleFormDraft } from '../../../src/services/formDrafts';
 import { useFormDraft } from '../../../src/hooks/useFormDraft';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -115,6 +131,13 @@ export default function NewSaleScreen() {
         typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
         typeChipText: { fontWeight: '600', color: colors.text, fontSize: 13 },
         typeChipTextActive: { color: colors.onPrimary },
+        rcmRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginTop: spacing.xs,
+        },
+        rcmLabel: { fontSize: 13, fontWeight: '600', color: colors.text, flex: 1 },
         headerMeta: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
         headerMetaGrow: { flex: 1.2 },
         headerMetaDate: { flex: 1 },
@@ -139,6 +162,7 @@ export default function NewSaleScreen() {
         removeText: { color: colors.danger, fontSize: 16 },
         hsnToggle: { marginTop: 2, marginBottom: spacing.xs },
         hsnToggleText: { fontSize: 12, color: colors.primary, fontWeight: '600' },
+        hsnWarning: { fontSize: 12, color: colors.textMuted, marginTop: -4, marginBottom: spacing.xs },
         totals: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
@@ -162,6 +186,35 @@ export default function NewSaleScreen() {
         },
         paidHint: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
         hint: { color: colors.warning },
+        advanceCard: {
+          ...cardSurface(colors, isDark),
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm,
+          marginBottom: spacing.sm,
+          gap: 6,
+        },
+        advanceRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: spacing.sm,
+        },
+        advanceLabel: { flex: 1, fontSize: 13, color: colors.text, fontWeight: '600' },
+        advanceMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+        advanceToggle: {
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          borderRadius: radius.sm,
+          borderWidth: 1,
+          borderColor: colors.border,
+          backgroundColor: colors.surface,
+        },
+        advanceToggleOn: {
+          backgroundColor: colors.primaryContainer,
+          borderColor: colors.primary,
+        },
+        advanceToggleText: { fontSize: 12, fontWeight: '700', color: colors.text },
+        advanceToggleTextOn: { color: colors.onPrimaryContainer },
         discountRow: { flexDirection: 'row', gap: spacing.sm },
         discountField: { flex: 1 },
         addItemBtn: {
@@ -197,6 +250,7 @@ export default function NewSaleScreen() {
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState('0');
   const [serviceCharges, setServiceCharges] = useState('');
+  const [serviceChargeGstRate, setServiceChargeGstRate] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [items, setItems] = useState<LineItem[]>(() => [createEmptyLineItem()]);
@@ -206,6 +260,9 @@ export default function NewSaleScreen() {
   const [gstEnabled, setGstEnabled] = useState(true);
   const [taxInclusive, setTaxInclusive] = useState(false);
   const [partyState, setPartyState] = useState<string | null>(null);
+  const [isReverseCharge, setIsReverseCharge] = useState(false);
+  const [advanceCredit, setAdvanceCredit] = useState(0);
+  const [applyAdvance, setApplyAdvance] = useState(false);
   const productsRef = React.useRef<Product[]>([]);
   productsRef.current = products;
 
@@ -364,12 +421,13 @@ export default function NewSaleScreen() {
 
   React.useEffect(() => {
     let cancelled = false;
-    Promise.all([getBusinessState(), isGstEnabled(), isTaxInclusivePricing()])
-      .then(([state, enabled, inclusive]) => {
+    Promise.all([getBusinessState(), isGstEnabled(), isTaxInclusivePricing(), getServiceChargeGstRate()])
+      .then(([state, enabled, inclusive, svcRate]) => {
         if (!cancelled) {
           setBusinessState(state);
           setGstEnabled(enabled);
           setTaxInclusive(inclusive);
+          setServiceChargeGstRate(String(svcRate));
         }
       })
       .catch(() => {});
@@ -382,29 +440,58 @@ export default function NewSaleScreen() {
     let cancelled = false;
     const name = partyName.trim();
     if (!name) {
-      setPartyState(null);
+      // Keep business-state default ready for the next name typed.
+      setPartyState(businessState.trim() || null);
+      setAdvanceCredit(0);
+      setApplyAdvance(false);
       return;
     }
     getPartyByName(name, 'customer')
-      .then((party) => {
-        if (!cancelled && party) {
+      .then(async (party) => {
+        if (cancelled) return;
+        if (party) {
           setPartyPhone((current) => (current.trim() ? current : party.phone ?? ''));
-          setPartyState(party.state ?? null);
-        } else if (!cancelled) {
-          setPartyState(null);
+          setPartyState(
+            resolveStateFromPartyFields(party.state, party.gstin) ||
+              businessState.trim() ||
+              null
+          );
+        } else {
+          // New customer typed on this screen → default to your business state
+          // (e.g. West Bengal 19 if that is set in Settings → Business).
+          setPartyState(businessState.trim() || null);
+        }
+        const credit = await getPartyUnallocatedPaymentCredit(name, 'customer');
+        if (!cancelled) {
+          setAdvanceCredit(credit);
+          setApplyAdvance(credit > 0.009);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) {
+          setAdvanceCredit(0);
+          setApplyAdvance(false);
+        }
+      });
     return () => {
       cancelled = true;
     };
-  }, [partyName]);
+  }, [partyName, businessState]);
 
   const discountAmount = roundMoney(Math.max(0, parseAmountInput(discount) || 0));
   const serviceChargesAmount = roundMoney(Math.max(0, parseAmountInput(serviceCharges) || 0));
   const deferredItems = useDeferredValue(items);
   const deferredDiscount = useDeferredValue(discountAmount);
   const deferredServiceCharges = useDeferredValue(serviceChargesAmount);
+  const deferredServiceChargeGstRate = useDeferredValue(serviceChargeGstRate);
+
+  const parsedServiceChargeGstRate = useMemo(() => {
+    if (serviceChargesAmount <= 0) return null;
+    const trimmed = deferredServiceChargeGstRate.trim();
+    if (!trimmed) return null;
+    const n = parseAmountInput(trimmed);
+    return Number.isFinite(n) ? n : null;
+  }, [serviceChargesAmount, deferredServiceChargeGstRate]);
 
   const gstDoc = useMemo(() => {
     try {
@@ -417,6 +504,7 @@ export default function NewSaleScreen() {
         })),
         discount_amount: deferredDiscount,
         service_charges: deferredServiceCharges,
+        service_charges_gst_rate: parsedServiceChargeGstRate,
         business_state: businessState || null,
         party_state: partyState,
         gst_enabled: gstEnabled,
@@ -429,6 +517,7 @@ export default function NewSaleScreen() {
     deferredItems,
     deferredDiscount,
     deferredServiceCharges,
+    parsedServiceChargeGstRate,
     businessState,
     partyState,
     gstEnabled,
@@ -438,10 +527,15 @@ export default function NewSaleScreen() {
   const subtotal = gstDoc?.subtotal ?? 0;
   const total = gstDoc?.total_amount ?? 0;
 
-  const paidTotal = useMemo(
+  const cashPaidTotal = useMemo(
     () => payments.reduce((sum, p) => addMoney(sum, parseAmountInput(p.amount) || 0), 0),
     [payments]
   );
+  const advanceAppliedPreview =
+    applyAdvance && advanceCredit > 0.009
+      ? roundMoney(Math.min(advanceCredit, Math.max(0, total - cashPaidTotal)))
+      : 0;
+  const paidTotal = addMoney(cashPaidTotal, advanceAppliedPreview);
   const isOverpaid = paidTotal > total + 0.01;
 
   const addItem = () => {
@@ -508,7 +602,12 @@ export default function NewSaleScreen() {
         return;
       }
     }
-    const paidTotal = payments.reduce((sum, p) => addMoney(sum, parseAmountInput(p.amount) || 0), 0);
+    const cashPaid = payments.reduce((sum, p) => addMoney(sum, parseAmountInput(p.amount) || 0), 0);
+    const advanceToApply =
+      applyAdvance && advanceCredit > 0.009
+        ? roundMoney(Math.min(advanceCredit, Math.max(0, total - cashPaid)))
+        : 0;
+    const paidTotal = addMoney(cashPaid, advanceToApply);
     if (paidTotal > total + 0.01) {
       Alert.alert('Payment too high', `Total payments cannot exceed invoice amount (${formatCurrency(total)}).`);
       return;
@@ -535,12 +634,15 @@ export default function NewSaleScreen() {
         const saleId = await createSale({
           party_name: partyName.trim(),
           party_phone: partyPhone.trim() || undefined,
+          party_state: partyState,
           invoice_no: invoiceNo.trim(),
           invoice_type: invoiceType,
           date,
           notes: notes.trim() || undefined,
           discount_amount: discountAmount,
           service_charges: serviceChargesAmount > 0 ? serviceChargesAmount : undefined,
+          service_charges_gst_rate: parsedServiceChargeGstRate,
+          is_reverse_charge: isReverseCharge,
           items: items.map((i) => ({
             product_id: i.product_id,
             qty: parseAmountInput(i.qty) || 0,
@@ -557,6 +659,9 @@ export default function NewSaleScreen() {
               notes: p.notes || undefined,
             })),
         });
+        if (advanceToApply > 0.009) {
+          await applyPartyAdvanceToSale(saleId, advanceToApply, date);
+        }
         await clearDraftOnSave();
         refresh();
         router.replace(`/(drawer)/sales/${saleId}`);
@@ -612,6 +717,18 @@ export default function NewSaleScreen() {
             </TouchableOpacity>
           ))}
         </View>
+        {gstEnabled ? (
+          <View style={localStyles.rcmRow}>
+            <Text style={localStyles.rcmLabel}>Reverse charge (RCM)</Text>
+            <Switch
+              value={isReverseCharge}
+              onValueChange={setIsReverseCharge}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor={colors.surface}
+              accessibilityLabel="Reverse charge"
+            />
+          </View>
+        ) : null}
         <View style={localStyles.headerMeta}>
           <View style={localStyles.headerMetaGrow}>
             <FormInput
@@ -629,6 +746,22 @@ export default function NewSaleScreen() {
 
       <View style={localStyles.partyBlock}>
         <CustomerAutocomplete value={partyName} onChange={setPartyName} />
+        {gstEnabled ? (
+          <FormInput
+            label="Buyer state"
+            value={partyState ?? ''}
+            onChangeText={(v) => setPartyState(v.trim() ? v.trim().slice(0, 2) : null)}
+            placeholder={businessState.trim() || 'e.g. 19'}
+            keyboardType="number-pad"
+            helperText={
+              partyState
+                ? stateName(partyState) || 'Unknown state code'
+                : businessState.trim()
+                  ? `Defaults to your business state (${stateName(businessState) || businessState})`
+                  : 'Set business state in Settings, or enter 2-digit code (19 = West Bengal)'
+            }
+          />
+        ) : null}
         <FormInput
           label="Phone"
           value={partyPhone}
@@ -679,6 +812,10 @@ export default function NewSaleScreen() {
                     money
                     placeholder="0"
                   />
+                  <GstRateChips
+                    value={item.gst_rate}
+                    onChange={(v) => updateItem(index, 'gst_rate', v)}
+                  />
                 </View>
                 <TouchableOpacity
                   onPress={() => removeItem(index)}
@@ -700,13 +837,20 @@ export default function NewSaleScreen() {
                   <Text style={localStyles.hsnToggleText}>+ HSN/SAC</Text>
                 </TouchableOpacity>
               ) : (
-                <FormInput
-                  label="HSN/SAC"
-                  value={item.hsn_sac}
-                  onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
-                  placeholder="Optional"
-                  keyboardType="number-pad"
-                />
+                <>
+                  <FormInput
+                    label="HSN/SAC"
+                    value={item.hsn_sac}
+                    onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
+                    placeholder="Optional"
+                    keyboardType="number-pad"
+                  />
+                  {item.hsn_sac.trim() && !isPlausibleHsnSac(item.hsn_sac) ? (
+                    <Text style={localStyles.hsnWarning}>
+                      Usual HSN is 4, 6, or 8 digits
+                    </Text>
+                  ) : null}
+                </>
               )}
             </View>
           );
@@ -744,6 +888,17 @@ export default function NewSaleScreen() {
                 money
               />
             </View>
+            {serviceChargesAmount > 0 ? (
+              <View style={localStyles.gstField}>
+                <FormInput
+                  label="Svc GST%"
+                  value={serviceChargeGstRate}
+                  onChangeText={setServiceChargeGstRate}
+                  money
+                  placeholder="0"
+                />
+              </View>
+            ) : null}
           </View>
           {gstEnabled && gstDoc && gstDoc.tax_amount > 0.009 ? (
             <>
@@ -768,6 +923,33 @@ export default function NewSaleScreen() {
                   </View>
                 </>
               )}
+              {gstDoc.service_charges_cgst > 0.009 ||
+              gstDoc.service_charges_sgst > 0.009 ||
+              gstDoc.service_charges_igst > 0.009 ? (
+                gstDoc.is_inter_state ? (
+                  <View style={localStyles.totalRow}>
+                    <Text style={localStyles.totalLabel}>Service IGST</Text>
+                    <Text style={localStyles.totalValue}>
+                      {formatCurrency(gstDoc.service_charges_igst)}
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={localStyles.totalRow}>
+                      <Text style={localStyles.totalLabel}>Service CGST</Text>
+                      <Text style={localStyles.totalValue}>
+                        {formatCurrency(gstDoc.service_charges_cgst)}
+                      </Text>
+                    </View>
+                    <View style={localStyles.totalRow}>
+                      <Text style={localStyles.totalLabel}>Service SGST</Text>
+                      <Text style={localStyles.totalValue}>
+                        {formatCurrency(gstDoc.service_charges_sgst)}
+                      </Text>
+                    </View>
+                  </>
+                )
+              ) : null}
             </>
           ) : null}
           <View style={[localStyles.totalRow, { marginTop: 4 }]}>
@@ -781,11 +963,42 @@ export default function NewSaleScreen() {
       <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
 
       <SectionHeader title="Payment" />
+      {advanceCredit > 0.009 ? (
+        <View style={localStyles.advanceCard}>
+          <View style={localStyles.advanceRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={localStyles.advanceLabel}>
+                Advance available {formatCurrency(advanceCredit)}
+              </Text>
+              <Text style={localStyles.advanceMeta}>
+                {applyAdvance
+                  ? `Will deduct ${formatCurrency(advanceAppliedPreview)} from this sale`
+                  : 'Turn on to deduct advance from this invoice'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[localStyles.advanceToggle, applyAdvance && localStyles.advanceToggleOn]}
+              onPress={() => setApplyAdvance((v) => !v)}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: applyAdvance }}
+            >
+              <Text
+                style={[
+                  localStyles.advanceToggleText,
+                  applyAdvance && localStyles.advanceToggleTextOn,
+                ]}
+              >
+                {applyAdvance ? 'On' : 'Off'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
       <PaymentSplitForm
         accounts={accounts}
         payments={payments}
         onChange={setPayments}
-        totalDue={total}
+        totalDue={Math.max(0, roundMoney(total - advanceAppliedPreview))}
         defaultDate={isValidISODate(date) ? date : undefined}
       />
 

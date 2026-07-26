@@ -108,12 +108,15 @@ export interface Sale {
   subtotal: number;
   discount_amount: number;
   service_charges: number;
+  /** null = legacy untaxed service charges */
+  service_charges_gst_rate?: number | null;
   taxable_amount: number;
   cgst_amount: number;
   sgst_amount: number;
   igst_amount: number;
   is_inter_state: number;
   place_of_supply: string | null;
+  is_reverse_charge?: number;
   total_amount: number;
   paid_amount: number;
   status: PaymentStatus;
@@ -163,11 +166,64 @@ export interface Purchase {
   igst_amount: number;
   is_inter_state: number;
   place_of_supply: string | null;
+  is_reverse_charge?: number;
   total_amount: number;
   paid_amount: number;
   status: PaymentStatus;
   notes: string | null;
   created_at: string;
+}
+
+export type AdjustmentNoteKind = 'credit' | 'debit';
+export type AdjustmentNoteDirection = 'sale' | 'purchase';
+
+export interface AdjustmentNote {
+  id: number;
+  note_no: string;
+  note_kind: AdjustmentNoteKind;
+  direction: AdjustmentNoteDirection;
+  against_sale_id: number | null;
+  against_purchase_id: number | null;
+  party_id: number | null;
+  party_name: string;
+  date: string;
+  reason: string | null;
+  taxable_amount: number;
+  cgst_amount: number;
+  sgst_amount: number;
+  igst_amount: number;
+  is_inter_state: number;
+  place_of_supply: string | null;
+  is_reverse_charge: number;
+  total_amount: number;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface AdjustmentNoteItem {
+  id: number;
+  note_id: number;
+  product_id: number | null;
+  description: string | null;
+  qty: number;
+  unit_price: number;
+  total: number;
+  hsn_sac: string | null;
+  gst_rate: number;
+  taxable_amount: number;
+  cgst_amount: number;
+  sgst_amount: number;
+  igst_amount: number;
+  product_name?: string;
+}
+
+export interface AdjustmentNoteItemInput {
+  product_id?: number | null;
+  description?: string | null;
+  qty: number;
+  unit_price: number;
+  hsn_sac?: string | null;
+  gst_rate?: number | null;
 }
 
 export interface PurchaseItem {
@@ -319,6 +375,8 @@ export interface PartySummary {
   totalBilled: number;
   totalPaid: number;
   balanceDue: number;
+  /** Unallocated advance / on-account credit still available. */
+  advanceCredit: number;
   lastActivityDate: string | null;
 }
 
