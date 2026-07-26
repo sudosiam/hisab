@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -10,11 +10,13 @@ import {
 } from 'react-native';
 import { DashboardSkeleton } from '../../src/components/Skeleton';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
+import type { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { formatSqliteError } from '../../src/db/database';
 import { StatCard } from '../../src/components/StatCard';
 import { MonthPicker } from '../../src/components/MonthPicker';
 import { RecentActivityList } from '../../src/components/RecentActivityList';
+import { CalculatorHeaderButton } from '../../src/components/QuickCalculator';
 import {
   useScreenStyles,
   DashboardShortcuts,
@@ -38,6 +40,7 @@ const ACCOUNTING_BASIS_KEY = '@hisab/dashboard_accounting_basis';
 
 export default function DashboardScreen() {
   const router = useRouter();
+  const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { refreshKey } = useDatabase();
   const { colors } = useTheme();
   const styles = useScreenStyles();
@@ -56,36 +59,35 @@ export default function DashboardScreen() {
   const basisStyles = useMemo(
     () =>
       StyleSheet.create({
-        row: {
+        headerRight: {
           flexDirection: 'row',
           alignItems: 'center',
-          justifyContent: 'flex-end',
-          marginBottom: spacing.sm,
-          marginTop: -2,
+          marginRight: 4,
+          gap: 6,
         },
         seg: {
           flexDirection: 'row',
-          backgroundColor: colors.surfaceContainer,
+          backgroundColor: colors.primaryContainer,
           borderRadius: radius.full,
           padding: 2,
         },
         opt: {
-          paddingHorizontal: 10,
-          paddingVertical: 4,
+          paddingHorizontal: 8,
+          paddingVertical: 3,
           borderRadius: radius.full,
-          minHeight: 26,
+          minHeight: 24,
           justifyContent: 'center',
         },
         optActive: {
-          backgroundColor: colors.primaryContainer,
+          backgroundColor: colors.primary,
         },
         optText: {
           fontSize: 11,
           fontWeight: '500',
-          color: colors.textMuted,
+          color: colors.onPrimaryContainer,
         },
         optTextActive: {
-          color: colors.onPrimaryContainer,
+          color: colors.onPrimary,
           fontWeight: '700',
         },
       }),
@@ -120,6 +122,45 @@ export default function DashboardScreen() {
     setBasis(next);
     void AsyncStorage.setItem(ACCOUNTING_BASIS_KEY, next);
   }, []);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={basisStyles.headerRight}>
+          <View
+            style={basisStyles.seg}
+            accessibilityRole="tablist"
+            accessibilityLabel="Accounting basis"
+          >
+            {(
+              [
+                { key: 'accrual', label: 'Accrual' },
+                { key: 'cash', label: 'Cash' },
+              ] as const
+            ).map((opt) => {
+              const active = basis === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[basisStyles.opt, active && basisStyles.optActive]}
+                  onPress={() => setAccountingBasis(opt.key)}
+                  activeOpacity={0.7}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`${opt.label} mode`}
+                >
+                  <Text style={[basisStyles.optText, active && basisStyles.optTextActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <CalculatorHeaderButton tintColor={colors.headerText} />
+        </View>
+      ),
+    });
+  }, [navigation, basis, basisStyles, colors.headerText, setAccountingBasis]);
 
   const load = useCallback(async () => {
     const [data, recent] = await Promise.all([
@@ -159,38 +200,6 @@ export default function DashboardScreen() {
       }
     >
       <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
-
-      <View style={basisStyles.row}>
-        <View
-          style={basisStyles.seg}
-          accessibilityRole="tablist"
-          accessibilityLabel="Accounting basis"
-        >
-          {(
-            [
-              { key: 'accrual', label: 'Accrual' },
-              { key: 'cash', label: 'Cash' },
-            ] as const
-          ).map((opt) => {
-            const active = basis === opt.key;
-            return (
-              <TouchableOpacity
-                key={opt.key}
-                style={[basisStyles.opt, active && basisStyles.optActive]}
-                onPress={() => setAccountingBasis(opt.key)}
-                activeOpacity={0.7}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={`${opt.label} mode`}
-              >
-                <Text style={[basisStyles.optText, active && basisStyles.optTextActive]}>
-                  {opt.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      </View>
 
       {stats ? (
         <FinanceHero

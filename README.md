@@ -1,52 +1,42 @@
-# Hisab — Business Management App
+# Hisab — Offline MSME Accounting
 
-Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. Books stay on the device; optional encrypted cloud backup via Supabase.
+Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. Books stay on the device. Optional private cloud backup via Supabase (TLS + private storage — not multi-device sync).
 
-**Current version:** `10.6.0` (Android `versionCode` 36 · schema v27)
+**Current version:** `10.7.0` (Android `versionCode` 37 · schema v27)
 
 ## What's in Hisab
 
 - **Offline accounting** — Sales (Tax Invoice / BOS), purchases, inventory, banking, parties, expenses, other income
 - **Payments** — Money in/out with against-invoice, advance, and on-account allocation
 - **Double-entry ledger** — Scoped journal re-post after writes (full rebuild on migrations); P&L, balance sheet, growth, GST reports
+- **GST** — Master on/off toggle; CGST/SGST/IGST books, registers, GSTR-1/3B helper JSON (not official filing)
 - **Tally XML** — Import/export sales, purchases, parties, receipts, and payments
 - **PDF & WhatsApp** — Invoice and ledger PDFs; WhatsApp share opens the party number when available (native build)
-- **Backup** — Local SAF daily backup + optional cloud backup; delete cloud snapshot from Settings
-- **Reliability** — DB init generation guard, deferred integrity repair, draft/haptic/skeleton UX polish
+- **Backup** — Local SAF daily backup + optional cloud snapshot; delete cloud data from Settings
+- **Dashboard** — Accrual / Cash period view toggle in the header
+
+## What's new in 10.7.0
+
+**GST master toggle**
+- Settings → Business GST on/off hides GST fields, BOS, reports, and PDF tax chrome app-wide
+
+**Dashboard**
+- Accrual / Cash mode toggle in the header (period revenue, purchases, and profit)
+
+**Ops & reliability**
+- Scoped ledger refresh after writes; personal cloud owner email lock
+- CI `verify` workflow; golden-book and cloud auth tests
 
 ## What's new in 10.6.0
 
-**Tally import accuracy**
-- FIFO allocation when Tally omits `BILLALLOCATIONS` so receipts/payments clear open invoices
-- Duplicate voucher key respects voucher type family (Receipt #1 ≠ Payment #1; Tax Invoice ≠ BOS)
-- Cash/Bank Payment voucher types classified correctly
-- Infer business GST state from party states when Settings is empty
-- Normalize Tally state names / aliases (Orissa, Pondicherry, `&#4; Any`) to GST codes
-
-**Correctness**
-- Bill lookup scopes to the voucher party and prefers open invoices (safe with duplicate invoice numbers)
-- Party/vendor state resolution never keeps invalid Tally placeholders for CGST/SGST vs IGST
+- FIFO allocation when Tally omits `BILLALLOCATIONS`; duplicate voucher keys respect type family
+- Cash/Bank Payment voucher types; GST state normalize / infer from parties
+- Party-scoped bill lookup prefers open invoices (safe with duplicate numbers)
 
 ## What's new in 10.5.0
 
-**Reliability pass**
-- Safe database re-init after restore/invalidate; ledger rebuild coalesce (no skipped rebuilds)
-- Deferred financial integrity repair (avoids cold-start ANR on large books)
-- Chunked cloud backup decode; balance sheet clamps negative stock qty
-- Form draft save race fixed; dropdown blur/z-index coordination; date/product create modals
-- Debounced product search / deferred GST / coalesced dashboard refresh
-
-**UX**
-- Skeleton loaders on dashboard and main lists
-- Haptic feedback toggle (Settings → Appearance)
-- Delete cloud backup in Settings → Backup
-- Stronger payment status badge contrast
-
-## What's new in 10.4.0
-
-- Payment vouchers (receipt/payment) with advances and on-account
-- Tally Receipt/Payment import-export + sample XML
-- WhatsApp PDF share targeting party phone (requires native APK with `react-native-share`)
+- Reliability pass (DB re-init, ledger coalesce, deferred integrity repair)
+- Skeletons, haptics toggle, delete cloud backup, stronger payment badges
 
 ## Features
 
@@ -72,7 +62,7 @@ Use a **dev/production build** for native modules (WhatsApp share, haptics). Exp
 npm run verify    # typecheck + lint + tests — run before every release
 ```
 
-CI runs the same `npm run verify` on push/PR (`.github/workflows/verify.yml`).
+CI runs the same command on push/PR (`.github/workflows/verify.yml`).
 
 For personal cloud backup, set `EXPO_PUBLIC_CLOUD_OWNER_EMAIL` in `.env` (and EAS env) so only your email can sign in.
 
@@ -95,8 +85,8 @@ Copy into `releases/` for handoff (APKs are gitignored):
 
 ```powershell
 New-Item -ItemType Directory -Force releases | Out-Null
-Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-10.6.0.apk" -Force
-adb install -r "releases\hisab-10.6.0.apk"
+Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-10.7.0.apk" -Force
+adb install -r "releases\hisab-10.7.0.apk"
 ```
 
 ## Build APK (EAS cloud)
@@ -128,15 +118,18 @@ Keep these in sync when releasing:
 
 1. Create a Supabase project and run `supabase/cloud-backup-setup.sql`
 2. Copy `.env.example` → `.env` and set `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY`
-3. Rebuild the app (env is baked in at build time)
-4. Settings → Backup to sign in, upload, restore, or delete cloud data
+3. Optionally set `EXPO_PUBLIC_CLOUD_OWNER_EMAIL` to lock sign-in to one account
+4. Rebuild the app (env is baked in at build time)
+5. Settings → Backup to sign in, upload, restore, or delete cloud data
+
+Cloud backup is a full-database snapshot (last upload wins). Prefer local SAF folder backups as primary.
 
 ## First steps
 
 1. **Inventory** — add products with opening stock  
 2. **Banking** — default Cash / Bank accounts  
 3. Create **Purchases** and **Sales**  
-4. **Settings** — financial year, WhatsApp template, backup folder  
+4. **Settings** — GST on/off, financial year, WhatsApp template, backup folder  
 
 ## Tech stack
 
@@ -161,3 +154,5 @@ Keep these in sync when releasing:
 - Tally import does not include expense/journal vouchers; imported Net Profit may differ from Tally P&L
 - WhatsApp chat+PDF targeting needs a native APK (not Expo Go alone)
 - Loans are balance-sheet memos — not linked to banking repayments
+- Cloud backup is single-device snapshot sync (last upload wins), not live multi-user sync
+- GSTR helper JSON is for cross-check only — not for direct portal upload
