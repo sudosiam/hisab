@@ -7,7 +7,7 @@ import {
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { Redirect, useFocusEffect, useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getGstOutwardSupplies, type GstOutwardLine } from '../../../src/services/gstReports';
 import { ReportRow } from '../../../src/components/ReportRow';
@@ -15,6 +15,7 @@ import { formatCurrency } from '../../../src/utils/format';
 import { formatDisplayDate } from '../../../src/utils/date';
 import { ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
@@ -29,6 +30,7 @@ export default function GstOutwardScreen() {
   const router = useRouter();
   const { refreshKey } = useDatabase();
   const { colors, isDark } = useTheme();
+  const gstEnabled = useGstEnabled();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [rows, setRows] = useState<GstOutwardLine[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +81,7 @@ export default function GstOutwardScreen() {
   const exportPdf = useCallback(async () => shareGstOutwardPdf(monthKey, rows), [monthKey, rows]);
   useReportPdfHeader({ disabled: !!error, onExport: exportPdf });
 
+  if (!gstEnabled) return <Redirect href="/(drawer)/reports" />;
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (booting) {
     return (

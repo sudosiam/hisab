@@ -7,7 +7,7 @@ import {
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { Redirect, useFocusEffect, useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getGstInwardSupplies, type GstInwardLine } from '../../../src/services/gstReports';
 import { ReportRow } from '../../../src/components/ReportRow';
@@ -15,6 +15,7 @@ import { formatCurrency } from '../../../src/utils/format';
 import { formatDisplayDate } from '../../../src/utils/date';
 import { ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { formatSqliteError } from '../../../src/db/database';
@@ -27,6 +28,7 @@ export default function GstInwardScreen() {
   const router = useRouter();
   const { refreshKey } = useDatabase();
   const { colors, isDark } = useTheme();
+  const gstEnabled = useGstEnabled();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [rows, setRows] = useState<GstInwardLine[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +85,7 @@ export default function GstInwardScreen() {
     setRefreshing(false);
   }, [load]);
 
+  if (!gstEnabled) return <Redirect href="/(drawer)/reports" />;
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (booting) {
     return (

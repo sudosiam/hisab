@@ -329,7 +329,7 @@ export async function createPurchase(params: {
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-    scheduleGeneralLedgerRefresh();
+    scheduleGeneralLedgerRefresh({ type: 'purchase', id: purchaseId });
   } catch {
     // Purchase is saved; ledger refresh is best-effort housekeeping.
   }
@@ -585,7 +585,7 @@ export async function updatePurchase(
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-    scheduleGeneralLedgerRefresh();
+    scheduleGeneralLedgerRefresh({ type: 'purchase', id: purchaseId });
   } catch {
     // Purchase is updated; ledger refresh is best-effort housekeeping.
   }
@@ -649,7 +649,7 @@ export async function addPurchasePayment(
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-    scheduleGeneralLedgerRefresh();
+    scheduleGeneralLedgerRefresh({ type: 'purchase', id: purchaseId });
   } catch {
     // Payment recorded; ledger refresh is best-effort housekeeping.
   }
@@ -720,7 +720,7 @@ export async function removePurchasePayment(purchaseId: number, paymentId: numbe
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-    scheduleGeneralLedgerRefresh();
+    scheduleGeneralLedgerRefresh({ type: 'purchase', id: purchaseId });
   } catch {
     // Purchase payment removed; ledger refresh is best-effort housekeeping.
   }

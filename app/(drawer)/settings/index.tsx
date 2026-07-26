@@ -10,12 +10,11 @@ import { SettingsNavCard, useSettingsStyles } from '../../../src/components/sett
 import { checkDownloadAndReload } from '../../../src/services/appUpdates';
 import { isHapticsEnabled, setHapticsEnabled } from '../../../src/services/appSettings';
 import { setHapticsEnabledCache } from '../../../src/utils/haptics';
-
 const SETTINGS_ITEMS = [
   {
     title: 'Business Profile',
     route: '/(drawer)/settings/business',
-    desc: 'Name, address, GST, UPI, WhatsApp',
+    desc: 'Name, address, GST on/off, UPI, WhatsApp',
     icon: 'storefront-outline' as const,
   },
   {
@@ -27,7 +26,7 @@ const SETTINGS_ITEMS = [
   {
     title: 'Invoicing',
     route: '/(drawer)/settings/invoicing',
-    desc: 'Next sale, BOS, and purchase numbers',
+    desc: 'Next sale and purchase numbers',
     icon: 'document-text-outline' as const,
   },
   {

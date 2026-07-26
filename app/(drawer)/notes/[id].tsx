@@ -27,6 +27,7 @@ import {
 import { formatCurrency } from '../../../src/utils/format';
 import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatDisplayDate } from '../../../src/utils/date';
 import { stackDetailBeforeRemove } from '../../../src/navigation/screenOptions';
@@ -45,6 +46,7 @@ export default function NoteDetailScreen() {
   const { refresh } = useDatabase();
   const styles = useScreenStyles();
   const { colors } = useTheme();
+  const gstEnabled = useGstEnabled();
   const noteId = useMemo(() => parseRouteId(id), [id]);
 
   useEffect(() => {
@@ -249,23 +251,29 @@ export default function NoteDetailScreen() {
         <Text style={localStyles.date}>Against invoice: {againstInvoiceNo}</Text>
       ) : null}
       {note.reason ? <Text style={localStyles.date}>Reason: {note.reason}</Text> : null}
-      {placeLabel ? <Text style={localStyles.date}>Place of supply: {placeLabel}</Text> : null}
+      {gstEnabled && placeLabel ? (
+        <Text style={localStyles.date}>Place of supply: {placeLabel}</Text>
+      ) : null}
 
       <View style={localStyles.kpiRow}>
         <StatCard label="Total" value={note.total_amount} color={colors.primary} />
-        <StatCard
-          label="Tax"
-          value={outputTax}
-          color={outputTax > 0 ? colors.primary : colors.textSecondary}
-          subtitle={
-            (note.igst_amount ?? 0) > 0.009
-              ? 'IGST'
-              : outputTax > 0
-                ? 'CGST + SGST'
-                : 'No tax'
-          }
-        />
-        <StatCard label="Taxable" value={note.taxable_amount} color={colors.accent} />
+        {gstEnabled ? (
+          <>
+            <StatCard
+              label="Tax"
+              value={outputTax}
+              color={outputTax > 0 ? colors.primary : colors.textSecondary}
+              subtitle={
+                (note.igst_amount ?? 0) > 0.009
+                  ? 'IGST'
+                  : outputTax > 0
+                    ? 'CGST + SGST'
+                    : 'No tax'
+              }
+            />
+            <StatCard label="Taxable" value={note.taxable_amount} color={colors.accent} />
+          </>
+        ) : null}
       </View>
 
       <SectionHeader title="Items" />
@@ -279,10 +287,12 @@ export default function NoteDetailScreen() {
               <Text style={localStyles.itemName}>{name}</Text>
               <Text style={localStyles.itemMeta}>
                 {item.qty} × {formatCurrency(item.unit_price)}
-                {item.hsn_sac ? ` · HSN ${item.hsn_sac}` : ''}
-                {(item.gst_rate ?? 0) > 0.009
-                  ? ` · GST ${item.gst_rate}% · Tax ${formatCurrency(lineTax)}`
-                  : ' · No GST'}
+                {gstEnabled && item.hsn_sac ? ` · HSN ${item.hsn_sac}` : ''}
+                {gstEnabled
+                  ? (item.gst_rate ?? 0) > 0.009
+                    ? ` · GST ${item.gst_rate}% · Tax ${formatCurrency(lineTax)}`
+                    : ' · No GST'
+                  : ''}
               </Text>
             </View>
             <Text style={localStyles.itemTotal}>{formatCurrency(item.total)}</Text>

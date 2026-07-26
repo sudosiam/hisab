@@ -30,10 +30,37 @@ const CLOUD_LAST_ERROR_KEY = '@hisab_cloud_backup_last_error';
 const CLOUD_RECONCILE_ATTEMPTED_KEY = '@hisab_cloud_reconcile_attempted';
 
 export const CLOUD_RETENTION_DAYS = 7;
-/** Existing accounts may still use shorter passwords; sign-in stays lenient. */
-export const CLOUD_PASSWORD_MIN_SIGN_IN = 6;
-/** New accounts require a stronger password (financial backup access). */
-export const CLOUD_PASSWORD_MIN_SIGN_UP = 8;
+/** Personal / single-owner builds: same floor for sign-in and sign-up. */
+export const CLOUD_PASSWORD_MIN_SIGN_IN = 10;
+/** New accounts require a strong password (full books leave the device). */
+export const CLOUD_PASSWORD_MIN_SIGN_UP = 10;
+
+/**
+ * Optional owner lock. When `EXPO_PUBLIC_CLOUD_OWNER_EMAIL` is set, only that
+ * email may sign in or create a cloud-backup account (personal single-user).
+ */
+export function getCloudOwnerEmail(): string | null {
+  const raw = process.env.EXPO_PUBLIC_CLOUD_OWNER_EMAIL?.trim().toLowerCase() ?? '';
+  return raw.includes('@') ? raw : null;
+}
+
+export function isCloudOwnerLockEnabled(): boolean {
+  return getCloudOwnerEmail() != null;
+}
+
+function assertCloudEmailAllowed(
+  email: string
+): { ok: true } | { ok: false; message: string } {
+  const owner = getCloudOwnerEmail();
+  if (!owner) return { ok: true };
+  if (email.trim().toLowerCase() !== owner) {
+    return {
+      ok: false,
+      message: 'This Hisab build only allows the owner email for cloud backup.',
+    };
+  }
+  return { ok: true };
+}
 
 const cloudBackupInFlight: { current: Promise<{ success: boolean; message: string }> | null } = {
   current: null,
@@ -198,19 +225,21 @@ export async function signInWithEmailPassword(
   email: string,
   password: string
 ): Promise<{ success: boolean; message: string }> {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    return { success: false, message: 'Cloud backup is not configured on this build.' };
-  }
   const trimmed = email.trim().toLowerCase();
   if (!trimmed || !trimmed.includes('@')) {
     return { success: false, message: 'Enter a valid email address.' };
   }
+  const allowed = assertCloudEmailAllowed(trimmed);
+  if (!allowed.ok) return { success: false, message: allowed.message };
   if (!password || password.length < CLOUD_PASSWORD_MIN_SIGN_IN) {
     return {
       success: false,
       message: `Password must be at least ${CLOUD_PASSWORD_MIN_SIGN_IN} characters.`,
     };
+  }
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return { success: false, message: 'Cloud backup is not configured on this build.' };
   }
   const { error } = await supabase.auth.signInWithPassword({
     email: trimmed,
@@ -228,19 +257,21 @@ export async function signUpWithEmailPassword(
   email: string,
   password: string
 ): Promise<{ success: boolean; message: string }> {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    return { success: false, message: 'Cloud backup is not configured on this build.' };
-  }
   const trimmed = email.trim().toLowerCase();
   if (!trimmed || !trimmed.includes('@')) {
     return { success: false, message: 'Enter a valid email address.' };
   }
+  const allowed = assertCloudEmailAllowed(trimmed);
+  if (!allowed.ok) return { success: false, message: allowed.message };
   if (!password || password.length < CLOUD_PASSWORD_MIN_SIGN_UP) {
     return {
       success: false,
       message: `Password must be at least ${CLOUD_PASSWORD_MIN_SIGN_UP} characters.`,
     };
+  }
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return { success: false, message: 'Cloud backup is not configured on this build.' };
   }
   const { data, error } = await supabase.auth.signUp({
     email: trimmed,

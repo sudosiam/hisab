@@ -467,7 +467,7 @@ export async function createPaymentVoucher(
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-    scheduleGeneralLedgerRefresh();
+    scheduleGeneralLedgerRefresh({ type: 'payment_voucher', id: voucherId });
   } catch {
     // best-effort
   }
@@ -786,7 +786,7 @@ export async function applyPartyAdvanceToSale(
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-    scheduleGeneralLedgerRefresh();
+    scheduleGeneralLedgerRefresh({ type: 'sale', id: saleId });
   } catch {
     // best-effort
   }
@@ -884,7 +884,7 @@ export async function applyPartyAdvanceToPurchase(
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-    scheduleGeneralLedgerRefresh();
+    scheduleGeneralLedgerRefresh({ type: 'purchase', id: purchaseId });
   } catch {
     // best-effort
   }

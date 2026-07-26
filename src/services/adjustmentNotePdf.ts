@@ -77,18 +77,20 @@ export async function buildAdjustmentNoteHtml(noteId: number): Promise<{
     note.against_purchase_id ? getPurchaseById(note.against_purchase_id) : Promise.resolve(null),
   ]);
 
+  const gstOn = profile.gst_enabled;
   const docLabel = noteKindLabel(note.note_kind);
   const businessName = profile.business_name || 'Hisab';
   const taxTotal =
     (note.cgst_amount ?? 0) + (note.sgst_amount ?? 0) + (note.igst_amount ?? 0);
-  const showTax = taxTotal > 0.009;
-  const taxInclusive = profile.tax_inclusive;
+  const showTax = gstOn && taxTotal > 0.009;
+  const taxInclusive = gstOn && profile.tax_inclusive;
   const partyLabel = note.direction === 'sale' ? 'Customer' : 'Vendor';
-  const partyStateLabel = party?.state
-    ? stateName(party.state) || party.state
-    : note.place_of_supply
-      ? stateName(note.place_of_supply) || note.place_of_supply
-      : '';
+  const partyStateLabel =
+    gstOn && party?.state
+      ? stateName(party.state) || party.state
+      : gstOn && note.place_of_supply
+        ? stateName(note.place_of_supply) || note.place_of_supply
+        : '';
   const placeOfSupplyLabel = note.place_of_supply
     ? `${stateName(note.place_of_supply) || note.place_of_supply} (${note.place_of_supply})`
     : partyStateLabel || '—';
@@ -100,18 +102,18 @@ export async function buildAdjustmentNoteHtml(noteId: number): Promise<{
     .map((item, index) => {
       const tax =
         (item.cgst_amount ?? 0) + (item.sgst_amount ?? 0) + (item.igst_amount ?? 0);
-      const lineAmount = (item.taxable_amount ?? item.total) + tax;
+      const lineAmount = showTax ? (item.taxable_amount ?? item.total) + tax : item.total;
       const name = item.product_name ?? item.description ?? 'Item';
       const zebra = index % 2 === 1 ? ' class="zebra"' : '';
       return `<tr${zebra}>
         <td class="c mono">${index + 1}</td>
         <td>
           <div class="item-name">${escapeHtml(name)}</div>
-          ${item.hsn_sac ? `<div class="hsn">HSN/SAC ${escapeHtml(item.hsn_sac)}</div>` : ''}
+          ${gstOn && item.hsn_sac ? `<div class="hsn">HSN/SAC ${escapeHtml(item.hsn_sac)}</div>` : ''}
         </td>
         <td class="num mono">${item.qty}</td>
         <td class="num mono">${money(item.unit_price)}</td>
-        <td class="num mono">${item.gst_rate ?? 0}%</td>
+        ${gstOn ? `<td class="num mono">${item.gst_rate ?? 0}%</td>` : ''}
         <td class="num mono">${money(item.taxable_amount ?? item.total)}</td>
         ${showTax ? `<td class="num mono">${money(tax)}</td>` : ''}
         <td class="num mono strong">${money(lineAmount)}</td>
@@ -202,9 +204,9 @@ export async function buildAdjustmentNoteHtml(noteId: number): Promise<{
     <div class="brand-block">
       <div class="brand-name">${escapeHtml(businessName)}</div>
       ${profile.business_address ? `<div class="brand-meta">${escapeHtml(profile.business_address)}</div>` : ''}
-      ${profile.business_gstin ? `<div class="brand-meta"><strong>GSTIN</strong> ${escapeHtml(profile.business_gstin)}</div>` : ''}
+      ${gstOn && profile.business_gstin ? `<div class="brand-meta"><strong>GSTIN</strong> ${escapeHtml(profile.business_gstin)}</div>` : ''}
       ${
-        profile.business_state
+        gstOn && profile.business_state
           ? `<div class="brand-meta"><strong>State</strong> ${escapeHtml(stateName(profile.business_state) || profile.business_state)} (${escapeHtml(profile.business_state)})</div>`
           : ''
       }
@@ -220,7 +222,7 @@ export async function buildAdjustmentNoteHtml(noteId: number): Promise<{
       <div class="card-label">${partyLabel}</div>
       <div class="party-name">${escapeHtml(note.party_name)}</div>
       ${party?.address ? `<div class="card-line">${escapeHtml(party.address)}</div>` : ''}
-      ${party?.gstin ? `<div class="card-line"><strong>GSTIN</strong> ${escapeHtml(party.gstin)}</div>` : ''}
+      ${gstOn && party?.gstin ? `<div class="card-line"><strong>GSTIN</strong> ${escapeHtml(party.gstin)}</div>` : ''}
       ${partyStateLabel ? `<div class="card-line"><strong>State</strong> ${escapeHtml(partyStateLabel)}</div>` : ''}
       ${party?.phone ? `<div class="card-line"><strong>Phone</strong> ${escapeHtml(party.phone)}</div>` : ''}
     </div>
@@ -228,10 +230,10 @@ export async function buildAdjustmentNoteHtml(noteId: number): Promise<{
       <div class="card-label">Note details</div>
       ${againstInvoiceNo ? `<div class="meta-kv"><span class="k">Against invoice</span><span class="v mono">${escapeHtml(againstInvoiceNo)}</span></div>` : ''}
       ${note.reason ? `<div class="meta-kv"><span class="k">Reason</span><span class="v">${escapeHtml(note.reason)}</span></div>` : ''}
-      <div class="meta-kv"><span class="k">Place of supply</span><span class="v">${escapeHtml(placeOfSupplyLabel)}</span></div>
-      <div class="meta-kv"><span class="k">Reverse charge</span><span class="v">${reverseChargeLabel}</span></div>
+      ${gstOn ? `<div class="meta-kv"><span class="k">Place of supply</span><span class="v">${escapeHtml(placeOfSupplyLabel)}</span></div>` : ''}
+      ${gstOn ? `<div class="meta-kv"><span class="k">Reverse charge</span><span class="v">${reverseChargeLabel}</span></div>` : ''}
       ${taxInclusive && showTax ? `<div class="meta-kv"><span class="k">Pricing</span><span class="v">Tax-inclusive</span></div>` : ''}
-      <div class="meta-kv"><span class="k">Taxable</span><span class="v mono">${money(note.taxable_amount)}</span></div>
+      ${gstOn ? `<div class="meta-kv"><span class="k">Taxable</span><span class="v mono">${money(note.taxable_amount)}</span></div>` : ''}
       ${showTax ? `<div class="meta-kv"><span class="k">Tax</span><span class="v mono">${money(taxTotal)}</span></div>` : ''}
       <div class="meta-kv"><span class="k">Grand total</span><span class="v mono">${money(note.total_amount)}</span></div>
     </div>
@@ -243,17 +245,17 @@ export async function buildAdjustmentNoteHtml(noteId: number): Promise<{
         <th>Particulars</th>
         <th class="num" style="width:48px">Qty</th>
         <th class="num" style="width:72px">${taxInclusive ? 'Rate (incl.)' : 'Rate'}</th>
-        <th class="num" style="width:46px">GST%</th>
-        <th class="num" style="width:74px">Taxable</th>
+        ${gstOn ? '<th class="num" style="width:46px">GST%</th>' : ''}
+        <th class="num" style="width:74px">${gstOn ? 'Taxable' : 'Amount'}</th>
         ${showTax ? '<th class="num" style="width:66px">Tax</th>' : ''}
-        <th class="num" style="width:80px">Amount</th>
+        <th class="num" style="width:80px">${gstOn ? 'Amount' : 'Total'}</th>
       </tr>
     </thead>
     <tbody>${itemRows}</tbody>
   </table>
   <div class="bottom">
     <div class="totals">
-      <div class="row"><span>Taxable value</span><span class="mono">${money(note.taxable_amount)}</span></div>
+      ${gstOn ? `<div class="row"><span>Taxable value</span><span class="mono">${money(note.taxable_amount)}</span></div>` : ''}
       ${showTax && (note.cgst_amount ?? 0) > 0 ? `<div class="row"><span>CGST</span><span class="mono">${money(note.cgst_amount)}</span></div>` : ''}
       ${showTax && (note.sgst_amount ?? 0) > 0 ? `<div class="row"><span>SGST</span><span class="mono">${money(note.sgst_amount)}</span></div>` : ''}
       ${showTax && (note.igst_amount ?? 0) > 0 ? `<div class="row"><span>IGST</span><span class="mono">${money(note.igst_amount)}</span></div>` : ''}

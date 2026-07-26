@@ -7,10 +7,12 @@ import { createProduct } from '../../../src/services/inventory';
 import { formatSqliteError } from '../../../src/db/database';
 import { parseAmountInput } from '../../../src/utils/format';
 import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useGstEnabled } from '../../../src/context/GstContext';
 
 export default function NewProductScreen() {
   const router = useRouter();
   const { refresh } = useDatabase();
+  const gstEnabled = useGstEnabled();
   const [name, setName] = useState('');
   const [category, setCategory] = useState('');
   const [sku, setSku] = useState('');
@@ -35,7 +37,7 @@ export default function NewProductScreen() {
     const qty = openingQty.trim() ? parseAmountInput(openingQty) : 0;
     const cost = openingCost.trim() ? parseAmountInput(openingCost) : 0;
     const price = sellPrice.trim() ? parseAmountInput(sellPrice) : undefined;
-    const rate = gstRate.trim() ? parseAmountInput(gstRate) : 0;
+    const rate = gstEnabled ? (gstRate.trim() ? parseAmountInput(gstRate) : 0) : 0;
     if (!Number.isFinite(qty) || qty < 0) {
       Alert.alert('Error', 'Opening stock quantity cannot be negative');
       return;
@@ -48,7 +50,7 @@ export default function NewProductScreen() {
       Alert.alert('Error', 'Enter a valid sell price');
       return;
     }
-    if (!Number.isFinite(rate) || rate < 0) {
+    if (gstEnabled && (!Number.isFinite(rate) || rate < 0)) {
       Alert.alert('Error', 'Enter a valid GST rate');
       return;
     }
@@ -62,7 +64,7 @@ export default function NewProductScreen() {
         opening_qty: qty,
         opening_cost: cost,
         sell_price: price,
-        hsn_sac: hsnSac.trim() || undefined,
+        hsn_sac: gstEnabled ? hsnSac.trim() || undefined : undefined,
         gst_rate: rate,
       });
       refresh();
@@ -89,21 +91,25 @@ export default function NewProductScreen() {
         money
         placeholder="Leave blank for cost + 20%"
       />
-      <FormInput
-        label="HSN/SAC (optional)"
-        value={hsnSac}
-        onChangeText={setHsnSac}
-        placeholder="e.g. 8471"
-        keyboardType="number-pad"
-      />
-      <FormInput
-        label="GST rate (%)"
-        value={gstRate}
-        onChangeText={setGstRate}
-        money
-        placeholder="0, 5, 12, 18, 28"
-        helperText="Tax-exclusive sell price when GST is enabled"
-      />
+      {gstEnabled ? (
+        <>
+          <FormInput
+            label="HSN/SAC (optional)"
+            value={hsnSac}
+            onChangeText={setHsnSac}
+            placeholder="e.g. 8471"
+            keyboardType="number-pad"
+          />
+          <FormInput
+            label="GST rate (%)"
+            value={gstRate}
+            onChangeText={setGstRate}
+            money
+            placeholder="0, 5, 12, 18, 28"
+            helperText="Tax-exclusive sell price when GST is enabled"
+          />
+        </>
+      ) : null}
       <PrimaryButton title="Save Product" onPress={handleSave} loading={loading} />
     </FormScreen>
   );

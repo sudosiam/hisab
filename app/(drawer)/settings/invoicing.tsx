@@ -19,12 +19,14 @@ import {
   getNextBosInvoiceNo,
   getNextPurchaseInvoiceNo,
 } from '../../../src/services/invoiceNumbers';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { SettingsDivider, useSettingsStyles } from '../../../src/components/settings/settingsUi';
 
 export default function InvoicingSettingsScreen() {
   const styles = useScreenStyles();
   const localStyles = useSettingsStyles();
   const { colors } = useTheme();
+  const gstEnabled = useGstEnabled();
 
   const [salePrefix, setSalePrefix] = useState('S');
   const [bosPrefix, setBosPrefix] = useState('BOS');
@@ -126,21 +128,25 @@ export default function InvoicingSettingsScreen() {
             ? ` (with existing sales: ${nextSaleInvoice})`
             : ''}
         </Text>
-        <SettingsDivider color={colors.borderLight} />
-        <FormInput
-          label="Next BOS number"
-          value={bosPrefix}
-          onChangeText={setBosPrefix}
-          placeholder="BOS2627-0001"
-          onEndEditing={saveBosPrefix}
-        />
-        <Text style={localStyles.rowMeta}>
-          After save, next BOS: {previewNextInvoiceFromSetting(bosPrefix, 'BOS')}
-          {nextBosInvoice &&
-          nextBosInvoice !== previewNextInvoiceFromSetting(bosPrefix, 'BOS')
-            ? ` (with existing BOS: ${nextBosInvoice})`
-            : ''}
-        </Text>
+        {gstEnabled ? (
+          <>
+            <SettingsDivider color={colors.borderLight} />
+            <FormInput
+              label="Next BOS number"
+              value={bosPrefix}
+              onChangeText={setBosPrefix}
+              placeholder="BOS2627-0001"
+              onEndEditing={saveBosPrefix}
+            />
+            <Text style={localStyles.rowMeta}>
+              After save, next BOS: {previewNextInvoiceFromSetting(bosPrefix, 'BOS')}
+              {nextBosInvoice &&
+              nextBosInvoice !== previewNextInvoiceFromSetting(bosPrefix, 'BOS')
+                ? ` (with existing BOS: ${nextBosInvoice})`
+                : ''}
+            </Text>
+          </>
+        ) : null}
         <SettingsDivider color={colors.borderLight} />
         <FormInput
           label="Next purchase invoice number"

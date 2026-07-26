@@ -12,11 +12,11 @@ import {
   setBusinessAddress,
   setBusinessGstin,
   setBusinessState,
-  setGstEnabled,
   setTaxInclusivePricing,
   setBusinessUpiId,
   setWhatsappMessageTemplate,
 } from '../../../src/services/appSettings';
+import { useGstSettings } from '../../../src/context/GstContext';
 import { stateName } from '../../../src/services/gst';
 import { SettingsDivider, useSettingsStyles } from '../../../src/components/settings/settingsUi';
 
@@ -24,12 +24,12 @@ export default function BusinessSettingsScreen() {
   const styles = useScreenStyles();
   const localStyles = useSettingsStyles();
   const { colors } = useTheme();
+  const { gstEnabled, setEnabled: setGstEnabledGlobal } = useGstSettings();
 
   const [businessName, setBusinessNameState] = useState('');
   const [businessAddress, setBusinessAddressState] = useState('');
   const [businessGstin, setBusinessGstinState] = useState('');
   const [businessState, setBusinessStateState] = useState('');
-  const [gstEnabled, setGstEnabledState] = useState(true);
   const [taxInclusive, setTaxInclusiveState] = useState(false);
   const [businessUpi, setBusinessUpiState] = useState('');
   const [whatsappTemplate, setWhatsappTemplateState] = useState('');
@@ -59,7 +59,6 @@ export default function BusinessSettingsScreen() {
       setBusinessAddressState(profile.business_address);
       setBusinessGstinState(profile.business_gstin);
       setBusinessStateState(profile.business_state);
-      setGstEnabledState(profile.gst_enabled);
       setTaxInclusiveState(profile.tax_inclusive);
       setBusinessUpiState(profile.business_upi_id);
       setWhatsappTemplateState(profile.whatsapp_message_template);
@@ -123,10 +122,8 @@ export default function BusinessSettingsScreen() {
 
   const toggleGstEnabled = async (value: boolean) => {
     try {
-      setGstEnabledState(value);
-      await setGstEnabled(value);
+      await setGstEnabledGlobal(value);
     } catch (e) {
-      setGstEnabledState(!value);
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not save GST setting');
     }
   };
@@ -181,32 +178,13 @@ export default function BusinessSettingsScreen() {
           multiline
           onEndEditing={saveBusinessAddressField}
         />
-        <FormInput
-          label="GSTIN"
-          value={businessGstin}
-          onChangeText={setBusinessGstinState}
-          placeholder="15-character GSTIN"
-          autoCapitalize="characters"
-          onEndEditing={saveBusinessGstinField}
-        />
-        <FormInput
-          label="State code"
-          value={businessState}
-          onChangeText={setBusinessStateState}
-          placeholder="e.g. 27"
-          keyboardType="number-pad"
-          helperText={
-            businessState.trim()
-              ? stateName(businessState.trim()) || 'Unknown state code — use 01–38'
-              : '2-digit GST state code (e.g. 27 = Maharashtra)'
-          }
-          onEndEditing={saveBusinessStateField}
-        />
         <View style={localStyles.settingsRow}>
           <View style={localStyles.rowStack}>
-            <Text style={localStyles.rowLabel}>GST enabled</Text>
+            <Text style={localStyles.rowLabel}>GST</Text>
             <Text style={localStyles.rowMeta}>
-              When on, sales and purchases calculate GST breakup
+              {gstEnabled
+                ? 'GST fields, tax breakup, and GST reports are shown across the app'
+                : 'GST is off — tax fields and GST reports are hidden everywhere'}
             </Text>
           </View>
           <Switch
@@ -214,23 +192,48 @@ export default function BusinessSettingsScreen() {
             onValueChange={toggleGstEnabled}
             trackColor={{ false: colors.border, true: colors.primary }}
             thumbColor={colors.surface}
+            accessibilityLabel="GST enabled"
           />
         </View>
-        <View style={localStyles.settingsRow}>
-          <View style={localStyles.rowStack}>
-            <Text style={localStyles.rowLabel}>Tax-inclusive prices</Text>
-            <Text style={localStyles.rowMeta}>
-              When on, entered rates include GST (tax is reverse-calculated)
-            </Text>
-          </View>
-          <Switch
-            value={taxInclusive}
-            onValueChange={toggleTaxInclusive}
-            disabled={!gstEnabled}
-            trackColor={{ false: colors.border, true: colors.primary }}
-            thumbColor={colors.surface}
-          />
-        </View>
+        {gstEnabled ? (
+          <>
+            <FormInput
+              label="GSTIN"
+              value={businessGstin}
+              onChangeText={setBusinessGstinState}
+              placeholder="15-character GSTIN"
+              autoCapitalize="characters"
+              onEndEditing={saveBusinessGstinField}
+            />
+            <FormInput
+              label="State code"
+              value={businessState}
+              onChangeText={setBusinessStateState}
+              placeholder="e.g. 27"
+              keyboardType="number-pad"
+              helperText={
+                businessState.trim()
+                  ? stateName(businessState.trim()) || 'Unknown state code — use 01–38'
+                  : '2-digit GST state code (e.g. 27 = Maharashtra)'
+              }
+              onEndEditing={saveBusinessStateField}
+            />
+            <View style={localStyles.settingsRow}>
+              <View style={localStyles.rowStack}>
+                <Text style={localStyles.rowLabel}>Tax-inclusive prices</Text>
+                <Text style={localStyles.rowMeta}>
+                  When on, entered rates include GST (tax is reverse-calculated)
+                </Text>
+              </View>
+              <Switch
+                value={taxInclusive}
+                onValueChange={toggleTaxInclusive}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor={colors.surface}
+              />
+            </View>
+          </>
+        ) : null}
         <SettingsDivider color={colors.borderLight} />
         <FormInput
           label="UPI ID (payment QR)"
@@ -238,7 +241,11 @@ export default function BusinessSettingsScreen() {
           onChangeText={setBusinessUpiState}
           placeholder="business@okaxis"
           autoCapitalize="none"
-          helperText="Shown as a scan-to-pay QR on Tax Invoice / BOS PDFs"
+          helperText={
+            gstEnabled
+              ? 'Shown as a scan-to-pay QR on Tax Invoice / BOS PDFs'
+              : 'Shown as a scan-to-pay QR on invoice PDFs'
+          }
           onEndEditing={saveBusinessUpiField}
         />
         <SettingsDivider color={colors.borderLight} />

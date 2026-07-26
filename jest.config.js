@@ -6,6 +6,7 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.integration.test.ts'],
   moduleFileExtensions: ['ts', 'tsx', 'js'],
   clearMocks: true,
+  setupFilesAfterEnv: ['<rootDir>/src/testing/jest.setup.ts'],
   moduleNameMapper: {
     '^expo-file-system/legacy$': '<rootDir>/src/__mocks__/expo-file-system.ts',
     '^expo-sqlite$': '<rootDir>/src/__mocks__/expo-sqlite.ts',

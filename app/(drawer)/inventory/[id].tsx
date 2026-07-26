@@ -32,11 +32,13 @@ import { formatAmountInput, formatCurrency, formatQty, parseAmountInput } from '
 import { roundMoney } from '../../../src/utils/money';
 import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { radius, spacing } from '../../../src/constants/theme';
 import type { InventoryMovement, Product } from '../../../src/types';
 
 export default function ProductDetailScreen() {
+  const gstEnabled = useGstEnabled();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const navigation = useNavigation();
@@ -157,8 +159,8 @@ export default function ProductDetailScreen() {
       Alert.alert('Error', 'Enter a valid sell price');
       return;
     }
-    const rate = gstRate.trim() ? parseAmountInput(gstRate) : 0;
-    if (!Number.isFinite(rate) || rate < 0) {
+    const rate = gstEnabled ? (gstRate.trim() ? parseAmountInput(gstRate) : 0) : 0;
+    if (gstEnabled && (!Number.isFinite(rate) || rate < 0)) {
       Alert.alert('Error', 'Enter a valid GST rate');
       return;
     }
@@ -170,7 +172,7 @@ export default function ProductDetailScreen() {
         sku: sku.trim() || undefined,
         unit: unit.trim() || 'pcs',
         sell_price: price,
-        hsn_sac: hsnSac.trim() || null,
+        hsn_sac: gstEnabled ? hsnSac.trim() || null : null,
         gst_rate: rate,
       });
       refresh();
@@ -286,8 +288,10 @@ export default function ProductDetailScreen() {
             <Text style={localStyles.meta}>{product.category}</Text>
           ) : null}
           {product.sku ? <Text style={localStyles.meta}>SKU: {product.sku}</Text> : null}
-          {product.hsn_sac ? <Text style={localStyles.meta}>HSN/SAC: {product.hsn_sac}</Text> : null}
-          {(product.gst_rate ?? 0) > 0 ? (
+          {gstEnabled && product.hsn_sac ? (
+            <Text style={localStyles.meta}>HSN/SAC: {product.hsn_sac}</Text>
+          ) : null}
+          {gstEnabled && (product.gst_rate ?? 0) > 0 ? (
             <Text style={localStyles.meta}>GST: {product.gst_rate}%</Text>
           ) : null}
         </>
@@ -298,20 +302,24 @@ export default function ProductDetailScreen() {
           <FormInput label="SKU" value={sku} onChangeText={setSku} />
           <FormInput label="Unit" value={unit} onChangeText={setUnit} />
           <FormInput label="Sell Price (₹)" value={sellPrice} onChangeText={setSellPrice} money />
-          <FormInput
-            label="HSN/SAC (optional)"
-            value={hsnSac}
-            onChangeText={setHsnSac}
-            placeholder="e.g. 8471"
-            keyboardType="number-pad"
-          />
-          <FormInput
-            label="GST rate (%)"
-            value={gstRate}
-            onChangeText={setGstRate}
-            money
-            placeholder="0, 5, 12, 18, 28"
-          />
+          {gstEnabled ? (
+            <>
+              <FormInput
+                label="HSN/SAC (optional)"
+                value={hsnSac}
+                onChangeText={setHsnSac}
+                placeholder="e.g. 8471"
+                keyboardType="number-pad"
+              />
+              <FormInput
+                label="GST rate (%)"
+                value={gstRate}
+                onChangeText={setGstRate}
+                money
+                placeholder="0, 5, 12, 18, 28"
+              />
+            </>
+          ) : null}
           <PrimaryButton title="Save Changes" onPress={handleSaveEdit} loading={saving} />
         </>
       )}

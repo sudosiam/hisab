@@ -1,5 +1,13 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, ScrollView, RefreshControl, Alert } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  RefreshControl,
+  Alert,
+  TouchableOpacity,
+  StyleSheet,
+} from 'react-native';
 import { DashboardSkeleton } from '../../src/components/Skeleton';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -15,17 +23,18 @@ import {
   SectionHeader,
 } from '../../src/components/ui';
 import { getRecentActivitiesGrouped } from '../../src/services/activity';
-import { getDashboardStats } from '../../src/services/dashboard';
+import { getDashboardStats, type AccountingBasis } from '../../src/services/dashboard';
 import { getPeriodSectionTitle } from '../../src/utils/date';
 import { useDatabase } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
 import { useSyncedPeriodKey } from '../../src/hooks/useSyncedPeriodKey';
-import { spacing } from '../../src/constants/theme';
+import { radius, spacing } from '../../src/constants/theme';
 import type { GroupedRecentActivity } from '../../src/services/activity';
 import type { DashboardStats } from '../../src/types';
 
 const AMOUNTS_HIDDEN_KEY = '@hisab/dashboard_amounts_hidden';
+const ACCOUNTING_BASIS_KEY = '@hisab/dashboard_accounting_basis';
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -42,10 +51,54 @@ export default function DashboardScreen() {
   });
   const [refreshing, setRefreshing] = useState(false);
   const [amountsHidden, setAmountsHidden] = useState(false);
+  const [basis, setBasis] = useState<AccountingBasis>('accrual');
+
+  const basisStyles = useMemo(
+    () =>
+      StyleSheet.create({
+        row: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          marginBottom: spacing.sm,
+          marginTop: -2,
+        },
+        seg: {
+          flexDirection: 'row',
+          backgroundColor: colors.surfaceContainer,
+          borderRadius: radius.full,
+          padding: 2,
+        },
+        opt: {
+          paddingHorizontal: 10,
+          paddingVertical: 4,
+          borderRadius: radius.full,
+          minHeight: 26,
+          justifyContent: 'center',
+        },
+        optActive: {
+          backgroundColor: colors.primaryContainer,
+        },
+        optText: {
+          fontSize: 11,
+          fontWeight: '500',
+          color: colors.textMuted,
+        },
+        optTextActive: {
+          color: colors.onPrimaryContainer,
+          fontWeight: '700',
+        },
+      }),
+    [colors]
+  );
 
   useEffect(() => {
-    AsyncStorage.getItem(AMOUNTS_HIDDEN_KEY).then((stored) => {
-      if (stored === '1') setAmountsHidden(true);
+    void Promise.all([
+      AsyncStorage.getItem(AMOUNTS_HIDDEN_KEY),
+      AsyncStorage.getItem(ACCOUNTING_BASIS_KEY),
+    ]).then(([hidden, storedBasis]) => {
+      if (hidden === '1') setAmountsHidden(true);
+      if (storedBasis === 'cash' || storedBasis === 'accrual') setBasis(storedBasis);
     });
   }, []);
 
@@ -63,16 +116,21 @@ export default function DashboardScreen() {
     });
   }, []);
 
+  const setAccountingBasis = useCallback((next: AccountingBasis) => {
+    setBasis(next);
+    void AsyncStorage.setItem(ACCOUNTING_BASIS_KEY, next);
+  }, []);
+
   const load = useCallback(async () => {
     const [data, recent] = await Promise.all([
-      getDashboardStats(monthKey),
+      getDashboardStats(monthKey, basis),
       getRecentActivitiesGrouped(5),
     ]);
     setStats(data);
     setActivities(recent);
-  }, [monthKey]);
+  }, [monthKey, basis]);
 
-  const { booting, error, retry } = useFocusRefresh(load, [debouncedRefreshKey, monthKey]);
+  const { booting, error, retry } = useFocusRefresh(load, [debouncedRefreshKey, monthKey, basis]);
 
   if (error) {
     return <ErrorState message={error} onRetry={retry} />;
@@ -102,6 +160,38 @@ export default function DashboardScreen() {
     >
       <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
 
+      <View style={basisStyles.row}>
+        <View
+          style={basisStyles.seg}
+          accessibilityRole="tablist"
+          accessibilityLabel="Accounting basis"
+        >
+          {(
+            [
+              { key: 'accrual', label: 'Accrual' },
+              { key: 'cash', label: 'Cash' },
+            ] as const
+          ).map((opt) => {
+            const active = basis === opt.key;
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                style={[basisStyles.opt, active && basisStyles.optActive]}
+                onPress={() => setAccountingBasis(opt.key)}
+                activeOpacity={0.7}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${opt.label} mode`}
+              >
+                <Text style={[basisStyles.optText, active && basisStyles.optTextActive]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
       {stats ? (
         <FinanceHero
           stats={stats}
@@ -115,7 +205,13 @@ export default function DashboardScreen() {
         />
       ) : null}
 
-      <SectionHeader title={getPeriodSectionTitle(monthKey)} />
+      <SectionHeader
+        title={
+          basis === 'cash'
+            ? `${getPeriodSectionTitle(monthKey)} · Cash`
+            : getPeriodSectionTitle(monthKey)
+        }
+      />
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         <StatCard

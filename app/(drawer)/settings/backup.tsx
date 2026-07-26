@@ -39,6 +39,8 @@ import {
   isCloudBackupEnabled,
   CLOUD_PASSWORD_MIN_SIGN_IN,
   CLOUD_PASSWORD_MIN_SIGN_UP,
+  getCloudOwnerEmail,
+  isCloudOwnerLockEnabled,
   restoreDatabaseFromCloud,
   setCloudBackupEnabled,
   signInWithEmailPassword,
@@ -51,6 +53,7 @@ import { isSupabaseConfigured } from '../../../src/services/supabaseClient';
 import {
   getBackupBackgroundTaskStatusLabel,
 } from '../../../src/services/backupBackgroundTask';
+import { getLastLedgerRefreshError } from '../../../src/services/ledger';
 import { spacing } from '../../../src/constants/theme';
 import { SettingsDivider, useSettingsStyles } from '../../../src/components/settings/settingsUi';
 
@@ -85,6 +88,7 @@ export default function BackupSettingsScreen() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importConfirmInput, setImportConfirmInput] = useState('');
   const [osScheduleLabel, setOsScheduleLabel] = useState('…');
+  const [ledgerError, setLedgerError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -106,6 +110,7 @@ export default function BackupSettingsScreen() {
       setLastCloudBackupAt(await getLastCloudBackupAt());
       setCloudBackupError(await getCloudBackupLastError());
       setOsScheduleLabel(await getBackupBackgroundTaskStatusLabel());
+      setLedgerError(getLastLedgerRefreshError());
     } catch (e) {
       Alert.alert('Error', formatSqliteError(e));
     }
@@ -592,6 +597,18 @@ export default function BackupSettingsScreen() {
             </>
           ) : null}
 
+          {ledgerError && !backupPaused ? (
+            <>
+              <SettingsDivider color={colors.borderLight} />
+              <View style={localStyles.rowStack}>
+                <Text style={[localStyles.rowLabel, { color: colors.danger }]}>
+                  Last ledger refresh didn’t complete
+                </Text>
+                <Text style={localStyles.rowMeta}>{ledgerError}</Text>
+              </View>
+            </>
+          ) : null}
+
           {!backupPaused ? (
             <View style={localStyles.buttonStack}>
               <TouchableOpacity
@@ -661,7 +678,10 @@ export default function BackupSettingsScreen() {
           </View>
 
           <Text style={[localStyles.rowMeta, { marginBottom: spacing.sm }]}>
-            Backup only — not multi-device sync. Last upload wins.
+            Personal backup only — not multi-device sync. Last upload wins.
+            {isCloudOwnerLockEnabled()
+              ? ` Locked to ${getCloudOwnerEmail()}.`
+              : ' Set EXPO_PUBLIC_CLOUD_OWNER_EMAIL in .env to lock this build to your email.'}
           </Text>
 
           <SettingsDivider color={colors.borderLight} />
@@ -784,13 +804,15 @@ export default function BackupSettingsScreen() {
           <Pressable style={localStyles.modalSheet} onPress={(e) => e.stopPropagation()}>
             <Text style={localStyles.modalTitle}>Cloud backup sign-in</Text>
             <Text style={localStyles.modalText}>
-              Sign in with email and password to store a full database backup in the cloud.
+              {isCloudOwnerLockEnabled()
+                ? `Sign in as ${getCloudOwnerEmail()} to store a full database backup. Password must be at least ${CLOUD_PASSWORD_MIN_SIGN_IN} characters. Confirm email before the first upload.`
+                : `Sign in with email and password to store a full database backup. Password must be at least ${CLOUD_PASSWORD_MIN_SIGN_IN} characters.`}
             </Text>
             <FormInput
               label="Email"
               value={cloudAuthEmail}
               onChangeText={setCloudAuthEmail}
-              placeholder="you@example.com"
+              placeholder={getCloudOwnerEmail() ?? 'you@example.com'}
               keyboardType="email-address"
               autoCapitalize="none"
               editable={!cloudAuthBusy}
@@ -799,7 +821,7 @@ export default function BackupSettingsScreen() {
               label="Password"
               value={cloudAuthPassword}
               onChangeText={setCloudAuthPassword}
-              placeholder={`At least ${CLOUD_PASSWORD_MIN_SIGN_UP} characters (new accounts)`}
+              placeholder={`At least ${CLOUD_PASSWORD_MIN_SIGN_UP} characters`}
               autoCapitalize="none"
               secureTextEntry
               editable={!cloudAuthBusy}

@@ -167,10 +167,14 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     SplashScreen.hideAsync().catch(() => {});
 
     const ledgerTask = InteractionManager.runAfterInteractions(() => {
-      ensureLedgerUpToDate().catch(() => {});
+      ensureLedgerUpToDate().catch((err) => {
+        console.warn('[boot] ledger update failed', err);
+      });
       // Heavy integrity repair after first paint — once per schema version.
       void repairFinancialDataIntegrity(undefined, { force: false, rebuildLedger: false }).catch(
-        () => {}
+        (err) => {
+          console.warn('[boot] integrity repair failed', err);
+        }
       );
     });
 

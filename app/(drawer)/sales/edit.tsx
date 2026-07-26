@@ -23,10 +23,11 @@ import { getProducts, getProductSellPrice } from '../../../src/services/inventor
 import { getSaleById, getSaleItems, updateSale } from '../../../src/services/sales';
 import { getPartyByName } from '../../../src/services/parties';
 import { getNextSaleDocumentNo } from '../../../src/services/invoiceNumbers';
-import { getBusinessState, getServiceChargeGstRate, isGstEnabled, isTaxInclusivePricing } from '../../../src/services/appSettings';
+import { getBusinessState, getServiceChargeGstRate, isTaxInclusivePricing } from '../../../src/services/appSettings';
 import { computeGstDocument, isPlausibleHsnSac, resolveStateFromPartyFields } from '../../../src/services/gst';
 import { GstRateChips } from '../../../src/components/GstRateChips';
 import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
 import { formatAmountInput, formatCurrency, formatQtyInput, parseAmountInput } from '../../../src/utils/format';
@@ -173,7 +174,7 @@ export default function EditSaleScreen() {
   const productsRef = useRef<Product[]>([]);
   productsRef.current = products;
   const [businessState, setBusinessState] = useState('');
-  const [gstEnabled, setGstEnabled] = useState(true);
+  const gstEnabled = useGstEnabled();
   const [taxInclusive, setTaxInclusive] = useState(false);
   const [partyState, setPartyState] = useState<string | null>(null);
   const [isReverseCharge, setIsReverseCharge] = useState(false);
@@ -311,11 +312,10 @@ export default function EditSaleScreen() {
 
   React.useEffect(() => {
     let cancelled = false;
-    Promise.all([getBusinessState(), isGstEnabled(), isTaxInclusivePricing()])
-      .then(([state, enabled, inclusive]) => {
+    Promise.all([getBusinessState(), isTaxInclusivePricing()])
+      .then(([state, inclusive]) => {
         if (!cancelled) {
           setBusinessState(state);
-          setGstEnabled(enabled);
           setTaxInclusive(inclusive);
         }
       })
@@ -324,6 +324,13 @@ export default function EditSaleScreen() {
       cancelled = true;
     };
   }, []);
+
+  React.useEffect(() => {
+    if (!gstEnabled) {
+      setIsReverseCharge(false);
+      if (invoiceType === 'bos') setInvoiceType('invoice');
+    }
+  }, [gstEnabled, invoiceType]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -589,36 +596,38 @@ export default function EditSaleScreen() {
         onChangeText={setPartyPhone}
         keyboardType="phone-pad"
       />
-      <View style={localStyles.typeRow}>
-        {([
-          { value: 'invoice', label: 'Tax Invoice' },
-          { value: 'bos', label: 'Bill of Supply' },
-        ] as { value: SaleInvoiceType; label: string }[]).map((option) => (
-          <TouchableOpacity
-            key={option.value}
-            style={[
-              localStyles.typeChip,
-              invoiceType === option.value && localStyles.typeChipActive,
-            ]}
-            onPress={() => {
-              if (option.value === invoiceType) return;
-              setInvoiceType(option.value);
-              getNextSaleDocumentNo(option.value)
-                .then(setInvoiceNo)
-                .catch(() => {});
-            }}
-          >
-            <Text
+      {gstEnabled ? (
+        <View style={localStyles.typeRow}>
+          {([
+            { value: 'invoice', label: 'Tax Invoice' },
+            { value: 'bos', label: 'Bill of Supply' },
+          ] as { value: SaleInvoiceType; label: string }[]).map((option) => (
+            <TouchableOpacity
+              key={option.value}
               style={[
-                localStyles.typeChipText,
-                invoiceType === option.value && localStyles.typeChipTextActive,
+                localStyles.typeChip,
+                invoiceType === option.value && localStyles.typeChipActive,
               ]}
+              onPress={() => {
+                if (option.value === invoiceType) return;
+                setInvoiceType(option.value);
+                getNextSaleDocumentNo(option.value)
+                  .then(setInvoiceNo)
+                  .catch(() => {});
+              }}
             >
-              {option.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+              <Text
+                style={[
+                  localStyles.typeChipText,
+                  invoiceType === option.value && localStyles.typeChipTextActive,
+                ]}
+              >
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
       {gstEnabled ? (
         <View style={localStyles.rcmRow}>
           <Text style={localStyles.rcmLabel}>Reverse charge (RCM)</Text>
@@ -632,7 +641,9 @@ export default function EditSaleScreen() {
         </View>
       ) : null}
       <FormInput
-        label={invoiceType === 'bos' ? 'BOS Number' : 'Invoice Number'}
+        label={
+          !gstEnabled ? 'Invoice Number' : invoiceType === 'bos' ? 'BOS Number' : 'Invoice Number'
+        }
         value={invoiceNo}
         onChangeText={setInvoiceNo}
         autoCapitalize="characters"
@@ -673,19 +684,21 @@ export default function EditSaleScreen() {
                     money
                   />
                 </View>
-                <View style={localStyles.gstField}>
-                  <FormInput
-                    label="GST%"
-                    value={item.gst_rate}
-                    onChangeText={(v) => updateItem(index, 'gst_rate', v)}
-                    money
-                    placeholder="0"
-                  />
-                  <GstRateChips
-                    value={item.gst_rate}
-                    onChange={(v) => updateItem(index, 'gst_rate', v)}
-                  />
-                </View>
+                {gstEnabled ? (
+                  <View style={localStyles.gstField}>
+                    <FormInput
+                      label="GST%"
+                      value={item.gst_rate}
+                      onChangeText={(v) => updateItem(index, 'gst_rate', v)}
+                      money
+                      placeholder="0"
+                    />
+                    <GstRateChips
+                      value={item.gst_rate}
+                      onChange={(v) => updateItem(index, 'gst_rate', v)}
+                    />
+                  </View>
+                ) : null}
                 <TouchableOpacity
                   onPress={() => removeItem(index)}
                   style={localStyles.removeBtn}
@@ -696,29 +709,31 @@ export default function EditSaleScreen() {
                   <Text style={localStyles.removeText}>✕</Text>
                 </TouchableOpacity>
               </View>
-              {!showHsn ? (
-                <TouchableOpacity
-                  style={localStyles.hsnToggle}
-                  onPress={() => setShowHsnByLine((prev) => ({ ...prev, [item.key]: true }))}
-                >
-                  <Text style={localStyles.hsnToggleText}>+ HSN/SAC</Text>
-                </TouchableOpacity>
-              ) : (
-                <>
-                  <FormInput
-                    label="HSN/SAC"
-                    value={item.hsn_sac}
-                    onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
-                    placeholder="Optional"
-                    keyboardType="number-pad"
-                  />
-                  {item.hsn_sac.trim() && !isPlausibleHsnSac(item.hsn_sac) ? (
-                    <Text style={localStyles.hsnWarning}>
-                      Usual HSN is 4, 6, or 8 digits
-                    </Text>
-                  ) : null}
-                </>
-              )}
+              {gstEnabled ? (
+                !showHsn ? (
+                  <TouchableOpacity
+                    style={localStyles.hsnToggle}
+                    onPress={() => setShowHsnByLine((prev) => ({ ...prev, [item.key]: true }))}
+                  >
+                    <Text style={localStyles.hsnToggleText}>+ HSN/SAC</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <FormInput
+                      label="HSN/SAC"
+                      value={item.hsn_sac}
+                      onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
+                      placeholder="Optional"
+                      keyboardType="number-pad"
+                    />
+                    {item.hsn_sac.trim() && !isPlausibleHsnSac(item.hsn_sac) ? (
+                      <Text style={localStyles.hsnWarning}>
+                        Usual HSN is 4, 6, or 8 digits
+                      </Text>
+                    ) : null}
+                  </>
+                )
+              ) : null}
             </View>
           );
         })}
@@ -758,7 +773,7 @@ export default function EditSaleScreen() {
                 money
               />
             </View>
-            {serviceChargesAmount > 0 ? (
+            {gstEnabled && serviceChargesAmount > 0 ? (
               <View style={localStyles.svcGstField}>
                 <FormInput
                   label="Svc GST%"

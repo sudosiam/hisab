@@ -34,6 +34,7 @@ import { formatCurrency } from '../../../src/utils/format';
 import { formatDisplayDate, getCurrentMonthKey, getPeriodRange } from '../../../src/utils/date';
 import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useFinancialYear } from '../../../src/context/FinancialYearContext';
 import { spacing, radius, typography } from '../../../src/constants/theme';
@@ -45,6 +46,7 @@ import { MoneyText } from '../../../src/components/MoneyText';
 type Tab = 'statement' | 'history';
 
 export default function PartyDetailScreen() {
+  const gstEnabled = useGstEnabled();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const navigation = useNavigation();
@@ -635,13 +637,13 @@ export default function PartyDetailScreen() {
             <Text style={localStyles.metaText}>{party.notes}</Text>
           </View>
         ) : null}
-        {party.gstin ? (
+        {gstEnabled && party.gstin ? (
           <View style={localStyles.metaRow}>
             <Ionicons name="card-outline" size={16} color={colors.textSecondary} />
             <Text style={localStyles.metaText}>GSTIN: {party.gstin}</Text>
           </View>
         ) : null}
-        {party.state ? (
+        {gstEnabled && party.state ? (
           <View style={localStyles.metaRow}>
             <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
             <Text style={localStyles.metaText}>
@@ -680,25 +682,29 @@ export default function PartyDetailScreen() {
           </View>
           <FormInput label="Name" value={name} onChangeText={setName} />
           <FormInput label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-          <FormInput
-            label="GSTIN (optional)"
-            value={gstin}
-            onChangeText={setGstin}
-            placeholder="15-character GSTIN"
-            autoCapitalize="characters"
-          />
-          <FormInput
-            label="State code (optional)"
-            value={stateCode}
-            onChangeText={setStateCode}
-            placeholder="e.g. 27"
-            keyboardType="number-pad"
-            helperText={
-              stateCode.trim()
-                ? stateName(stateCode.trim()) || 'Unknown state code'
-                : '2-digit GST state code'
-            }
-          />
+          {gstEnabled ? (
+            <>
+              <FormInput
+                label="GSTIN (optional)"
+                value={gstin}
+                onChangeText={setGstin}
+                placeholder="15-character GSTIN"
+                autoCapitalize="characters"
+              />
+              <FormInput
+                label="State code (optional)"
+                value={stateCode}
+                onChangeText={setStateCode}
+                placeholder="e.g. 27"
+                keyboardType="number-pad"
+                helperText={
+                  stateCode.trim()
+                    ? stateName(stateCode.trim()) || 'Unknown state code'
+                    : '2-digit GST state code'
+                }
+              />
+            </>
+          ) : null}
           <FormInput
             label="Address (optional)"
             value={address}
@@ -819,7 +825,7 @@ export default function PartyDetailScreen() {
           ) : (
             history.map((item, index) => {
               const due = item.total_amount - item.paid_amount;
-              const isBos = item.record_type === 'sale' && item.invoice_type === 'bos';
+              const isBos = gstEnabled && item.record_type === 'sale' && item.invoice_type === 'bos';
               return (
                 <TouchableOpacity
                   key={`${item.record_type}-${item.id}`}
@@ -839,7 +845,7 @@ export default function PartyDetailScreen() {
                       <Text style={localStyles.historyInvoice}>{item.invoice_no}</Text>
                       <StatusBadge status={item.status} />
                     </View>
-                    {item.record_type === 'sale' ? (
+                    {gstEnabled && item.record_type === 'sale' ? (
                       <Text style={[localStyles.historyType, isBos && localStyles.historyTypeBos]}>
                         {isBos ? 'BOS' : 'Tax Invoice'}
                       </Text>

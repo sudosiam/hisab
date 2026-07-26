@@ -22,7 +22,8 @@ import { ProductPicker } from '../../../src/components/ProductPicker';
 import { getProducts } from '../../../src/services/inventory';
 import { getPurchaseById, getPurchaseItems, updatePurchase } from '../../../src/services/purchases';
 import { getPartyByName } from '../../../src/services/parties';
-import { getBusinessState, isGstEnabled, isTaxInclusivePricing } from '../../../src/services/appSettings';
+import { getBusinessState, isTaxInclusivePricing } from '../../../src/services/appSettings';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { computeGstDocument, isPlausibleHsnSac, resolveStateFromPartyFields } from '../../../src/services/gst';
 import { GstRateChips } from '../../../src/components/GstRateChips';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -128,7 +129,7 @@ export default function EditPurchaseScreen() {
   const productsRef = useRef<Product[]>([]);
   productsRef.current = products;
   const [businessState, setBusinessState] = useState('');
-  const [gstEnabled, setGstEnabled] = useState(true);
+  const gstEnabled = useGstEnabled();
   const [taxInclusive, setTaxInclusive] = useState(false);
   const [partyState, setPartyState] = useState<string | null>(null);
   const [isReverseCharge, setIsReverseCharge] = useState(false);
@@ -244,11 +245,10 @@ export default function EditPurchaseScreen() {
 
   React.useEffect(() => {
     let cancelled = false;
-    Promise.all([getBusinessState(), isGstEnabled(), isTaxInclusivePricing()])
-      .then(([state, enabled, inclusive]) => {
+    Promise.all([getBusinessState(), isTaxInclusivePricing()])
+      .then(([state, inclusive]) => {
         if (!cancelled) {
           setBusinessState(state);
-          setGstEnabled(enabled);
           setTaxInclusive(inclusive);
         }
       })
@@ -257,6 +257,10 @@ export default function EditPurchaseScreen() {
       cancelled = true;
     };
   }, []);
+
+  React.useEffect(() => {
+    if (!gstEnabled) setIsReverseCharge(false);
+  }, [gstEnabled]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -482,16 +486,18 @@ export default function EditPurchaseScreen() {
       <DatePickerField label="Date" value={date} onChange={setDate} />
       <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
 
-      <View style={localStyles.rcmRow}>
-        <Text style={localStyles.rcmLabel}>Reverse charge (RCM)</Text>
-        <Switch
-          value={isReverseCharge}
-          onValueChange={setIsReverseCharge}
-          trackColor={{ false: colors.border, true: colors.primary }}
-          thumbColor={colors.surface}
-          accessibilityLabel="Reverse charge"
-        />
-      </View>
+      {gstEnabled ? (
+        <View style={localStyles.rcmRow}>
+          <Text style={localStyles.rcmLabel}>Reverse charge (RCM)</Text>
+          <Switch
+            value={isReverseCharge}
+            onValueChange={setIsReverseCharge}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            thumbColor={colors.surface}
+            accessibilityLabel="Reverse charge"
+          />
+        </View>
+      ) : null}
 
       <View style={styles.section}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -540,35 +546,37 @@ export default function EditPurchaseScreen() {
                   <Text style={localStyles.removeText}>✕</Text>
                 </TouchableOpacity>
               </View>
-              <View style={localStyles.itemRow}>
-                <View style={localStyles.qtyField}>
-                  <FormInput
-                    label="HSN/SAC"
-                    value={item.hsn_sac}
-                    onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
-                    placeholder="Optional"
-                    keyboardType="number-pad"
-                  />
-                  {item.hsn_sac.trim() && !isPlausibleHsnSac(item.hsn_sac) ? (
-                    <Text style={localStyles.hsnWarning}>
-                      Usual HSN is 4, 6, or 8 digits
-                    </Text>
-                  ) : null}
+              {gstEnabled ? (
+                <View style={localStyles.itemRow}>
+                  <View style={localStyles.qtyField}>
+                    <FormInput
+                      label="HSN/SAC"
+                      value={item.hsn_sac}
+                      onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
+                      placeholder="Optional"
+                      keyboardType="number-pad"
+                    />
+                    {item.hsn_sac.trim() && !isPlausibleHsnSac(item.hsn_sac) ? (
+                      <Text style={localStyles.hsnWarning}>
+                        Usual HSN is 4, 6, or 8 digits
+                      </Text>
+                    ) : null}
+                  </View>
+                  <View style={localStyles.costField}>
+                    <FormInput
+                      label="GST %"
+                      value={item.gst_rate}
+                      onChangeText={(v) => updateItem(index, 'gst_rate', v)}
+                      money
+                      placeholder="0"
+                    />
+                    <GstRateChips
+                      value={item.gst_rate}
+                      onChange={(v) => updateItem(index, 'gst_rate', v)}
+                    />
+                  </View>
                 </View>
-                <View style={localStyles.costField}>
-                  <FormInput
-                    label="GST %"
-                    value={item.gst_rate}
-                    onChangeText={(v) => updateItem(index, 'gst_rate', v)}
-                    money
-                    placeholder="0"
-                  />
-                  <GstRateChips
-                    value={item.gst_rate}
-                    onChange={(v) => updateItem(index, 'gst_rate', v)}
-                  />
-                </View>
-              </View>
+              ) : null}
             </View>
           ))}
 

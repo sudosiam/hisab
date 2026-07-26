@@ -1,25 +1,39 @@
 import { getDatabase } from '../db/database';
 import { getInventoryValue } from './inventory';
-import { getPeriodFinancials } from './financials';
+import { getPeriodFinancials, type AccountingBasis } from './financials';
 import { getBalanceSheet } from './banking';
 import { roundMoney } from '../utils/money';
 import { resolvePeriodRange } from '../utils/period';
 import type { DashboardStats } from '../types';
 
-export async function getDashboardStats(periodKey: string): Promise<DashboardStats> {
+export type { AccountingBasis };
+
+export async function getDashboardStats(
+  periodKey: string,
+  basis: AccountingBasis = 'accrual'
+): Promise<DashboardStats> {
   const db = await getDatabase();
   const { start, end } = await resolvePeriodRange(periodKey);
 
   const [financials, purchased, liquid, receivable, payable, inventoryValue, balanceSheet] =
     await Promise.all([
-    getPeriodFinancials(periodKey, { start, end }),
-    db.getFirstAsync<{ total: number }>(
-      `SELECT COALESCE(SUM(p.total_amount), 0) as total
-       FROM purchases p
-       WHERE p.date >= ? AND p.date <= ?
-         AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = p.id)`,
-      [start, end]
-    ),
+    getPeriodFinancials(periodKey, { start, end }, basis),
+    basis === 'cash'
+      ? db.getFirstAsync<{ total: number }>(
+          `SELECT COALESCE(SUM(pp.amount), 0) as total
+           FROM purchase_payments pp
+           JOIN accounts a ON a.id = pp.account_id
+           WHERE pp.date >= ? AND pp.date <= ?
+             AND COALESCE(a.is_excluded, 0) = 0`,
+          [start, end]
+        )
+      : db.getFirstAsync<{ total: number }>(
+          `SELECT COALESCE(SUM(p.total_amount), 0) as total
+           FROM purchases p
+           WHERE p.date >= ? AND p.date <= ?
+             AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = p.id)`,
+          [start, end]
+        ),
     db.getFirstAsync<{ total: number }>(
       `SELECT COALESCE(SUM(current_balance), 0) as total FROM accounts WHERE COALESCE(is_excluded, 0) = 0`
     ),

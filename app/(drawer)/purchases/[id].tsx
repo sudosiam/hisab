@@ -35,6 +35,7 @@ import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../..
 import { roundMoney } from '../../../src/utils/money';
 import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { todayISO, isValidISODate, formatDisplayDate } from '../../../src/utils/date';
 import { stackDetailBeforeRemove } from '../../../src/navigation/screenOptions';
@@ -42,6 +43,7 @@ import { spacing } from '../../../src/constants/theme';
 import type { Account, Purchase, PurchaseItem, PurchasePayment } from '../../../src/types';
 
 export default function PurchaseDetailScreen() {
+  const gstEnabled = useGstEnabled();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
@@ -343,7 +345,9 @@ export default function PurchaseDetailScreen() {
         </Text>
       ) : null}
 
-      {(purchase.cgst_amount ?? 0) + (purchase.sgst_amount ?? 0) + (purchase.igst_amount ?? 0) > 0.009 ? (
+      {gstEnabled &&
+      (purchase.cgst_amount ?? 0) + (purchase.sgst_amount ?? 0) + (purchase.igst_amount ?? 0) >
+        0.009 ? (
         <Text style={localStyles.date}>
           Taxable {formatCurrency(purchase.taxable_amount ?? 0)}
           {(purchase.igst_amount ?? 0) > 0.009
@@ -368,42 +372,52 @@ export default function PurchaseDetailScreen() {
         />
       </View>
 
-      <SectionHeader title="GST / ITC" />
-      {(() => {
-        const inputTax =
-          (purchase.cgst_amount ?? 0) + (purchase.sgst_amount ?? 0) + (purchase.igst_amount ?? 0);
-        const withGst = items.filter((item) => (item.gst_rate ?? 0) > 0.009 || (item.cgst_amount ?? 0) + (item.sgst_amount ?? 0) + (item.igst_amount ?? 0) > 0.009);
-        const withoutGst = items.length - withGst.length;
-        return (
-          <View style={{ marginBottom: spacing.sm }}>
-            <View style={localStyles.kpiRow}>
-              <StatCard
-                label="ITC got"
-                value={inputTax}
-                color={inputTax > 0 ? colors.success : colors.textSecondary}
-                subtitle={
-                  (purchase.igst_amount ?? 0) > 0.009
-                    ? 'IGST'
-                    : inputTax > 0
-                      ? 'CGST + SGST'
-                      : 'No input tax'
-                }
-              />
-              <StatCard
-                label="Taxable"
-                value={purchase.taxable_amount ?? itemsCost}
-                color={colors.primary}
-              />
-              <StatCard
-                label="Lines"
-                displayValue={`${withGst.length}/${items.length}`}
-                color={withoutGst > 0 ? colors.warning : colors.success}
-                subtitle={withoutGst > 0 ? `${withoutGst} without GST` : 'All lines have GST'}
-              />
-            </View>
-          </View>
-        );
-      })()}
+      {gstEnabled ? (
+        <>
+          <SectionHeader title="GST / ITC" />
+          {(() => {
+            const inputTax =
+              (purchase.cgst_amount ?? 0) +
+              (purchase.sgst_amount ?? 0) +
+              (purchase.igst_amount ?? 0);
+            const withGst = items.filter(
+              (item) =>
+                (item.gst_rate ?? 0) > 0.009 ||
+                (item.cgst_amount ?? 0) + (item.sgst_amount ?? 0) + (item.igst_amount ?? 0) > 0.009
+            );
+            const withoutGst = items.length - withGst.length;
+            return (
+              <View style={{ marginBottom: spacing.sm }}>
+                <View style={localStyles.kpiRow}>
+                  <StatCard
+                    label="ITC got"
+                    value={inputTax}
+                    color={inputTax > 0 ? colors.success : colors.textSecondary}
+                    subtitle={
+                      (purchase.igst_amount ?? 0) > 0.009
+                        ? 'IGST'
+                        : inputTax > 0
+                          ? 'CGST + SGST'
+                          : 'No input tax'
+                    }
+                  />
+                  <StatCard
+                    label="Taxable"
+                    value={purchase.taxable_amount ?? itemsCost}
+                    color={colors.primary}
+                  />
+                  <StatCard
+                    label="Lines"
+                    displayValue={`${withGst.length}/${items.length}`}
+                    color={withoutGst > 0 ? colors.warning : colors.success}
+                    subtitle={withoutGst > 0 ? `${withoutGst} without GST` : 'All lines have GST'}
+                  />
+                </View>
+              </View>
+            );
+          })()}
+        </>
+      ) : null}
 
       <SectionHeader title="Items" />
       {items.map((item) => {
@@ -416,22 +430,26 @@ export default function PurchaseDetailScreen() {
               <Text style={localStyles.itemName}>{item.product_name}</Text>
               <Text style={localStyles.itemMeta}>
                 {item.qty} × {formatCurrency(item.unit_cost)}
-                {item.hsn_sac ? ` · HSN ${item.hsn_sac}` : ''}
-                {hasGst
-                  ? ` · GST ${item.gst_rate ?? 0}% · ITC ${formatCurrency(lineTax)}`
-                  : ' · No GST'}
+                {gstEnabled && item.hsn_sac ? ` · HSN ${item.hsn_sac}` : ''}
+                {gstEnabled
+                  ? hasGst
+                    ? ` · GST ${item.gst_rate ?? 0}% · ITC ${formatCurrency(lineTax)}`
+                    : ' · No GST'
+                  : ''}
               </Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
               <Text style={localStyles.itemTotal}>{formatCurrency(item.total)}</Text>
-              <Text
-                style={[
-                  localStyles.itemMeta,
-                  { color: hasGst ? colors.success : colors.warning, fontWeight: '600' },
-                ]}
-              >
-                {hasGst ? 'Got GST' : 'Missing GST'}
-              </Text>
+              {gstEnabled ? (
+                <Text
+                  style={[
+                    localStyles.itemMeta,
+                    { color: hasGst ? colors.success : colors.warning, fontWeight: '600' },
+                  ]}
+                >
+                  {hasGst ? 'Got GST' : 'Missing GST'}
+                </Text>
+              ) : null}
             </View>
           </View>
         );

@@ -274,7 +274,7 @@ export async function createAdjustmentNote(params: {
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-    scheduleGeneralLedgerRefresh();
+    scheduleGeneralLedgerRefresh({ type: 'adjustment_note', id: noteId });
   } catch {
     // Note is saved; ledger refresh is best-effort housekeeping.
   }
@@ -344,7 +344,7 @@ export async function deleteAdjustmentNote(id: number): Promise<void> {
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-    scheduleGeneralLedgerRefresh();
+    scheduleGeneralLedgerRefresh({ type: 'adjustment_note', id });
   } catch {
     // The note was deleted; ledger refresh is best-effort housekeeping.
   }

@@ -29,6 +29,7 @@ import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../..
 import { roundMoney } from '../../../src/utils/money';
 import { parseRouteId } from '../../../src/utils/route';
 import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { todayISO, isValidISODate, formatDisplayDate } from '../../../src/utils/date';
 import { stackDetailBeforeRemove } from '../../../src/navigation/screenOptions';
@@ -37,6 +38,7 @@ import { stateName } from '../../../src/services/gst';
 import type { Account, Sale, SaleItem, SalePayment } from '../../../src/types';
 
 export default function SaleDetailScreen() {
+  const gstEnabled = useGstEnabled();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
@@ -410,14 +412,16 @@ export default function SaleDetailScreen() {
           <StatusBadge status={sale.status} />
         </View>
       </View>
-      <View style={[localStyles.typeBadge, isBos && localStyles.typeBadgeBos]}>
-        <Text style={[localStyles.typeBadgeText, isBos && localStyles.typeBadgeTextBos]}>
-          {isBos ? 'Bill of Supply' : 'Tax Invoice'}
-        </Text>
-      </View>
+      {gstEnabled ? (
+        <View style={[localStyles.typeBadge, isBos && localStyles.typeBadgeBos]}>
+          <Text style={[localStyles.typeBadgeText, isBos && localStyles.typeBadgeTextBos]}>
+            {isBos ? 'Bill of Supply' : 'Tax Invoice'}
+          </Text>
+        </View>
+      ) : null}
       <Text style={localStyles.party}>{sale.party_name}</Text>
       <Text style={localStyles.date}>{formatDisplayDate(sale.date)}</Text>
-      {placeLabel ? (
+      {gstEnabled && placeLabel ? (
         <Text style={localStyles.date}>Place of supply: {placeLabel}</Text>
       ) : null}
 
@@ -445,7 +449,8 @@ export default function SaleDetailScreen() {
         />
       </View>
 
-      {(sale.cgst_amount ?? 0) + (sale.sgst_amount ?? 0) + (sale.igst_amount ?? 0) > 0.009 ? (
+      {gstEnabled &&
+      (sale.cgst_amount ?? 0) + (sale.sgst_amount ?? 0) + (sale.igst_amount ?? 0) > 0.009 ? (
         <>
           <SectionHeader title="GST" />
           <View style={{ marginBottom: spacing.sm }}>
@@ -490,10 +495,12 @@ export default function SaleDetailScreen() {
               <Text style={localStyles.itemMeta}>
                 {item.qty} × {formatCurrency(item.unit_price)} · Cost{' '}
                 {formatCurrency(item.unit_cost)}
-                {item.hsn_sac ? ` · HSN ${item.hsn_sac}` : ''}
-                {hasGst
-                  ? ` · GST ${item.gst_rate ?? 0}% · Tax ${formatCurrency(lineTax)}`
-                  : ' · No GST'}
+                {gstEnabled && item.hsn_sac ? ` · HSN ${item.hsn_sac}` : ''}
+                {gstEnabled
+                  ? hasGst
+                    ? ` · GST ${item.gst_rate ?? 0}% · Tax ${formatCurrency(lineTax)}`
+                    : ' · No GST'
+                  : ''}
               </Text>
             </View>
             <Text style={localStyles.itemTotal}>{formatCurrency(item.total)}</Text>

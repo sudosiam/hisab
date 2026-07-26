@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 import { DatabaseProvider } from '../src/context/DatabaseContext';
 import { FinancialYearProvider } from '../src/context/FinancialYearContext';
+import { GstProvider } from '../src/context/GstContext';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { StatusBar } from 'expo-status-bar';
@@ -51,11 +52,13 @@ export default function RootLayout() {
         <ThemedRoot>
           <ErrorBoundary>
             <DatabaseProvider>
-              <FinancialYearProvider>
-                <ThemedStatusBar />
-                <PendingUpdatePrompt />
-                <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }} />
-              </FinancialYearProvider>
+              <GstProvider>
+                <FinancialYearProvider>
+                  <ThemedStatusBar />
+                  <PendingUpdatePrompt />
+                  <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }} />
+                </FinancialYearProvider>
+              </GstProvider>
             </DatabaseProvider>
           </ErrorBoundary>
         </ThemedRoot>

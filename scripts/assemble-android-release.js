@@ -53,36 +53,33 @@ function ensureAndroidManifestProductionReady(manifestPath) {
 }
 
 /**
- * Make release assemble resilient:
- * - lint does not abort the build
- * - lintVital* tasks (AGP) cannot fail assembleRelease
+ * Keep local assembleRelease usable without silencing every lint rule.
+ * Only ignore known Expo/RN noise; real issues still fail the build.
  * Idempotent across repeated local builds.
  */
 function ensureReleaseBuildStable(appBuildGradlePath) {
   if (!existsSync(appBuildGradlePath)) return;
   let content = readFileSync(appBuildGradlePath, 'utf8');
 
-  if (!content.includes('abortOnError false') && /android\s*\{/.test(content)) {
+  if (!content.includes('hisabReleaseLint') && /android\s*\{/.test(content)) {
     content = content.replace(
       /android\s*\{/,
       `android {
+    // hisabReleaseLint — keep release lint on; disable only Expo/RN false positives
     lint {
-        checkReleaseBuilds false
-        abortOnError false
+        checkReleaseBuilds true
+        abortOnError true
+        disable 'NullSafeMutableLiveData', 'UnsafeOptInUsageError', 'GradleDependency'
     }`
     );
   }
 
-  if (!content.includes('hisabDisableLintVital')) {
-    content = `${content.trimEnd()}
-
-// hisabDisableLintVital — keep assembleRelease from failing on lintVital*
-tasks.configureEach { task ->
-    if (task.name.toLowerCase().contains("lintvital")) {
-        task.enabled = false
-    }
-}
-`;
+  // Prefer failing on real lint; lintVital stays enabled (remove legacy disable block).
+  if (content.includes('hisabDisableLintVital')) {
+    content = content.replace(
+      /\n\/\/ hisabDisableLintVital[\s\S]*?tasks\.configureEach \{ task ->\n(?:.*\n)*?\}\n/,
+      '\n'
+    );
   }
 
   writeFileSync(appBuildGradlePath, content.endsWith('\n') ? content : `${content}\n`, 'utf8');
@@ -112,7 +109,7 @@ if (existsSync(gradlePropsPath)) {
   props = upsertGradleProperty(props, 'hermesEnabled', 'true');
   props = upsertGradleProperty(props, 'newArchEnabled', 'true');
   props = upsertGradleProperty(props, 'android.enablePngCrunchInReleaseBuilds', 'true');
-  props = upsertGradleProperty(props, 'android.lint.checkReleaseBuilds', 'false');
+  props = upsertGradleProperty(props, 'android.lint.checkReleaseBuilds', 'true');
   // Keep minify off — R8 breaks some RN/Expo reflection paths without a tested proguard file.
   props = upsertGradleProperty(props, 'android.enableMinifyInReleaseBuilds', 'false');
   writeFileSync(gradlePropsPath, props.endsWith('\n') ? props : `${props}\n`, 'utf8');

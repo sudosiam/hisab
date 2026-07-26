@@ -1,4 +1,4 @@
-# Sets EXPO_PUBLIC_SUPABASE_* on EAS preview + production from local .env
+# Sets EXPO_PUBLIC_SUPABASE_* (+ optional CLOUD_OWNER_EMAIL) on EAS preview + production from local .env
 # Requires: eas login (or EXPO_TOKEN)
 # Usage: npm run eas:env:supabase
 
@@ -22,6 +22,7 @@ Get-Content .env | ForEach-Object {
 
 $url = $vars['EXPO_PUBLIC_SUPABASE_URL']
 $anon = $vars['EXPO_PUBLIC_SUPABASE_ANON_KEY']
+$ownerEmail = $vars['EXPO_PUBLIC_CLOUD_OWNER_EMAIL']
 
 if (-not $url -or $url -match 'your-project-ref' -or -not $anon -or $anon -eq 'your-anon-key') {
   throw 'Set real EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in .env first.'
@@ -49,6 +50,17 @@ foreach ($environment in @('preview', 'production')) {
     --type string `
     --non-interactive
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  if ($ownerEmail -and $ownerEmail -match '@' -and $ownerEmail -ne 'you@example.com') {
+    & $eas[0] $eas[1] $eas[2] env:set `
+      --name EXPO_PUBLIC_CLOUD_OWNER_EMAIL `
+      --value $ownerEmail `
+      --environment $environment `
+      --visibility plaintext `
+      --type string `
+      --non-interactive
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  }
 
   Write-Host "OK: $environment"
 }

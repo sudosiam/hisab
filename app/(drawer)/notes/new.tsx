@@ -23,7 +23,8 @@ import { createAdjustmentNote } from '../../../src/services/adjustmentNotes';
 import { getPartyByName } from '../../../src/services/parties';
 import { getPurchaseById, getPurchaseItems } from '../../../src/services/purchases';
 import { getSaleById, getSaleItems } from '../../../src/services/sales';
-import { getBusinessState, isGstEnabled, isTaxInclusivePricing } from '../../../src/services/appSettings';
+import { getBusinessState, isTaxInclusivePricing } from '../../../src/services/appSettings';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { computeGstDocument, resolveStateFromPartyFields } from '../../../src/services/gst';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
@@ -162,7 +163,7 @@ export default function NewNoteScreen() {
   const [loading, setLoading] = useState(false);
   const [prefillDone, setPrefillDone] = useState(false);
   const [businessState, setBusinessState] = useState('');
-  const [gstEnabled, setGstEnabled] = useState(true);
+  const gstEnabled = useGstEnabled();
   const [taxInclusive, setTaxInclusive] = useState(false);
   const [partyState, setPartyState] = useState<string | null>(null);
   const [placeOfSupply, setPlaceOfSupply] = useState<string | null>(null);
@@ -183,11 +184,10 @@ export default function NewNoteScreen() {
 
   React.useEffect(() => {
     let cancelled = false;
-    Promise.all([getBusinessState(), isGstEnabled(), isTaxInclusivePricing()])
-      .then(([state, enabled, inclusive]) => {
+    Promise.all([getBusinessState(), isTaxInclusivePricing()])
+      .then(([state, inclusive]) => {
         if (!cancelled) {
           setBusinessState(state);
-          setGstEnabled(enabled);
           setTaxInclusive(inclusive);
         }
       })
@@ -501,16 +501,19 @@ export default function NewNoteScreen() {
               <Text style={localStyles.removeText}>✕</Text>
             </TouchableOpacity>
           </View>
-          <GstRateChips
-            value={item.gst_rate}
-            onChange={(v) => updateItem(index, 'gst_rate', v)}
-            disabled={!gstEnabled}
-          />
-          <FormInput
-            label="HSN/SAC"
-            value={item.hsn_sac}
-            onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
-          />
+          {gstEnabled ? (
+            <>
+              <GstRateChips
+                value={item.gst_rate}
+                onChange={(v) => updateItem(index, 'gst_rate', v)}
+              />
+              <FormInput
+                label="HSN/SAC"
+                value={item.hsn_sac}
+                onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
+              />
+            </>
+          ) : null}
         </View>
       ))}
       <TouchableOpacity onPress={addItem} style={{ marginBottom: spacing.sm }}>
@@ -519,11 +522,15 @@ export default function NewNoteScreen() {
 
       {gstDoc ? (
         <View style={localStyles.totals}>
-          <View style={localStyles.totalRow}>
-            <Text style={localStyles.totalLabel}>Taxable</Text>
-            <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.taxable_amount)}</Text>
-          </View>
-          {(gstDoc.cgst_amount ?? 0) + (gstDoc.sgst_amount ?? 0) + (gstDoc.igst_amount ?? 0) > 0.009 ? (
+          {gstEnabled ? (
+            <View style={localStyles.totalRow}>
+              <Text style={localStyles.totalLabel}>Taxable</Text>
+              <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.taxable_amount)}</Text>
+            </View>
+          ) : null}
+          {gstEnabled &&
+          (gstDoc.cgst_amount ?? 0) + (gstDoc.sgst_amount ?? 0) + (gstDoc.igst_amount ?? 0) >
+            0.009 ? (
             <View style={localStyles.totalRow}>
               <Text style={localStyles.totalLabel}>Tax</Text>
               <Text style={localStyles.totalValue}>

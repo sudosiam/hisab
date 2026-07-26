@@ -362,7 +362,7 @@ export async function createSale(params: {
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-    scheduleGeneralLedgerRefresh();
+    scheduleGeneralLedgerRefresh({ type: 'sale', id: saleId });
   } catch {
     // Sale is saved; ledger refresh is best-effort housekeeping.
   }
@@ -601,7 +601,7 @@ export async function updateSale(
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-    scheduleGeneralLedgerRefresh();
+    scheduleGeneralLedgerRefresh({ type: 'sale', id: saleId });
   } catch {
     // Sale is updated; ledger refresh is best-effort housekeeping.
   }
@@ -665,7 +665,7 @@ export async function addSalePayment(
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-    scheduleGeneralLedgerRefresh();
+    scheduleGeneralLedgerRefresh({ type: 'sale', id: saleId });
   } catch {
     // Payment recorded; ledger refresh is best-effort housekeeping.
   }
@@ -736,7 +736,7 @@ export async function removeSalePayment(saleId: number, paymentId: number): Prom
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
-    scheduleGeneralLedgerRefresh();
+    scheduleGeneralLedgerRefresh({ type: 'sale', id: saleId });
   } catch {
     // Sale payment removed; ledger refresh is best-effort housekeeping.
   }

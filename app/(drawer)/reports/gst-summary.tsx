@@ -9,12 +9,13 @@ import {
   TouchableOpacity,
   Alert,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { Redirect, useFocusEffect } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getGstSummary } from '../../../src/services/gstReports';
 import { MoneyText, moneyRowStyles } from '../../../src/components/MoneyText';
 import { ErrorState, SectionHeader, useScreenStyles } from '../../../src/components/ui';
 import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
@@ -28,6 +29,7 @@ export default function GstSummaryScreen() {
   const styles = useScreenStyles();
   const { refreshKey } = useDatabase();
   const { colors, isDark } = useTheme();
+  const gstEnabled = useGstEnabled();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [data, setData] = useState<Awaited<ReturnType<typeof getGstSummary>> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -122,6 +124,7 @@ export default function GstSummaryScreen() {
     }
   }, [monthKey]);
 
+  if (!gstEnabled) return <Redirect href="/(drawer)/reports" />;
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (booting || !data) {
     return (

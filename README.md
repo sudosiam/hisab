@@ -2,13 +2,13 @@
 
 Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. Books stay on the device; optional encrypted cloud backup via Supabase.
 
-**Current version:** `10.6.0` (Android `versionCode` 36 · schema v26)
+**Current version:** `10.6.0` (Android `versionCode` 36 · schema v27)
 
 ## What's in Hisab
 
 - **Offline accounting** — Sales (Tax Invoice / BOS), purchases, inventory, banking, parties, expenses, other income
 - **Payments** — Money in/out with against-invoice, advance, and on-account allocation
-- **Double-entry ledger** — Journal rebuild after writes; P&L, balance sheet, growth, GST reports
+- **Double-entry ledger** — Scoped journal re-post after writes (full rebuild on migrations); P&L, balance sheet, growth, GST reports
 - **Tally XML** — Import/export sales, purchases, parties, receipts, and payments
 - **PDF & WhatsApp** — Invoice and ledger PDFs; WhatsApp share opens the party number when available (native build)
 - **Backup** — Local SAF daily backup + optional cloud backup; delete cloud snapshot from Settings
@@ -51,7 +51,7 @@ Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. 
 ## Features
 
 - Drawer navigation — Dashboard, Sales, Purchases, Payments, Inventory, Banking, Parties, Reports, Settings
-- SQLite local-first storage (schema v26)
+- SQLite local-first storage (schema v27)
 - Split payments, negative stock allowed, weighted-average COGS
 - Reports — P&L, cash flow, trial balance, GL, day book, receivables/payables, GST, party ledgers (PDF)
 - Financial year settings with period sync across screens
@@ -71,6 +71,10 @@ Use a **dev/production build** for native modules (WhatsApp share, haptics). Exp
 ```bash
 npm run verify    # typecheck + lint + tests — run before every release
 ```
+
+CI runs the same `npm run verify` on push/PR (`.github/workflows/verify.yml`).
+
+For personal cloud backup, set `EXPO_PUBLIC_CLOUD_OWNER_EMAIL` in `.env` (and EAS env) so only your email can sign in.
 
 ## Build APK locally (production)
 
@@ -137,7 +141,7 @@ Keep these in sync when releasing:
 ## Tech stack
 
 - Expo SDK 54 / React Native 0.81 / expo-router
-- expo-sqlite (schema v26)
+- expo-sqlite (schema v27)
 - expo-print / expo-sharing / react-native-share
 - Jest + `better-sqlite3` integration harness
 

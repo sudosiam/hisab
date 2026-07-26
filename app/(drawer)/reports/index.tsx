@@ -3,6 +3,7 @@ import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ScreenTitle, SectionHeader, useScreenStyles } from '../../../src/components/ui';
 import { NavListRow } from '../../../src/components/ListItem';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
@@ -167,6 +168,7 @@ function ReportSection({
 export default function ReportsIndexScreen() {
   const router = useRouter();
   const styles = useScreenStyles();
+  const gstEnabled = useGstEnabled();
 
   const navigate = (route: string) => router.push(route as never);
 
@@ -181,8 +183,12 @@ export default function ReportsIndexScreen() {
       <ReportSection items={DUES} onPress={navigate} />
       <SectionHeader title="Operational" />
       <ReportSection items={OPERATIONAL} onPress={navigate} />
-      <SectionHeader title="GST" />
-      <ReportSection items={GST_REPORTS} onPress={navigate} />
+      {gstEnabled ? (
+        <>
+          <SectionHeader title="GST" />
+          <ReportSection items={GST_REPORTS} onPress={navigate} />
+        </>
+      ) : null}
     </ScrollView>
   );
 }

@@ -1,12 +1,13 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { Redirect, useFocusEffect } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getGstCustomersByState, type GstStateWiseRow } from '../../../src/services/gstReports';
 import { ReportRow } from '../../../src/components/ReportRow';
 import { formatCurrency } from '../../../src/utils/format';
 import { ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
@@ -20,6 +21,7 @@ export default function GstStateWiseScreen() {
   const styles = useScreenStyles();
   const { refreshKey } = useDatabase();
   const { colors, isDark } = useTheme();
+  const gstEnabled = useGstEnabled();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [rows, setRows] = useState<GstStateWiseRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +70,7 @@ export default function GstStateWiseScreen() {
   const exportPdf = useCallback(async () => shareGstStateWisePdf(monthKey, rows), [monthKey, rows]);
   useReportPdfHeader({ disabled: !!error, onExport: exportPdf });
 
+  if (!gstEnabled) return <Redirect href="/(drawer)/reports" />;
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (booting) {
     return (

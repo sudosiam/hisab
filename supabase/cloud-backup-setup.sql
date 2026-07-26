@@ -1,7 +1,9 @@
 -- Hisab cloud backup setup (run in Supabase SQL Editor for your project)
 -- Recommended Auth settings (Dashboard → Authentication → Providers / Email):
 --   - Enable "Confirm email" so new accounts cannot upload until verified
---   - Prefer minimum password length ≥ 8 (app also enforces 8 on sign-up)
+--   - Prefer minimum password length ≥ 10 (app enforces 10 on sign-in/sign-up)
+--   - For personal use: set EXPO_PUBLIC_CLOUD_OWNER_EMAIL in the app build so only
+--     your email can authenticate against this project from the client
 
 -- 1) Private storage bucket
 insert into storage.buckets (id, name, public, file_size_limit)

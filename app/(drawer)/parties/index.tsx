@@ -30,6 +30,7 @@ import {
 } from '../../../src/services/parties';
 import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useGstEnabled } from '../../../src/context/GstContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { matchesSearch } from '../../../src/utils/search';
 import { spacing, radius } from '../../../src/constants/theme';
@@ -42,6 +43,7 @@ import type { PartyType, PartyWithSummary } from '../../../src/types';
 type Filter = 'all' | PartyType;
 
 export default function PartiesScreen() {
+  const gstEnabled = useGstEnabled();
   const router = useRouter();
   const { refreshKey, refresh } = useDatabase();
   const { colors, isDark } = useTheme();
@@ -231,25 +233,29 @@ export default function PartiesScreen() {
           </View>
           <FormInput label="Name" value={name} onChangeText={setName} placeholder="Company or person name" />
           <FormInput label="Phone (optional)" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-          <FormInput
-            label="GSTIN (optional)"
-            value={gstin}
-            onChangeText={setGstin}
-            placeholder="15-character GSTIN"
-            autoCapitalize="characters"
-          />
-          <FormInput
-            label="State code (optional)"
-            value={stateCode}
-            onChangeText={setStateCode}
-            placeholder="e.g. 27"
-            keyboardType="number-pad"
-            helperText={
-              stateCode.trim()
-                ? stateName(stateCode.trim()) || 'Unknown state code'
-                : '2-digit GST state code for CGST/SGST vs IGST'
-            }
-          />
+          {gstEnabled ? (
+            <>
+              <FormInput
+                label="GSTIN (optional)"
+                value={gstin}
+                onChangeText={setGstin}
+                placeholder="15-character GSTIN"
+                autoCapitalize="characters"
+              />
+              <FormInput
+                label="State code (optional)"
+                value={stateCode}
+                onChangeText={setStateCode}
+                placeholder="e.g. 27"
+                keyboardType="number-pad"
+                helperText={
+                  stateCode.trim()
+                    ? stateName(stateCode.trim()) || 'Unknown state code'
+                    : '2-digit GST state code for CGST/SGST vs IGST'
+                }
+              />
+            </>
+          ) : null}
           <FormInput
             label="Address (optional)"
             value={address}

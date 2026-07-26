@@ -178,20 +178,149 @@ export async function hasGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<bool
   return (row?.count ?? 0) > 0;
 }
 
-const LEDGER_CODE_VERSION = '7';
+const LEDGER_CODE_VERSION = '8';
 let rebuildInFlight: Promise<void> | null = null;
 /** Set when a rebuild is requested while another is already running. */
 let rebuildQueued = false;
 let ledgerRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+/** When true, next flush does a full journal rebuild. */
+let pendingFullRebuild = false;
+/** Scoped document ids waiting for targeted re-post (key = `${kind}:${id}`). */
+const pendingScopeKeys = new Set<string>();
+let lastLedgerRefreshError: string | null = null;
 
-/** Coalesce ledger rebuilds so rapid saves stay snappy; run after transitions settle. */
-export function scheduleGeneralLedgerRefresh(): void {
+/** Document-scoped ledger refresh (avoids full wipe on common writes). */
+export type LedgerRefreshScope =
+  | { type: 'full' }
+  | { type: 'sale'; id: number }
+  | { type: 'purchase'; id: number }
+  | { type: 'adjustment_note'; id: number }
+  | { type: 'payment_voucher'; id: number }
+  | { type: 'expense'; id: number }
+  | { type: 'other_income'; id: number };
+
+const MAX_SCOPED_BEFORE_FULL = 40;
+
+export function getLastLedgerRefreshError(): string | null {
+  return lastLedgerRefreshError;
+}
+
+/** Test helper — cancel debounced refresh and clear dirty state. */
+export function resetLedgerRefreshSchedulerForTests(): void {
+  if (ledgerRefreshTimer) clearTimeout(ledgerRefreshTimer);
+  ledgerRefreshTimer = null;
+  pendingFullRebuild = false;
+  pendingScopeKeys.clear();
+  rebuildQueued = false;
+  lastLedgerRefreshError = null;
+}
+
+function parseScopeKey(key: string): LedgerRefreshScope | null {
+  if (key === 'full') return { type: 'full' };
+  const idx = key.indexOf(':');
+  if (idx <= 0) return null;
+  const type = key.slice(0, idx);
+  const id = Number(key.slice(idx + 1));
+  if (!Number.isFinite(id)) return null;
+  if (
+    type === 'sale' ||
+    type === 'purchase' ||
+    type === 'adjustment_note' ||
+    type === 'payment_voucher' ||
+    type === 'expense' ||
+    type === 'other_income'
+  ) {
+    return { type, id } as LedgerRefreshScope;
+  }
+  return null;
+}
+
+async function deleteJournalRefs(
+  db: SQLite.SQLiteDatabase,
+  refs: { type: string; id: number }[]
+): Promise<void> {
+  for (const ref of refs) {
+    await db.runAsync(
+      `DELETE FROM journal_lines WHERE journal_entry_id IN (
+         SELECT id FROM journal_entries WHERE reference_type = ? AND reference_id = ?
+       )`,
+      [ref.type, ref.id]
+    );
+    await db.runAsync(
+      `DELETE FROM journal_entries WHERE reference_type = ? AND reference_id = ?`,
+      [ref.type, ref.id]
+    );
+  }
+}
+
+async function collectSaleJournalRefs(
+  db: SQLite.SQLiteDatabase,
+  saleId: number
+): Promise<{ type: string; id: number }[]> {
+  const paymentIds = await db.getAllAsync<{ id: number }>(
+    `SELECT id FROM sale_payments WHERE sale_id = ?`,
+    [saleId]
+  );
+  // Drop journals for payments removed since the last refresh (single-user safe).
+  const orphanPayments = await db.getAllAsync<{ id: number }>(
+    `SELECT reference_id AS id FROM journal_entries
+     WHERE reference_type = 'sale_payment'
+       AND reference_id NOT IN (SELECT id FROM sale_payments)`
+  );
+  const paymentRefIds = new Set([
+    ...paymentIds.map((p) => p.id),
+    ...orphanPayments.map((p) => p.id),
+  ]);
+  return [
+    { type: 'sale', id: saleId },
+    { type: 'sale_cogs', id: saleId },
+    ...[...paymentRefIds].map((id) => ({ type: 'sale_payment', id })),
+  ];
+}
+
+async function collectPurchaseJournalRefs(
+  db: SQLite.SQLiteDatabase,
+  purchaseId: number
+): Promise<{ type: string; id: number }[]> {
+  const paymentIds = await db.getAllAsync<{ id: number }>(
+    `SELECT id FROM purchase_payments WHERE purchase_id = ?`,
+    [purchaseId]
+  );
+  const orphanPayments = await db.getAllAsync<{ id: number }>(
+    `SELECT reference_id AS id FROM journal_entries
+     WHERE reference_type = 'purchase_payment'
+       AND reference_id NOT IN (SELECT id FROM purchase_payments)`
+  );
+  const paymentRefIds = new Set([
+    ...paymentIds.map((p) => p.id),
+    ...orphanPayments.map((p) => p.id),
+  ]);
+  return [
+    { type: 'purchase', id: purchaseId },
+    ...[...paymentRefIds].map((id) => ({ type: 'purchase_payment', id })),
+  ];
+}
+
+/** Coalesce ledger refresh so rapid saves stay snappy; prefers scoped re-post. */
+export function scheduleGeneralLedgerRefresh(scope?: LedgerRefreshScope): void {
+  if (!scope || scope.type === 'full') {
+    pendingFullRebuild = true;
+    pendingScopeKeys.clear();
+  } else {
+    pendingScopeKeys.add(`${scope.type}:${scope.id}`);
+    if (pendingScopeKeys.size > MAX_SCOPED_BEFORE_FULL) {
+      pendingFullRebuild = true;
+      pendingScopeKeys.clear();
+    }
+  }
+
   if (ledgerRefreshTimer) clearTimeout(ledgerRefreshTimer);
   ledgerRefreshTimer = setTimeout(() => {
     ledgerRefreshTimer = null;
     runAfterIdle(() => {
-      void rebuildGeneralLedger().catch((err) => {
-        console.warn('[ledger] rebuild failed', err);
+      void flushPendingLedgerRefresh().catch((err) => {
+        lastLedgerRefreshError = err instanceof Error ? err.message : String(err);
+        console.warn('[ledger] refresh failed', err);
       });
     });
   }, 750);
@@ -200,9 +329,33 @@ export function scheduleGeneralLedgerRefresh(): void {
   }
 }
 
+async function flushPendingLedgerRefresh(): Promise<void> {
+  const useFull = pendingFullRebuild || pendingScopeKeys.size === 0;
+  const keys = [...pendingScopeKeys];
+  pendingFullRebuild = false;
+  pendingScopeKeys.clear();
+
+  if (useFull) {
+    await rebuildGeneralLedger();
+    lastLedgerRefreshError = null;
+    return;
+  }
+
+  const scopes = keys
+    .map(parseScopeKey)
+    .filter((s): s is Exclude<LedgerRefreshScope, { type: 'full' }> => !!s && s.type !== 'full');
+  if (scopes.length === 0) {
+    await rebuildGeneralLedger();
+    return;
+  }
+
+  await refreshGeneralLedgerScoped(scopes);
+  lastLedgerRefreshError = null;
+}
+
 /** Refresh ledger after a business write without running full integrity repair. */
 export async function refreshGeneralLedgerAfterWrite(): Promise<void> {
-  scheduleGeneralLedgerRefresh();
+  scheduleGeneralLedgerRefresh({ type: 'full' });
 }
 
 /** Rebuild once after app updates when ledger posting rules change. Safe to call after UI is ready. */
@@ -223,6 +376,70 @@ export async function ensureLedgerUpToDate(db?: SQLite.SQLiteDatabase): Promise<
     `INSERT OR REPLACE INTO settings (key, value) VALUES ('ledger_code_version', ?)`,
     [LEDGER_CODE_VERSION]
   );
+}
+
+type LedgerRebuildFilter = {
+  saleIds?: number[];
+  purchaseIds?: number[];
+  adjustmentNoteIds?: number[];
+  paymentVoucherIds?: number[];
+  expenseIds?: number[];
+  otherIncomeIds?: number[];
+};
+
+function sqlIdIn(column: string, ids: number[] | undefined, full: boolean): {
+  clause: string;
+  params: number[];
+} {
+  if (full) return { clause: '1=1', params: [] };
+  if (!ids || ids.length === 0) return { clause: '1=0', params: [] };
+  return {
+    clause: `${column} IN (${ids.map(() => '?').join(',')})`,
+    params: ids,
+  };
+}
+
+async function refreshGeneralLedgerScoped(
+  scopes: Exclude<LedgerRefreshScope, { type: 'full' }>[],
+  db?: SQLite.SQLiteDatabase
+): Promise<void> {
+  const filter: LedgerRebuildFilter = {};
+  for (const scope of scopes) {
+    if (scope.type === 'sale') {
+      filter.saleIds = [...(filter.saleIds ?? []), scope.id];
+    } else if (scope.type === 'purchase') {
+      filter.purchaseIds = [...(filter.purchaseIds ?? []), scope.id];
+    } else if (scope.type === 'adjustment_note') {
+      filter.adjustmentNoteIds = [...(filter.adjustmentNoteIds ?? []), scope.id];
+    } else if (scope.type === 'payment_voucher') {
+      filter.paymentVoucherIds = [...(filter.paymentVoucherIds ?? []), scope.id];
+    } else if (scope.type === 'expense') {
+      filter.expenseIds = [...(filter.expenseIds ?? []), scope.id];
+    } else if (scope.type === 'other_income') {
+      filter.otherIncomeIds = [...(filter.otherIncomeIds ?? []), scope.id];
+    }
+  }
+
+  if (rebuildInFlight) {
+    for (const scope of scopes) {
+      pendingScopeKeys.add(`${scope.type}:${scope.id}`);
+    }
+    await rebuildInFlight;
+    if (pendingFullRebuild || pendingScopeKeys.size > 0) {
+      await flushPendingLedgerRefresh();
+    }
+    return;
+  }
+
+  const run = performGeneralLedgerRebuild(db, filter);
+  rebuildInFlight = run;
+  try {
+    await run;
+  } finally {
+    if (rebuildInFlight === run) {
+      rebuildInFlight = null;
+    }
+  }
 }
 
 /** Rebuild the general ledger from all business records (double-entry). */
@@ -256,8 +473,12 @@ export async function rebuildGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<
   }
 }
 
-async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<void> {
+async function performGeneralLedgerRebuild(
+  db?: SQLite.SQLiteDatabase,
+  filter?: LedgerRebuildFilter
+): Promise<void> {
   const database = db ?? (await getDatabase());
+  const full = !filter;
 
   const table = await database.getFirstAsync<{ name: string }>(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='journal_entries'`
@@ -304,8 +525,32 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
   }
 
   await database.withTransactionAsync(async () => {
-  await database.execAsync('DELETE FROM journal_lines; DELETE FROM journal_entries;');
+  if (full) {
+    await database.execAsync('DELETE FROM journal_lines; DELETE FROM journal_entries;');
+  } else {
+    const refs: { type: string; id: number }[] = [];
+    for (const saleId of filter.saleIds ?? []) {
+      refs.push(...(await collectSaleJournalRefs(database, saleId)));
+    }
+    for (const purchaseId of filter.purchaseIds ?? []) {
+      refs.push(...(await collectPurchaseJournalRefs(database, purchaseId)));
+    }
+    for (const noteId of filter.adjustmentNoteIds ?? []) {
+      refs.push({ type: 'adjustment_note', id: noteId });
+    }
+    for (const voucherId of filter.paymentVoucherIds ?? []) {
+      refs.push({ type: 'payment_voucher', id: voucherId });
+    }
+    for (const expenseId of filter.expenseIds ?? []) {
+      refs.push({ type: 'expense', id: expenseId });
+    }
+    for (const incomeId of filter.otherIncomeIds ?? []) {
+      refs.push({ type: 'other_income', id: incomeId });
+    }
+    await deleteJournalRefs(database, refs);
+  }
 
+  const saleFilter = sqlIdIn('s.id', filter?.saleIds, full);
   const sales = await database.getAllAsync<{
     id: number;
     invoice_no: string;
@@ -326,7 +571,9 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
             s.is_reverse_charge
      FROM sales s
      WHERE EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id)
-       AND s.total_amount > 0`
+       AND s.total_amount > 0
+       AND (${saleFilter.clause})`,
+    saleFilter.params
   );
 
   for (const sale of sales) {
@@ -364,6 +611,7 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     });
   }
 
+  const salePaymentFilter = sqlIdIn('sp.sale_id', filter?.saleIds, full);
   const salePayments = await database.getAllAsync<{
     id: number;
     sale_id: number;
@@ -378,7 +626,9 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
             s.invoice_no, s.party_name, s.party_id
      FROM sale_payments sp
      JOIN sales s ON s.id = sp.sale_id
-     WHERE sp.amount > 0`
+     WHERE sp.amount > 0
+       AND (${salePaymentFilter.clause})`,
+    salePaymentFilter.params
   );
 
   for (const payment of salePayments) {
@@ -398,6 +648,7 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     });
   }
 
+  const saleCogsFilter = sqlIdIn('s.id', filter?.saleIds, full);
   const saleCogsRows = await database.getAllAsync<{
     id: number;
     invoice_no: string;
@@ -411,8 +662,10 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
      FROM sales s
      JOIN sale_items si ON si.sale_id = s.id
      JOIN products p ON p.id = si.product_id
+     WHERE (${saleCogsFilter.clause})
      GROUP BY s.id
-     HAVING cogs > 0.009`
+     HAVING cogs > 0.009`,
+    saleCogsFilter.params
   );
 
   for (const saleCogs of saleCogsRows) {
@@ -429,6 +682,7 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     });
   }
 
+  const purchaseFilter = sqlIdIn('p.id', filter?.purchaseIds, full);
   const purchases = await database.getAllAsync<{
     id: number;
     invoice_no: string;
@@ -446,7 +700,9 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
             p.taxable_amount, p.cgst_amount, p.sgst_amount, p.igst_amount, p.is_reverse_charge
      FROM purchases p
      WHERE EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = p.id)
-       AND p.total_amount > 0`
+       AND p.total_amount > 0
+       AND (${purchaseFilter.clause})`,
+    purchaseFilter.params
   );
 
   for (const purchase of purchases) {
@@ -493,6 +749,7 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     });
   }
 
+  const noteFilter = sqlIdIn('n.id', filter?.adjustmentNoteIds, full);
   const adjustmentNotes = await database.getAllAsync<{
     id: number;
     note_no: string;
@@ -513,7 +770,9 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
             n.is_reverse_charge, n.total_amount
      FROM adjustment_notes n
      WHERE n.total_amount > 0
-       AND EXISTS (SELECT 1 FROM adjustment_note_items ani WHERE ani.note_id = n.id)`
+       AND EXISTS (SELECT 1 FROM adjustment_note_items ani WHERE ani.note_id = n.id)
+       AND (${noteFilter.clause})`,
+    noteFilter.params
   );
 
   for (const note of adjustmentNotes) {
@@ -594,6 +853,7 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     });
   }
 
+  const purchasePaymentFilter = sqlIdIn('pp.purchase_id', filter?.purchaseIds, full);
   const purchasePayments = await database.getAllAsync<{
     id: number;
     account_id: number;
@@ -607,7 +867,9 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
             p.invoice_no, p.supplier_name, p.party_id
      FROM purchase_payments pp
      JOIN purchases p ON p.id = pp.purchase_id
-     WHERE pp.amount > 0`
+     WHERE pp.amount > 0
+       AND (${purchasePaymentFilter.clause})`,
+    purchasePaymentFilter.params
   );
 
   for (const payment of purchasePayments) {
@@ -628,6 +890,7 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
   }
 
   // Unallocated Receipt/Payment voucher advances (cash already moved via party_receipt/party_payment).
+  const voucherFilter = sqlIdIn('v.id', filter?.paymentVoucherIds, full);
   const paymentVouchers = await database.getAllAsync<{
     id: number;
     voucher_type: string;
@@ -648,7 +911,9 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
                 AND a.purchase_payment_id IS NULL
             ), 0) as unallocated
      FROM payment_vouchers v
-     WHERE v.account_id IS NOT NULL`
+     WHERE v.account_id IS NOT NULL
+       AND (${voucherFilter.clause})`,
+    voucherFilter.params
   );
 
   for (const voucher of paymentVouchers) {
@@ -687,6 +952,7 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     }
   }
 
+  const expenseFilter = sqlIdIn('id', filter?.expenseIds, full);
   const expenses = await database.getAllAsync<{
     id: number;
     category: string;
@@ -694,7 +960,11 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     amount: number;
     account_id: number;
     date: string;
-  }>(`SELECT id, category, description, amount, account_id, date FROM expenses WHERE amount > 0`);
+  }>(
+    `SELECT id, category, description, amount, account_id, date FROM expenses
+     WHERE amount > 0 AND (${expenseFilter.clause})`,
+    expenseFilter.params
+  );
 
   for (const expense of expenses) {
     const cashAccount = accounts.get(`cash:${expense.account_id}`);
@@ -713,6 +983,7 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     });
   }
 
+  const otherIncomeFilter = sqlIdIn('id', filter?.otherIncomeIds, full);
   const otherIncomeRows = await database.getAllAsync<{
     id: number;
     category: string;
@@ -720,7 +991,11 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
     amount: number;
     account_id: number;
     date: string;
-  }>(`SELECT id, category, description, amount, account_id, date FROM other_income WHERE amount > 0`);
+  }>(
+    `SELECT id, category, description, amount, account_id, date FROM other_income
+     WHERE amount > 0 AND (${otherIncomeFilter.clause})`,
+    otherIncomeFilter.params
+  );
 
   for (const row of otherIncomeRows) {
     const cashAccount = accounts.get(`cash:${row.account_id}`);
@@ -736,6 +1011,11 @@ async function performGeneralLedgerRebuild(db?: SQLite.SQLiteDatabase): Promise<
         { ledgerAccountId: otherIncomeAccount, debit: 0, credit: amount },
       ],
     });
+  }
+
+  // Opening stock, transfers, equity movements only on full rebuild.
+  if (!full) {
+    return;
   }
 
   const stockMovements = await database.getAllAsync<{

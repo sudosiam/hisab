@@ -27,6 +27,8 @@ export function calculateSaleGrossProfit(
   return roundMoney(sale.total_amount - calculateSaleCogs(sale, items));
 }
 
+export type AccountingBasis = 'accrual' | 'cash';
+
 export interface PeriodFinancials {
   revenue: number;
   cogs: number;
@@ -38,29 +40,57 @@ export interface PeriodFinancials {
 
 export async function getPeriodFinancials(
   periodKey: string,
-  range?: { start: string; end: string }
+  range?: { start: string; end: string },
+  basis: AccountingBasis = 'accrual'
 ): Promise<PeriodFinancials> {
   const db = await getDatabase();
   const { start, end } = range ?? (await resolvePeriodRange(periodKey));
 
   const [revenue, cogs, expenses, otherIncome] = await Promise.all([
-    db.getFirstAsync<{ total: number }>(
-      `SELECT COALESCE(SUM(s.total_amount), 0) as total
-       FROM sales s
-       WHERE s.date >= ? AND s.date <= ?
-         AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id)`,
-      [start, end]
-    ),
-    db.getFirstAsync<{ total: number }>(
-      `SELECT COALESCE(SUM(
-         ${SALE_LINE_UNIT_COST_SQL} * si.qty
-       ), 0) as total
-       FROM sale_items si
-       JOIN sales s ON s.id = si.sale_id
-       JOIN products p ON p.id = si.product_id
-       WHERE s.date >= ? AND s.date <= ?`,
-      [start, end]
-    ),
+    basis === 'cash'
+      ? db.getFirstAsync<{ total: number }>(
+          `SELECT COALESCE(SUM(sp.amount), 0) as total
+           FROM sale_payments sp
+           JOIN accounts a ON a.id = sp.account_id
+           WHERE sp.date >= ? AND sp.date <= ?
+             AND COALESCE(a.is_excluded, 0) = 0`,
+          [start, end]
+        )
+      : db.getFirstAsync<{ total: number }>(
+          `SELECT COALESCE(SUM(s.total_amount), 0) as total
+           FROM sales s
+           WHERE s.date >= ? AND s.date <= ?
+             AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id)`,
+          [start, end]
+        ),
+    basis === 'cash'
+      ? db.getFirstAsync<{ total: number }>(
+          `SELECT COALESCE(SUM(
+             (
+               SELECT COALESCE(SUM(${SALE_LINE_UNIT_COST_SQL} * si.qty), 0)
+               FROM sale_items si
+               JOIN products p ON p.id = si.product_id
+               WHERE si.sale_id = s.id
+             ) * (sp.amount / NULLIF(s.total_amount, 0))
+           ), 0) as total
+           FROM sale_payments sp
+           JOIN sales s ON s.id = sp.sale_id
+           JOIN accounts a ON a.id = sp.account_id
+           WHERE sp.date >= ? AND sp.date <= ?
+             AND COALESCE(a.is_excluded, 0) = 0
+             AND s.total_amount > 0.009`,
+          [start, end]
+        )
+      : db.getFirstAsync<{ total: number }>(
+          `SELECT COALESCE(SUM(
+             ${SALE_LINE_UNIT_COST_SQL} * si.qty
+           ), 0) as total
+           FROM sale_items si
+           JOIN sales s ON s.id = si.sale_id
+           JOIN products p ON p.id = si.product_id
+           WHERE s.date >= ? AND s.date <= ?`,
+          [start, end]
+        ),
     db.getFirstAsync<{ total: number }>(
       `SELECT COALESCE(SUM(e.amount), 0) as total FROM expenses e
        JOIN accounts a ON a.id = e.account_id
