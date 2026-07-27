@@ -24,7 +24,7 @@ import {
 import { getDatabase } from '../db/database';
 import { makeFinancialYearPeriodKey } from '../utils/date';
 import { deferDeleteCacheFile } from '../utils/tempShareFiles';
-import { roundMoney } from '../utils/money';
+import { paiseToFixedRupees, roundMoney, toPaise } from '../utils/money';
 import type {
   PaymentBillType,
   Party,
@@ -342,12 +342,17 @@ function parseSignedAmount(raw: string): number {
   return match ? Number(match[0]) : 0;
 }
 
+/** Parse a Tally rupee amount into integer paise. */
+function parseMoneyAmount(raw: string): number {
+  return toPaise(parseSignedAmount(raw));
+}
+
 function parseQty(raw: string): number {
   return Math.abs(parseSignedAmount(raw));
 }
 
 function parseRate(raw: string): number {
-  return Math.abs(parseSignedAmount(raw));
+  return toPaise(Math.abs(parseSignedAmount(raw)));
 }
 
 function isYes(raw: string): boolean {
@@ -410,8 +415,8 @@ function inventoryLinesXml(
   ${tag('STOCKITEMNAME', item.name)}
   ${tag('ACTUALQTY', `${item.qty} ${item.unit || 'pcs'}`)}
   ${tag('BILLEDQTY', `${item.qty} ${item.unit || 'pcs'}`)}
-  ${tag('RATE', `${item.rate}/${item.unit || 'pcs'}`)}
-  ${tag('AMOUNT', item.amount.toFixed(2))}
+  ${tag('RATE', `${paiseToFixedRupees(item.rate)}/${item.unit || 'pcs'}`)}
+  ${tag('AMOUNT', paiseToFixedRupees(item.amount))}
   ${tag('GSTOVRDNHSNCODE', item.hsn ?? '')}
   ${tag('GSTOVRDNTAXRATE', item.gstRate ?? 0)}
 </ALLINVENTORYENTRIES.LIST>`
@@ -518,7 +523,7 @@ async function paymentVoucherXml(voucherId: number): Promise<string> {
                 return `<BILLALLOCATIONS.LIST>
    ${tag('NAME', a.bill_name)}
    ${tag('BILLTYPE', billType)}
-   ${tag('AMOUNT', signed.toFixed(2))}
+   ${tag('AMOUNT', paiseToFixedRupees(signed))}
   </BILLALLOCATIONS.LIST>`;
               })
               .join('\n')
@@ -535,7 +540,7 @@ async function paymentVoucherXml(voucherId: number): Promise<string> {
   ${tag('LEDGERNAME', line.ledger_name)}
   ${tag('ISDEEMEDPOSITIVE', line.is_deemed_positive ? 'Yes' : 'No')}
   ${tag('ISPARTYLEDGER', isParty ? 'Yes' : 'No')}
-  ${tag('AMOUNT', line.amount.toFixed(2))}
+  ${tag('AMOUNT', paiseToFixedRupees(line.amount))}
   ${billBlocks}
   ${bankBlock}
  </LEDGERENTRIES.LIST>`;
@@ -794,7 +799,7 @@ async function buildItemsFromInventory(inventory: string[]) {
     const itemName = extractTag(line, 'STOCKITEMNAME');
     const qty = parseQty(extractTag(line, 'BILLEDQTY') || extractTag(line, 'ACTUALQTY'));
     const rate = parseRate(extractTag(line, 'RATE'));
-    const amount = Math.abs(parseSignedAmount(extractTag(line, 'AMOUNT')));
+    const amount = Math.abs(parseMoneyAmount(extractTag(line, 'AMOUNT')));
     const hsn = extractTag(line, 'GSTOVRDNHSNCODE');
     const gstRate = parseRate(extractTag(line, 'GSTOVRDNTAXRATE'));
     if (!itemName || qty <= 0) continue;
@@ -822,7 +827,7 @@ function partyAmountFromLedgers(ledgerBlocks: string[], partyName: string): numb
       isYes(extractTag(block, 'ISPARTYLEDGER')) ||
       name.trim().toLowerCase() === partyName.trim().toLowerCase();
     if (!isParty) continue;
-    total = roundMoney(total + Math.abs(parseSignedAmount(extractTag(block, 'AMOUNT'))));
+    total = roundMoney(total + Math.abs(parseMoneyAmount(extractTag(block, 'AMOUNT'))));
   }
   return total;
 }
@@ -850,7 +855,7 @@ function detectBankLedger(ledgerBlocks: string[], partyName: string): {
     const bankAlloc = extractBlocks(block, 'BANKALLOCATIONS.LIST')[0] ?? '';
     return {
       name,
-      amount: Math.abs(parseSignedAmount(extractTag(block, 'AMOUNT'))),
+      amount: Math.abs(parseMoneyAmount(extractTag(block, 'AMOUNT'))),
       instrument_no: extractTag(bankAlloc, 'INSTRUMENTNUMBER') || undefined,
       instrument_bank: extractTag(bankAlloc, 'BANKNAME') || undefined,
       payment_mode:
@@ -866,7 +871,7 @@ function detectBankLedger(ledgerBlocks: string[], partyName: string): {
     if (isYes(extractTag(block, 'ISPARTYLEDGER'))) continue;
     return {
       name,
-      amount: Math.abs(parseSignedAmount(extractTag(block, 'AMOUNT'))),
+      amount: Math.abs(parseMoneyAmount(extractTag(block, 'AMOUNT'))),
     };
   }
   return null;
@@ -884,7 +889,7 @@ function parseBillAllocations(ledgerBlocks: string[], partyName: string) {
     for (const bill of bills) {
       const billName = extractTag(bill, 'NAME') || 'On Account';
       const billType = mapBillType(extractTag(bill, 'BILLTYPE'));
-      const amount = Math.abs(parseSignedAmount(extractTag(bill, 'AMOUNT')));
+      const amount = Math.abs(parseMoneyAmount(extractTag(bill, 'AMOUNT')));
       if (amount > 0) allocations.push({ bill_name: billName, bill_type: billType, amount });
     }
   }
@@ -1064,7 +1069,7 @@ export async function importTallyXml(xml: string): Promise<TallyImportResult> {
             ledger_name: ledgerName || (isParty ? party : 'Ledger'),
             is_party: isParty,
             is_bank_cash: isBank || (!isParty && ledgerEntries.length <= 2),
-            amount: parseSignedAmount(extractTag(block, 'AMOUNT')),
+            amount: parseMoneyAmount(extractTag(block, 'AMOUNT')),
             is_deemed_positive: isYes(extractTag(block, 'ISDEEMEDPOSITIVE')),
           };
         });

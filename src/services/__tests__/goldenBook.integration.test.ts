@@ -1,4 +1,5 @@
 import { getDatabase, initializeFreshDatabase } from '../../db/database';
+import { toPaise } from '../../utils/money';
 import { getBalanceSheet } from '../banking';
 import { createProduct } from '../inventory';
 import {
@@ -42,22 +43,22 @@ describe('golden book — ledger', () => {
     const productId = await createProduct({
       name: 'Golden Widget',
       opening_qty: 20,
-      opening_cost: 40,
-      sell_price: 100,
+      opening_cost: toPaise(40),
+      sell_price: toPaise(100),
     });
 
     const saleId = await createSale({
       party_name: 'Mumbai Buyer',
       date: TEST_DATE,
-      items: [{ product_id: productId, qty: 2, unit_price: 100 }],
-      payments: [{ account_id: cashAccountId, amount: 200, date: TEST_DATE }],
+      items: [{ product_id: productId, qty: 2, unit_price: toPaise(100) }],
+      payments: [{ account_id: cashAccountId, amount: toPaise(200), date: TEST_DATE }],
     });
 
     await createPurchase({
       supplier_name: 'Pune Vendor',
       date: TEST_DATE,
-      items: [{ product_id: productId, qty: 5, unit_cost: 40 }],
-      payments: [{ account_id: cashAccountId, amount: 200, date: TEST_DATE }],
+      items: [{ product_id: productId, qty: 5, unit_cost: toPaise(40) }],
+      payments: [{ account_id: cashAccountId, amount: toPaise(200), date: TEST_DATE }],
     });
 
     await createAdjustmentNote({
@@ -67,13 +68,13 @@ describe('golden book — ledger', () => {
       party_name: 'Mumbai Buyer',
       date: TEST_DATE,
       reason: 'Return one unit',
-      items: [{ product_id: productId, qty: 1, unit_price: 100 }],
+      items: [{ product_id: productId, qty: 1, unit_price: toPaise(100) }],
     });
 
     await rebuildGeneralLedger();
 
     const tb = await getTrialBalanceFromLedger();
-    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(0.02);
+    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(1);
   });
 
   it('full rebuild after sale keeps trial balance balanced', async () => {
@@ -81,21 +82,21 @@ describe('golden book — ledger', () => {
     const productId = await createProduct({
       name: 'Scoped Item',
       opening_qty: 5,
-      opening_cost: 10,
-      sell_price: 50,
+      opening_cost: toPaise(10),
+      sell_price: toPaise(50),
     });
 
     await createSale({
       party_name: 'Walk-in',
       date: TEST_DATE,
       invoice_type: 'bos',
-      items: [{ product_id: productId, qty: 1, unit_price: 50 }],
-      payments: [{ account_id: cashAccountId, amount: 50, date: TEST_DATE }],
+      items: [{ product_id: productId, qty: 1, unit_price: toPaise(50) }],
+      payments: [{ account_id: cashAccountId, amount: toPaise(50), date: TEST_DATE }],
     });
 
     await rebuildGeneralLedger();
     const tb = await getTrialBalanceFromLedger();
-    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(0.02);
+    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(1);
   });
 
   it('ignores legacy tax columns so trial balance has no GST accounts', async () => {
@@ -103,29 +104,29 @@ describe('golden book — ledger', () => {
     const productId = await createProduct({
       name: 'Taxed Legacy Item',
       opening_qty: 10,
-      opening_cost: 20,
-      sell_price: 118,
+      opening_cost: toPaise(20),
+      sell_price: toPaise(118),
     });
 
     const saleId = await createSale({
       party_name: 'Legacy Buyer',
       date: TEST_DATE,
-      items: [{ product_id: productId, qty: 1, unit_price: 118 }],
-      payments: [{ account_id: cashAccountId, amount: 118, date: TEST_DATE }],
+      items: [{ product_id: productId, qty: 1, unit_price: toPaise(118) }],
+      payments: [{ account_id: cashAccountId, amount: toPaise(118), date: TEST_DATE }],
     });
 
     const db = await getDatabase();
     // Simulate a pre-GST-removal invoice that still stores tax splits on the row.
     await db.runAsync(
       `UPDATE sales
-       SET taxable_amount = 100, cgst_amount = 9, sgst_amount = 9, igst_amount = 0
+       SET taxable_amount = ${100 * 100}, cgst_amount = ${9 * 100}, sgst_amount = ${9 * 100}, igst_amount = 0
        WHERE id = ?`,
       [saleId]
     );
 
     await rebuildGeneralLedger();
     const tb = await getTrialBalanceFromLedger();
-    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(0.02);
+    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(1);
     const gstAccounts = tb.rows.filter((row) => /gst/i.test(row.account));
     expect(gstAccounts).toEqual([]);
 
@@ -142,15 +143,15 @@ describe('golden book — ledger', () => {
     const productId = await createProduct({
       name: 'Await Drain Item',
       opening_qty: 5,
-      opening_cost: 10,
-      sell_price: 50,
+      opening_cost: toPaise(10),
+      sell_price: toPaise(50),
     });
 
     await createSale({
       party_name: 'Await Buyer',
       date: TEST_DATE,
-      items: [{ product_id: productId, qty: 1, unit_price: 50 }],
-      payments: [{ account_id: cashAccountId, amount: 50, date: TEST_DATE }],
+      items: [{ product_id: productId, qty: 1, unit_price: toPaise(50) }],
+      payments: [{ account_id: cashAccountId, amount: toPaise(50), date: TEST_DATE }],
     });
 
     scheduleGeneralLedgerRefresh({ type: 'full' });
@@ -161,7 +162,7 @@ describe('golden book — ledger', () => {
     await awaitPendingLedgerRefresh();
 
     const tb = await getTrialBalanceFromLedger();
-    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(0.02);
+    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(1);
   });
 
   it('payment voucher against invoice keeps TB balanced after scoped refresh', async () => {
@@ -170,14 +171,14 @@ describe('golden book — ledger', () => {
     const productId = await createProduct({
       name: 'Voucher Widget',
       opening_qty: 10,
-      opening_cost: 20,
-      sell_price: 100,
+      opening_cost: toPaise(20),
+      sell_price: toPaise(100),
     });
 
     const saleId = await createSale({
       party_name: 'Voucher Customer',
       date: TEST_DATE,
-      items: [{ product_id: productId, qty: 1, unit_price: 100 }],
+      items: [{ product_id: productId, qty: 1, unit_price: toPaise(100) }],
       payments: [],
     });
     const sale = await getDatabase().then((db) =>
@@ -191,19 +192,19 @@ describe('golden book — ledger', () => {
       party_name: 'Voucher Customer',
       party_type: 'customer',
       account_id: cashAccountId,
-      amount: 100,
+      amount: toPaise(100),
       lines: [
-        { ledger_name: 'Voucher Customer', is_party: true, amount: -100, is_deemed_positive: true },
-        { ledger_name: 'Cash', is_bank_cash: true, amount: 100, is_deemed_positive: false },
+        { ledger_name: 'Voucher Customer', is_party: true, amount: toPaise(-100), is_deemed_positive: true },
+        { ledger_name: 'Cash', is_bank_cash: true, amount: toPaise(100), is_deemed_positive: false },
       ],
       allocations: [
-        { bill_name: sale!.invoice_no, bill_type: 'agst_ref', amount: 100 },
+        { bill_name: sale!.invoice_no, bill_type: 'agst_ref', amount: toPaise(100) },
       ],
     });
 
     await awaitPendingLedgerRefresh();
     const tb = await getTrialBalanceFromLedger();
-    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(0.02);
+    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(1);
 
     const paid = await getDatabase().then((db) =>
       db.getFirstAsync<{ paid_amount: number; status: string }>(
@@ -211,7 +212,7 @@ describe('golden book — ledger', () => {
         [saleId]
       )
     );
-    expect(paid?.paid_amount).toBe(100);
+    expect(paid?.paid_amount).toBe(toPaise(100));
     expect(paid?.status).toBe('paid');
   });
 });

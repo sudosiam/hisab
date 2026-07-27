@@ -10,7 +10,7 @@ import {
 } from '../../src/components/ui';
 import { getInvestmentInfo, setOwnerInvestment } from '../../src/services/investments';
 import { formatSqliteError } from '../../src/db/database';
-import { formatAmountInput, parseAmountInput } from '../../src/utils/format';
+import { formatAmountInput, parseMoneyInput } from '../../src/utils/format';
 import { MoneyText } from '../../src/components/MoneyText';
 import { DetailSkeleton } from '../../src/components/Skeleton';
 import { useDatabaseActions } from '../../src/context/DatabaseContext';
@@ -84,7 +84,7 @@ export default function InvestmentsScreen() {
 
   const handleSave = async () => {
     if (saving) return;
-    const parsed = parseAmountInput(amount);
+    const parsed = parseMoneyInput(amount);
     if (!Number.isFinite(parsed) || parsed < 0) {
       Alert.alert('Error', 'Enter a valid investment amount');
       return;

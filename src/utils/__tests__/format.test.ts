@@ -6,39 +6,40 @@ import {
   formatQtyInput,
   formatSignedCurrency,
   parseAmountInput,
+  parseMoneyInput,
   parsePositiveAmount,
 } from '../format';
 
-describe('format utilities', () => {
-  it('formats Indian currency with paise', () => {
-    expect(formatCurrency(1234567)).toBe('₹12,34,567.00');
-    expect(formatCurrency(10.75)).toBe('₹10.75');
-    expect(formatCurrency(10.7)).toBe('₹10.70');
-    expect(formatCurrency(-500.5)).toBe('-₹500.50');
+describe('format utilities (paise amounts)', () => {
+  it('formats Indian currency from paise', () => {
+    expect(formatCurrency(123456700)).toBe('₹12,34,567.00');
+    expect(formatCurrency(1075)).toBe('₹10.75');
+    expect(formatCurrency(1070)).toBe('₹10.70');
+    expect(formatCurrency(-50050)).toBe('-₹500.50');
     expect(formatCurrency(0)).toBe('₹0.00');
   });
 
   it('formats whole rupees without paise', () => {
-    expect(formatCurrencyWhole(1234567)).toBe('₹12,34,567');
-    expect(formatCurrencyWhole(10.75)).toBe('₹11');
-    expect(formatCurrencyWhole(10.4)).toBe('₹10');
-    expect(formatCurrencyWhole(-500.6)).toBe('-₹501');
+    expect(formatCurrencyWhole(123456700)).toBe('₹12,34,567');
+    expect(formatCurrencyWhole(1075)).toBe('₹11');
+    expect(formatCurrencyWhole(1040)).toBe('₹10');
+    expect(formatCurrencyWhole(-50060)).toBe('-₹501');
     expect(formatCurrencyWhole(0)).toBe('₹0');
   });
 
   it('formats plain indian money without symbol', () => {
-    expect(formatIndianMoney(1234.5)).toBe('1,234.50');
+    expect(formatIndianMoney(123450)).toBe('1,234.50');
   });
 
-  it('formats input with two decimal places', () => {
-    expect(formatAmountInput(1234567)).toBe('1234567.00');
-    expect(formatAmountInput(10.75)).toBe('10.75');
-    expect(formatAmountInput(99.999)).toBe('100.00');
-    expect(formatAmountInput(-5.5)).toBe('-5.50');
+  it('formats input with two decimal places from paise', () => {
+    expect(formatAmountInput(123456700)).toBe('1234567.00');
+    expect(formatAmountInput(1075)).toBe('10.75');
+    expect(formatAmountInput(10000)).toBe('100.00');
+    expect(formatAmountInput(-550)).toBe('-5.50');
     expect(formatAmountInput(NaN)).toBe('0.00');
   });
 
-  it('parses comma-grouped decimal input to paise', () => {
+  it('parses qty/rate decimals without converting to paise', () => {
     expect(parseAmountInput('5,000')).toBe(5000);
     expect(parseAmountInput('1,23,456.50')).toBe(123456.5);
     expect(parseAmountInput('99.99')).toBe(99.99);
@@ -47,9 +48,15 @@ describe('format utilities', () => {
     expect(Number.isNaN(parseAmountInput('abc'))).toBe(true);
   });
 
-  it('formats signed currency', () => {
-    expect(formatSignedCurrency(100)).toBe('+₹100.00');
-    expect(formatSignedCurrency(-50.25)).toBe('-₹50.25');
+  it('parses money input to paise', () => {
+    expect(parseMoneyInput('100')).toBe(10000);
+    expect(parseMoneyInput('99.99')).toBe(9999);
+    expect(parseMoneyInput('1,23,456.50')).toBe(12345650);
+  });
+
+  it('formats signed currency from paise', () => {
+    expect(formatSignedCurrency(10000)).toBe('+₹100.00');
+    expect(formatSignedCurrency(-5025)).toBe('-₹50.25');
     expect(formatSignedCurrency(0)).toBe('₹0.00');
   });
 
@@ -60,9 +67,9 @@ describe('format utilities', () => {
     expect(formatQtyInput(-3)).toBe('-3');
   });
 
-  it('parses positive amounts', () => {
-    expect(parsePositiveAmount('100')).toBe(100);
-    expect(parsePositiveAmount('99.99')).toBe(99.99);
+  it('parses positive money amounts as paise', () => {
+    expect(parsePositiveAmount('100')).toBe(10000);
+    expect(parsePositiveAmount('99.99')).toBe(9999);
     expect(parsePositiveAmount('')).toBeNull();
     expect(parsePositiveAmount('-5')).toBeNull();
     expect(parsePositiveAmount('0')).toBeNull();

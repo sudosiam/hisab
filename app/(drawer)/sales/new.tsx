@@ -39,7 +39,7 @@ import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuar
 import { useDatabaseActions, useRefreshKey } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
-import { formatAmountInput, formatCurrency, parseAmountInput } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency, parseAmountInput, parseMoneyInput } from '../../../src/utils/format';
 import { MoneyText } from '../../../src/components/MoneyText';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
 import { addMoney, roundMoney } from '../../../src/utils/money';
@@ -412,10 +412,10 @@ export default function NewSaleScreen() {
           setAdvanceCredit(credit);
           if (skipAdvanceAutoRef.current) {
             skipAdvanceAutoRef.current = false;
-            if (credit <= 0.009) setApplyAdvance(false);
+            if (credit <= 0) setApplyAdvance(false);
             // else keep draft-restored applyAdvance
           } else {
-            setApplyAdvance(credit > 0.009);
+            setApplyAdvance(credit > 0);
           }
         }
       })
@@ -431,8 +431,8 @@ export default function NewSaleScreen() {
     };
   }, [partyName]);
 
-  const discountAmount = roundMoney(Math.max(0, parseAmountInput(discount) || 0));
-  const serviceChargesAmount = roundMoney(Math.max(0, parseAmountInput(serviceCharges) || 0));
+  const discountAmount = roundMoney(Math.max(0, parseMoneyInput(discount) || 0));
+  const serviceChargesAmount = roundMoney(Math.max(0, parseMoneyInput(serviceCharges) || 0));
   const deferredItems = useDeferredValue(items);
   const deferredDiscount = useDeferredValue(discountAmount);
   const deferredServiceCharges = useDeferredValue(serviceChargesAmount);
@@ -441,7 +441,7 @@ export default function NewSaleScreen() {
       return computeUntaxedDocument({
         lines: deferredItems.map((item) => ({
           qty: parseAmountInput(item.qty) || 0,
-          unit_price: parseAmountInput(item.unit_price) || 0,
+          unit_price: parseMoneyInput(item.unit_price) || 0,
           hsn_sac: item.hsn_sac.trim() || null,
         })),
         discount_amount: deferredDiscount,
@@ -456,15 +456,15 @@ export default function NewSaleScreen() {
   const total = docTotals?.total_amount ?? 0;
 
   const cashPaidTotal = useMemo(
-    () => payments.reduce((sum, p) => addMoney(sum, parseAmountInput(p.amount) || 0), 0),
+    () => payments.reduce((sum, p) => addMoney(sum, parseMoneyInput(p.amount) || 0), 0),
     [payments]
   );
   const advanceAppliedPreview =
-    applyAdvance && advanceCredit > 0.009
+    applyAdvance && advanceCredit > 0
       ? roundMoney(Math.min(advanceCredit, Math.max(0, total - cashPaidTotal)))
       : 0;
   const paidTotal = addMoney(cashPaidTotal, advanceAppliedPreview);
-  const isOverpaid = paidTotal > total + 0.01;
+  const isOverpaid = paidTotal > total + 1;
 
   const addItem = () => {
     setItems([...items, createEmptyLineItem()]);
@@ -513,7 +513,7 @@ export default function NewSaleScreen() {
           break;
         }
         const qty = parseAmountInput(item.qty);
-        const price = parseAmountInput(item.unit_price);
+        const price = parseMoneyInput(item.unit_price);
         if (!qty || qty <= 0) {
           nextErrors.items = 'Each item must have quantity greater than zero';
           break;
@@ -527,7 +527,7 @@ export default function NewSaleScreen() {
     if (discountAmount > subtotal) nextErrors.discount = 'Discount cannot exceed subtotal';
 
     for (const p of payments) {
-      const amt = parseAmountInput(p.amount);
+      const amt = parseMoneyInput(p.amount);
       if (p.amount.trim() && (!Number.isFinite(amt) || amt <= 0)) {
         nextErrors.payments =
           'Each payment amount must be greater than zero (or leave it empty)';
@@ -543,13 +543,13 @@ export default function NewSaleScreen() {
       }
     }
 
-    const cashPaid = payments.reduce((sum, p) => addMoney(sum, parseAmountInput(p.amount) || 0), 0);
+    const cashPaid = payments.reduce((sum, p) => addMoney(sum, parseMoneyInput(p.amount) || 0), 0);
     const advanceToApply =
-      applyAdvance && advanceCredit > 0.009
+      applyAdvance && advanceCredit > 0
         ? roundMoney(Math.min(advanceCredit, Math.max(0, total - cashPaid)))
         : 0;
     const paidTotal = addMoney(cashPaid, advanceToApply);
-    if (paidTotal > total + 0.01) {
+    if (paidTotal > total + 1) {
       nextErrors.payments = `Total payments cannot exceed invoice amount (${formatCurrency(total)}).`;
     }
 
@@ -570,19 +570,19 @@ export default function NewSaleScreen() {
           items: items.map((i) => ({
             product_id: i.product_id,
             qty: parseAmountInput(i.qty) || 0,
-            unit_price: parseAmountInput(i.unit_price) || 0,
+            unit_price: parseMoneyInput(i.unit_price) || 0,
             hsn_sac: i.hsn_sac.trim() || null,
           })),
           payments: payments
-            .filter((p) => parseAmountInput(p.amount) > 0 && p.account_id > 0)
+            .filter((p) => parseMoneyInput(p.amount) > 0 && p.account_id > 0)
             .map((p) => ({
               account_id: p.account_id,
-              amount: parseAmountInput(p.amount),
+              amount: parseMoneyInput(p.amount),
               date: p.date,
               notes: p.notes || undefined,
             })),
         });
-        if (advanceToApply > 0.009) {
+        if (advanceToApply > 0) {
           await applyPartyAdvanceToSale(saleId, advanceToApply, date);
         }
         leaveBypassRef.current = true;

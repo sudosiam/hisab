@@ -34,8 +34,9 @@ function amountInWordsInr(amount: number): string {
     return `${tens[Math.floor(n / 10)]}${ones[n % 10] ? ` ${ones[n % 10]}` : ''}`.trim();
   };
   const section = (n: number, label: string) => (n > 0 ? `${twoDigits(n)} ${label}` : '');
-  const rupees = Math.floor(Math.abs(amount));
-  const paise = Math.round((Math.abs(amount) - rupees) * 100);
+  const abs = Math.abs(Math.round(amount));
+  const rupees = Math.floor(abs / 100);
+  const paise = abs % 100;
   if (rupees === 0 && paise === 0) return 'Zero Rupees Only';
   const crore = Math.floor(rupees / 10000000);
   const lakh = Math.floor((rupees % 10000000) / 100000);
@@ -73,8 +74,8 @@ export async function buildPurchaseInvoiceHtml(purchaseId: number): Promise<{
   const due = roundMoney(Math.max(0, purchase.total_amount - purchase.paid_amount));
   const words = amountInWordsInr(purchase.total_amount);
 
-  const statusLabel = due > 0.009 ? 'Balance due' : 'Paid in full';
-  const statusTone = due > 0.009 ? 'due' : 'paid';
+  const statusLabel = due > 0 ? 'Balance due' : 'Paid in full';
+  const statusTone = due > 0 ? 'due' : 'paid';
 
   const itemRows = items
     .map((item, index) => {
@@ -306,7 +307,7 @@ export async function buildPurchaseInvoiceHtml(purchaseId: number): Promise<{
       <div class="doc-type">${escapeHtml(docLabel)}</div>
       <div class="inv-no mono">${escapeHtml(purchase.invoice_no)}</div>
       <div class="inv-date">${escapeHtml(formatDisplayDate(purchase.date))}</div>
-      <span class="status-pill ${statusTone}">${statusLabel}${due > 0.009 ? ` · ${money(due)}` : ''}</span>
+      <span class="status-pill ${statusTone}">${statusLabel}${due > 0 ? ` · ${money(due)}` : ''}</span>
     </div>
   </div>
 
@@ -343,7 +344,7 @@ export async function buildPurchaseInvoiceHtml(purchaseId: number): Promise<{
       <div class="row"><span>Subtotal</span><span class="mono">${money(purchase.subtotal)}</span></div>
       ${purchase.discount_amount > 0 ? `<div class="row"><span>Discount</span><span class="mono">− ${money(purchase.discount_amount)}</span></div>` : ''}
       <div class="row grand"><span>Grand Total</span><span class="mono">${money(purchase.total_amount)}</span></div>
-      ${due > 0.009 ? `<div class="row due-row"><span>Balance due</span><span class="mono">${money(due)}</span></div>` : ''}
+      ${due > 0 ? `<div class="row due-row"><span>Balance due</span><span class="mono">${money(due)}</span></div>` : ''}
     </div>
   </div>
 

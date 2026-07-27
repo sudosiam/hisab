@@ -1,4 +1,5 @@
 import { initializeFreshDatabase } from '../../db/database';
+import { toPaise } from '../../utils/money';
 import { importTallyXml } from '../tallyXml';
 import { getSales } from '../sales';
 import { getPurchases } from '../purchases';
@@ -67,7 +68,7 @@ describe('Tally import FIFO payment allocation without BILLALLOCATIONS', () => {
     const sales = await getSales('all');
     expect(sales).toHaveLength(1);
     expect(sales[0].status).toBe('paid');
-    expect(sales[0].paid_amount).toBe(1000);
+    expect(sales[0].paid_amount).toBe(toPaise(1000));
   });
 
   it('marks purchase paid when payment has no bill allocations but matches vendor', async () => {
@@ -122,6 +123,6 @@ describe('Tally import FIFO payment allocation without BILLALLOCATIONS', () => {
     const purchases = await getPurchases('all');
     expect(purchases).toHaveLength(1);
     expect(purchases[0].status).toBe('paid');
-    expect(purchases[0].paid_amount).toBe(500);
+    expect(purchases[0].paid_amount).toBe(toPaise(500));
   });
 });

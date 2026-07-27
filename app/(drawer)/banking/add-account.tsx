@@ -13,7 +13,7 @@ import { DRAFT_KEYS, loadDraft, type AddAccountFormDraft } from '../../../src/se
 import { useFormDraft } from '../../../src/hooks/useFormDraft';
 import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { formatSqliteError } from '../../../src/db/database';
-import { parseAmountInput } from '../../../src/utils/format';
+import { parseMoneyInput } from '../../../src/utils/format';
 import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { radius, spacing } from '../../../src/constants/theme';
@@ -120,7 +120,7 @@ export default function AddAccountScreen() {
       Alert.alert('Error', 'Account name is required');
       return;
     }
-    const openingValue = opening.trim() ? parseAmountInput(opening) : 0;
+    const openingValue = opening.trim() ? parseMoneyInput(opening) : 0;
     if (!Number.isFinite(openingValue)) {
       Alert.alert('Error', 'Enter a valid opening balance');
       return;

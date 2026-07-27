@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { spacing, radius } from '../constants/theme';
 import { elevatedSurface } from '../constants/shadows';
-import { formatCurrency, formatQty, parseAmountInput } from '../utils/format';
+import { formatCurrency, formatQty, parseAmountInput, parseMoneyInput } from '../utils/format';
 import {
   addProductCategory,
   createProduct,
@@ -288,8 +288,8 @@ export function ProductPicker({
     }
 
     const openingQty = newOpeningQty.trim() ? parseAmountInput(newOpeningQty) : 0;
-    const openingCost = newCost.trim() ? parseAmountInput(newCost) : 0;
-    const sellPrice = newSellPrice.trim() ? parseAmountInput(newSellPrice) : undefined;
+    const openingCost = newCost.trim() ? parseMoneyInput(newCost) : 0;
+    const sellPrice = newSellPrice.trim() ? parseMoneyInput(newSellPrice) : undefined;
 
     if (!Number.isFinite(openingQty) || openingQty < 0) {
       Alert.alert('Invalid stock', 'Opening quantity cannot be negative.');

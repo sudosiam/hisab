@@ -4,13 +4,43 @@
 --   [ ] Auth → Providers → Email enabled (password sign-in)
 --   [ ] Auth → enable "Confirm email" so new accounts cannot upload until verified
 --   [ ] Prefer minimum password length ≥ 10 (app enforces 10 on sign-in/sign-up)
---   [ ] Set EXPO_PUBLIC_CLOUD_OWNER_EMAIL in the app build so only your email can
---       authenticate against this project from the client
+--   [ ] Replace OWNER_EMAIL_PLACEHOLDER below with your real owner email, then run
+--       section 0 (signup allowlist trigger) — this is the real server-side lock
+--   [ ] Set EXPO_PUBLIC_CLOUD_OWNER_EMAIL in the app build to the same email
+--       (client UX only; not authoritative — anyone can bypass a public env var)
+--   [ ] After first successful sign-up, Auth → disable public sign-ups if available
 --   [ ] Confirm the owner email inbox once after first sign-up (before first upload)
 --   [ ] Storage bucket hisab-backups is private (created below)
 --
 -- Reminder: cloud backup is a full DB snapshot from one device — last upload wins;
 -- it is not multi-device live sync.
+
+-- 0) Server-side signup allowlist (authoritative)
+-- Replace the placeholder email before running. Blocks any other email from
+-- creating an auth.users row via the Auth API (including decompiled APK clients).
+create or replace function public.hisab_enforce_owner_email()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  -- >>> CHANGE THIS to your owner email before running <<<
+  allowed_email text := lower('you@example.com');
+begin
+  if new.email is null or lower(new.email) <> allowed_email then
+    raise exception 'Hisab cloud backup: sign-up restricted to the owner email'
+      using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists hisab_enforce_owner_email on auth.users;
+create trigger hisab_enforce_owner_email
+  before insert on auth.users
+  for each row
+  execute function public.hisab_enforce_owner_email();
 
 -- 1) Private storage bucket
 insert into storage.buckets (id, name, public, file_size_limit)

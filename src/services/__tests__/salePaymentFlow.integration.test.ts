@@ -1,4 +1,5 @@
 import { getDatabase, initializeFreshDatabase } from '../../db/database';
+import { toPaise } from '../../utils/money';
 import { createProduct, getProductById } from '../inventory';
 import {
   createPurchase,
@@ -35,15 +36,15 @@ describe('sale and purchase payment integration', () => {
     const productId = await createProduct({
       name: 'Test Bulb',
       opening_qty: 10,
-      opening_cost: 50,
-      sell_price: 100,
+      opening_cost: toPaise(50),
+      sell_price: toPaise(100),
     });
 
     const saleId = await createSale({
       party_name: 'Test Customer',
       date: TEST_DATE,
-      items: [{ product_id: productId, qty: 2, unit_price: 100 }],
-      payments: [{ account_id: cashAccountId, amount: 120, date: TEST_DATE }],
+      items: [{ product_id: productId, qty: 2, unit_price: toPaise(100) }],
+      payments: [{ account_id: cashAccountId, amount: toPaise(120), date: TEST_DATE }],
     });
 
     const product = await getProductById(productId);
@@ -55,17 +56,17 @@ describe('sale and purchase payment integration', () => {
         [cashAccountId]
       )
     );
-    expect(cash?.current_balance).toBe(120);
+    expect(cash?.current_balance).toBe(toPaise(120));
 
     const sale = await getSaleById(saleId);
-    expect(sale?.paid_amount).toBe(120);
+    expect(sale?.paid_amount).toBe(toPaise(120));
     expect(sale?.status).toBe('partial');
 
     const [payment] = await getSalePayments(saleId);
     await removeSalePayment(saleId, payment.id);
 
     const saleAfter = await getSaleById(saleId);
-    expect(saleAfter?.paid_amount).toBe(0);
+    expect(saleAfter?.paid_amount).toBe(toPaise(0));
     expect(saleAfter?.status).toBe('unpaid');
 
     const cashAfter = await getDatabase().then((db) =>
@@ -74,7 +75,7 @@ describe('sale and purchase payment integration', () => {
         [cashAccountId]
       )
     );
-    expect(cashAfter?.current_balance).toBe(0);
+    expect(cashAfter?.current_balance).toBe(toPaise(0));
 
     const productAfter = await getProductById(productId);
     expect(productAfter?.current_qty).toBe(8);
@@ -85,15 +86,15 @@ describe('sale and purchase payment integration', () => {
     const productId = await createProduct({
       name: 'Test Cable',
       opening_qty: 0,
-      opening_cost: 0,
-      sell_price: 80,
+      opening_cost: toPaise(0),
+      sell_price: toPaise(80),
     });
 
     const purchaseId = await createPurchase({
       supplier_name: 'Test Vendor',
       date: TEST_DATE,
-      items: [{ product_id: productId, qty: 5, unit_cost: 40 }],
-      payments: [{ account_id: cashAccountId, amount: 100, date: TEST_DATE }],
+      items: [{ product_id: productId, qty: 5, unit_cost: toPaise(40) }],
+      payments: [{ account_id: cashAccountId, amount: toPaise(100), date: TEST_DATE }],
     });
 
     const product = await getProductById(productId);
@@ -105,17 +106,17 @@ describe('sale and purchase payment integration', () => {
         [cashAccountId]
       )
     );
-    expect(cash?.current_balance).toBe(-100);
+    expect(cash?.current_balance).toBe(toPaise(-100));
 
     const purchase = await getPurchaseById(purchaseId);
-    expect(purchase?.paid_amount).toBe(100);
+    expect(purchase?.paid_amount).toBe(toPaise(100));
     expect(purchase?.status).toBe('partial');
 
     const [payment] = await getPurchasePayments(purchaseId);
     await removePurchasePayment(purchaseId, payment.id);
 
     const purchaseAfter = await getPurchaseById(purchaseId);
-    expect(purchaseAfter?.paid_amount).toBe(0);
+    expect(purchaseAfter?.paid_amount).toBe(toPaise(0));
     expect(purchaseAfter?.status).toBe('unpaid');
 
     const cashAfter = await getDatabase().then((db) =>
@@ -124,7 +125,7 @@ describe('sale and purchase payment integration', () => {
         [cashAccountId]
       )
     );
-    expect(cashAfter?.current_balance).toBe(0);
+    expect(cashAfter?.current_balance).toBe(toPaise(0));
   });
 
   it('addSalePayment and removeSalePayment keep invoice totals in sync', async () => {
@@ -132,27 +133,27 @@ describe('sale and purchase payment integration', () => {
     const productId = await createProduct({
       name: 'Test Panel',
       opening_qty: 4,
-      opening_cost: 200,
-      sell_price: 300,
+      opening_cost: toPaise(200),
+      sell_price: toPaise(300),
     });
 
     const saleId = await createSale({
       party_name: 'Sync Customer',
       date: TEST_DATE,
-      items: [{ product_id: productId, qty: 1, unit_price: 300 }],
+      items: [{ product_id: productId, qty: 1, unit_price: toPaise(300) }],
       payments: [],
     });
 
-    await addSalePayment(saleId, { account_id: cashAccountId, amount: 150, date: TEST_DATE });
+    await addSalePayment(saleId, { account_id: cashAccountId, amount: toPaise(150), date: TEST_DATE });
     let sale = await getSaleById(saleId);
-    expect(sale?.paid_amount).toBe(150);
+    expect(sale?.paid_amount).toBe(toPaise(150));
     expect(sale?.status).toBe('partial');
 
     const payments = await getSalePayments(saleId);
     await removeSalePayment(saleId, payments[0].id);
 
     sale = await getSaleById(saleId);
-    expect(sale?.paid_amount).toBe(0);
+    expect(sale?.paid_amount).toBe(toPaise(0));
     expect(sale?.status).toBe('unpaid');
     expect(await getSalePayments(saleId)).toHaveLength(0);
   });

@@ -76,7 +76,7 @@ describe('tallyXml helpers', () => {
     expect(purchase902).toBeTruthy();
     expect(extractBlocks(purchase902!, 'LEDGERENTRIES.LIST').length).toBeGreaterThan(0);
     expect(parseQty('10 pcs')).toBe(10);
-    expect(parseRate('50/pcs')).toBe(50);
+    expect(parseRate('50/pcs')).toBe(5000);
   });
 
   it('formats import summary with skip reasons', () => {

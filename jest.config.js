@@ -12,6 +12,7 @@ module.exports = {
     '^expo-sqlite$': '<rootDir>/src/__mocks__/expo-sqlite.ts',
     '^expo-document-picker$': '<rootDir>/src/__mocks__/expo-document-picker.ts',
     '^expo-sharing$': '<rootDir>/src/__mocks__/expo-sharing.ts',
+    '^expo-print$': '<rootDir>/src/__mocks__/expo-print.ts',
     '^expo-intent-launcher$': '<rootDir>/src/__mocks__/expo-intent-launcher.ts',
     '^react-native-share$': '<rootDir>/src/__mocks__/react-native-share.ts',
     '^react-native$': '<rootDir>/src/__mocks__/react-native.ts',

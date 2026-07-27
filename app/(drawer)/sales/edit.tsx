@@ -31,7 +31,7 @@ import { computeUntaxedDocument } from '../../../src/services/documentTotals';
 import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
-import { formatAmountInput, formatCurrency, formatQtyInput, parseAmountInput } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency, formatQtyInput, parseAmountInput, parseMoneyInput } from '../../../src/utils/format';
 import { MoneyText } from '../../../src/components/MoneyText';
 import { isValidISODate } from '../../../src/utils/date';
 import { roundMoney } from '../../../src/utils/money';
@@ -258,15 +258,15 @@ export default function EditSaleScreen() {
     }, [load, saleId, reloadProducts])
   );
 
-  const discountAmount = roundMoney(Math.max(0, parseAmountInput(discount) || 0));
-  const serviceChargesAmount = roundMoney(Math.max(0, parseAmountInput(serviceCharges) || 0));
+  const discountAmount = roundMoney(Math.max(0, parseMoneyInput(discount) || 0));
+  const serviceChargesAmount = roundMoney(Math.max(0, parseMoneyInput(serviceCharges) || 0));
 
   const docTotals = useMemo(() => {
     try {
       return computeUntaxedDocument({
         lines: items.map((item) => ({
           qty: parseAmountInput(item.qty) || 0,
-          unit_price: parseAmountInput(item.unit_price) || 0,
+          unit_price: parseMoneyInput(item.unit_price) || 0,
           hsn_sac: item.hsn_sac.trim() || null,
         })),
         discount_amount: discountAmount,
@@ -359,7 +359,7 @@ export default function EditSaleScreen() {
       Alert.alert('Error', 'Enter a valid service charge amount');
       return;
     }
-    if (total + 0.01 < sale.paid_amount) {
+    if (total + 1 < sale.paid_amount) {
       Alert.alert(
         'Error',
         `New total (${formatCurrency(total)}) cannot be less than the amount already paid (${formatCurrency(sale.paid_amount)}). Remove payments first.`
@@ -373,7 +373,7 @@ export default function EditSaleScreen() {
         return;
       }
       const qty = parseAmountInput(item.qty);
-      const unitPrice = parseAmountInput(item.unit_price);
+      const unitPrice = parseMoneyInput(item.unit_price);
       if (!Number.isFinite(qty) || qty <= 0) {
         Alert.alert('Error', 'Each item must have quantity greater than zero');
         return;
@@ -401,7 +401,7 @@ export default function EditSaleScreen() {
             items: items.map((item) => ({
               product_id: item.product_id,
               qty: parseAmountInput(item.qty) || 0,
-              unit_price: parseAmountInput(item.unit_price) || 0,hsn_sac: item.hsn_sac.trim() || null,
+              unit_price: parseMoneyInput(item.unit_price) || 0,hsn_sac: item.hsn_sac.trim() || null,
             })),
           });
           refresh();

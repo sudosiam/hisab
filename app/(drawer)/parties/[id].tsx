@@ -585,7 +585,7 @@ export default function PartyDetailScreen() {
 
   const { party } = summary;
   const isCustomer = party.type === 'customer';
-  const balanceColor = summary.balanceDue > 0.01 ? colors.danger : colors.success;
+  const balanceColor = summary.balanceDue > 0 ? colors.danger : colors.success;
   const paidPct =
     summary.totalBilled > 0 ? Math.min(100, (summary.totalPaid / summary.totalBilled) * 100) : 0;
   const initial = party.name.trim().charAt(0).toUpperCase() || '?';
@@ -704,7 +704,7 @@ export default function PartyDetailScreen() {
             color={colors.success}
             subtitle={`${summary.invoiceCount} invoice${summary.invoiceCount === 1 ? '' : 's'}`}
           />
-          {(summary.advanceCredit ?? 0) > 0.009 ? (
+          {(summary.advanceCredit ?? 0) > 0 ? (
             <StatCard
               label="Advance"
               value={summary.advanceCredit}
@@ -817,7 +817,7 @@ export default function PartyDetailScreen() {
                     <View style={localStyles.historyAmounts}>
                       <Text style={localStyles.historyAmt}>Total {formatCurrency(item.total_amount)}</Text>
                       <Text style={localStyles.historyAmt}>Paid {formatCurrency(item.paid_amount)}</Text>
-                      {due > 0.01 ? (
+                      {due > 0 ? (
                         <Text style={localStyles.historyDue}>Due {formatCurrency(due)}</Text>
                       ) : null}
                     </View>

@@ -258,7 +258,7 @@ export const ListItem = memo(function ListItem({
           />
         ) : null}
         {badge}
-        {dueAmount != null && dueAmount > 0.01 ? (
+        {dueAmount != null && dueAmount > 0 ? (
           <View style={[styles.dueRow, { justifyContent: 'flex-end', marginTop: 0 }]}>
             <Text style={styles.dueLabel}>{dueLabel}</Text>
             <MoneyText

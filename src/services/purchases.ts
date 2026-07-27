@@ -40,13 +40,13 @@ function validatePaymentAmount(
 ): void {
   if (paymentAmount <= 0) throw new Error('Payment amount must be greater than zero');
   const remaining = subMoney(totalAmount, paidAmount);
-  if (paymentAmount > remaining + 0.01) {
+  if (paymentAmount > remaining + 1) {
     throw new Error(`Payment exceeds amount due (${formatCurrency(remaining)} remaining)`);
   }
 }
 
 function roundUnitCost(value: number): number {
-  return Math.round(value * 10000) / 10000;
+  return roundMoney(value);
 }
 
 async function assertActivePaymentAccount(
@@ -159,7 +159,7 @@ export async function createPurchase(params: {
     if (payment.amount <= 0) continue;
     paidAmount = addMoney(paidAmount, payment.amount);
   }
-  if (paidAmount > totalAmount + 0.01) {
+  if (paidAmount > totalAmount + 1) {
     throw new Error('Total payments cannot exceed invoice amount');
   }
 
@@ -386,7 +386,7 @@ export async function updatePurchase(
   if (!invoiceNo) throw new Error('Purchase number is required');
 
   const discount = roundMoney(Math.max(0, params.discount_amount));
-  if (Math.abs(discount - roundMoney(purchase.discount_amount ?? 0)) > 0.01) {
+  if (Math.abs(discount - roundMoney(purchase.discount_amount ?? 0)) > 0) {
     throw new Error(
       'The discount is built into inventory costs and cannot be changed here. Delete this purchase and re-enter it to change the discount.'
     );
@@ -416,7 +416,7 @@ export async function updatePurchase(
       taxableAmount = replaced.totals.taxable_amount;
     }
 
-    if (totalAmount + 0.01 < purchase.paid_amount) {
+    if (totalAmount + 1 < purchase.paid_amount) {
       throw new Error(
         `New total (${formatCurrency(totalAmount)}) cannot be less than the amount already paid (${formatCurrency(purchase.paid_amount)}). Remove payments first.`
       );

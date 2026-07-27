@@ -2,7 +2,16 @@
 
 Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. Books stay on the device. Optional private cloud backup via Supabase (TLS + private storage — not multi-device sync).
 
-**Current version:** `11.0.0` (Android `versionCode` 38 · schema v28)
+Copyright (c) 2026 Biswa. All rights reserved.
+
+**Current version:** `11.1.0` (Android `versionCode` 39 · schema v29)
+
+## What's new in 11.1.0
+
+- Money stored as integer paise (schema v29); UI/Tally convert at the boundary
+- Report/PDF unit + integration tests; `expo-print` Jest mock
+- Proprietary LICENSE; server-side cloud signup email allowlist in Supabase setup SQL
+- Removed non-portable logo asset script
 
 ## What's new in 11.0.0
 
@@ -48,7 +57,7 @@ Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. 
 ## Features
 
 - Drawer — Home · Trading (Sales, Purchases, Inventory, Adjustments) · Cash & parties · Books · Capital · App
-- SQLite local-first storage (schema v28)
+- SQLite local-first storage (schema v29)
 - Split payments, negative stock allowed, weighted-average COGS
 - Reports — P&L, cash flow, trial balance, GL, day book, receivables/payables, party ledgers (PDF)
 - Financial year settings with period sync across screens
@@ -94,8 +103,8 @@ Copy into `releases/` for handoff (APKs are gitignored):
 
 ```powershell
 New-Item -ItemType Directory -Force releases | Out-Null
-Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-11.0.0.apk" -Force
-adb install -r "releases\hisab-11.0.0.apk"
+Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-11.1.0.apk" -Force
+adb install -r "releases\hisab-11.1.0.apk"
 ```
 
 ## Build APK (EAS cloud)
@@ -143,7 +152,7 @@ Cloud backup is a full-database snapshot (last upload wins). Prefer local SAF fo
 ## Tech stack
 
 - Expo SDK 54 / React Native 0.81 / expo-router
-- expo-sqlite (schema v28)
+- expo-sqlite (schema v29)
 - expo-print / expo-sharing / react-native-share
 - Jest + `better-sqlite3` integration harness
 
@@ -159,10 +168,11 @@ Cloud backup is a full-database snapshot (last upload wins). Prefer local SAF fo
 
 ## Known limits
 
-- Money stored as SQLite `REAL` with `roundMoney()` — not integer-paise columns
+- Money stored as SQLite `INTEGER` paise (1 rupee = 100 paise); UI/Tally convert at the boundary. Restoring a pre-v29 backup auto-migrates on open.
 - Tally import does not include expense/journal vouchers; imported Net Profit may differ from Tally P&L
 - WhatsApp chat+PDF targeting needs a native APK (not Expo Go alone)
 - Loans are balance-sheet memos — not linked to banking repayments
 - Cloud backup is a full DB snapshot from one device (last upload wins), not live multi-user sync; the snapshot leaves the device under your cloud login
 - Cloud auth session is stored in SecureStore when available (AsyncStorage fallback in tests/web)
+- Cloud owner email is enforced server-side by the `auth.users` signup trigger in `supabase/cloud-backup-setup.sql` (client `EXPO_PUBLIC_CLOUD_OWNER_EMAIL` is UX only)
 - Historical GST tax amounts may remain in SQLite columns for backup compatibility; new documents are untaxed. Ledger rebuild posts full document totals only (no GST accounts on Trial Balance).

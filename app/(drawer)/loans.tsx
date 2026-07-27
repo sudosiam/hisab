@@ -16,7 +16,7 @@ import {
 import { ListItem } from '../../src/components/ListItem';
 import { ListSkeleton } from '../../src/components/Skeleton';
 import { addLoan, deleteLoan, getLoans, updateLoan } from '../../src/services/loans';
-import { formatAmountInput, formatCurrency, parseAmountInput, parsePositiveAmount } from '../../src/utils/format';
+import { formatAmountInput, formatCurrency, parseAmountInput, parsePositiveAmount, parseMoneyInput } from '../../src/utils/format';
 import { matchesSearch } from '../../src/utils/search';
 import { isValidISODate } from '../../src/utils/date';
 import { useDatabaseActions } from '../../src/context/DatabaseContext';
@@ -206,7 +206,7 @@ export default function LoansScreen() {
     if (!lenderName.trim()) nextErrors.lenderName = 'Enter lender name';
     if (principal === null) nextErrors.principalAmount = 'Enter an amount greater than zero';
 
-    const outstanding = parseAmountInput(outstandingAmount || '0');
+    const outstanding = parseMoneyInput(outstandingAmount || '0');
     if (!Number.isFinite(outstanding) || outstanding < 0) {
       nextErrors.outstandingAmount = 'Cannot be negative';
     } else if (principal !== null && outstanding > principal) {

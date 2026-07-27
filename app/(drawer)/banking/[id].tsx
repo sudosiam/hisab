@@ -34,7 +34,7 @@ import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
 import { parseRouteId } from '../../../src/utils/route';
-import { formatAmountInput, formatCurrency, parseAmountInput } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency, parseMoneyInput } from '../../../src/utils/format';
 import { roundMoney } from '../../../src/utils/money';
 import { spacing, radius } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
@@ -207,7 +207,7 @@ export default function AccountDetailScreen() {
 
   const isEditDirty = useMemo(() => {
     if (!editing || !account) return false;
-    const opening = parseAmountInput(openingBalance);
+    const opening = parseMoneyInput(openingBalance);
     return (
       name.trim() !== account.name ||
       type !== account.type ||
@@ -223,7 +223,7 @@ export default function AccountDetailScreen() {
       Alert.alert('Error', 'Account name is required');
       return;
     }
-    const opening = parseAmountInput(openingBalance);
+    const opening = parseMoneyInput(openingBalance);
     if (!Number.isFinite(opening)) {
       Alert.alert('Error', 'Enter a valid opening balance');
       return;

@@ -242,7 +242,7 @@ export default function SaleDetailScreen() {
     }
 
     const due = sale.total_amount - sale.paid_amount;
-    if (amount > due + 0.01) {
+    if (amount > due + 1) {
       Alert.alert('Error', `Amount exceeds due (${formatCurrency(due)})`);
       return;
     }

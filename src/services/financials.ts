@@ -78,7 +78,7 @@ export async function getPeriodFinancials(
            JOIN accounts a ON a.id = sp.account_id
            WHERE sp.date >= ? AND sp.date <= ?
              AND COALESCE(a.is_excluded, 0) = 0
-             AND s.total_amount > 0.009`,
+             AND s.total_amount > 0`,
           [start, end]
         )
       : db.getFirstAsync<{ total: number }>(

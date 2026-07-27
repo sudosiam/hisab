@@ -33,7 +33,7 @@ import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuar
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
-import { formatAmountInput, parseAmountInput } from '../../../src/utils/format';
+import { formatAmountInput, parseAmountInput, parseMoneyInput } from '../../../src/utils/format';
 import { MoneyText } from '../../../src/components/MoneyText';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
 import { parseRouteId } from '../../../src/utils/route';
@@ -364,7 +364,7 @@ export default function NewNoteScreen() {
       return computeUntaxedDocument({
         lines: deferredItems.map((item) => ({
           qty: parseAmountInput(item.qty) || 0,
-          unit_price: parseAmountInput(item.unit_price) || 0,
+          unit_price: parseMoneyInput(item.unit_price) || 0,
           hsn_sac: item.hsn_sac.trim() || null,
         })),
         discount_amount: 0,
@@ -421,7 +421,7 @@ export default function NewNoteScreen() {
     const parsedItems = [];
     for (const item of items) {
       const qty = parseAmountInput(item.qty);
-      const unitPrice = parseAmountInput(item.unit_price);
+      const unitPrice = parseMoneyInput(item.unit_price);
       if (!item.product_id && !item.description.trim()) {
         Alert.alert('Error', 'Each line needs a product or description');
         return;

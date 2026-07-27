@@ -102,7 +102,7 @@ async function findSaleByBillName(billName: string, partyName?: string) {
       `SELECT id, invoice_no, total_amount, paid_amount, party_name FROM sales
        WHERE invoice_no = ? COLLATE NOCASE
          AND party_name = ? COLLATE NOCASE
-         AND (total_amount - paid_amount) > 0.009
+         AND (total_amount - paid_amount) > 0
        ORDER BY date ASC, id ASC LIMIT 1`,
       [name, party]
     );
@@ -152,7 +152,7 @@ async function findPurchaseByBillName(billName: string, partyName?: string) {
       `SELECT id, invoice_no, vendor_invoice_no, total_amount, paid_amount, supplier_name FROM purchases
        WHERE (invoice_no = ? COLLATE NOCASE OR vendor_invoice_no = ? COLLATE NOCASE)
          AND supplier_name = ? COLLATE NOCASE
-         AND (total_amount - paid_amount) > 0.009
+         AND (total_amount - paid_amount) > 0
        ORDER BY date ASC, id ASC LIMIT 1`,
       [name, name, party]
     );
@@ -198,7 +198,7 @@ export async function planFifoAllocationsAgainstOpenInvoices(
   amount: number
 ): Promise<PaymentVoucherAllocationInput[]> {
   const total = roundMoney(Math.abs(amount));
-  if (!(total > 0.009) || !partyName.trim()) {
+  if (!(total > 0) || !partyName.trim()) {
     return [{ bill_name: 'On Account', bill_type: 'on_account', amount: total }];
   }
 
@@ -212,7 +212,7 @@ export async function planFifoAllocationsAgainstOpenInvoices(
         }>(
           `SELECT invoice_no, total_amount, paid_amount FROM sales
            WHERE party_name = ? COLLATE NOCASE
-             AND (total_amount - paid_amount) > 0.009
+             AND (total_amount - paid_amount) > 0
            ORDER BY date ASC, id ASC`,
           [partyName.trim()]
         )
@@ -223,7 +223,7 @@ export async function planFifoAllocationsAgainstOpenInvoices(
         }>(
           `SELECT invoice_no, total_amount, paid_amount FROM purchases
            WHERE supplier_name = ? COLLATE NOCASE
-             AND (total_amount - paid_amount) > 0.009
+             AND (total_amount - paid_amount) > 0
            ORDER BY date ASC, id ASC`,
           [partyName.trim()]
         );
@@ -231,9 +231,9 @@ export async function planFifoAllocationsAgainstOpenInvoices(
   const allocations: PaymentVoucherAllocationInput[] = [];
   let remaining = total;
   for (const inv of open) {
-    if (remaining <= 0.009) break;
+    if (remaining <= 0) break;
     const due = roundMoney(Math.max(0, inv.total_amount - inv.paid_amount));
-    if (due <= 0.009) continue;
+    if (due <= 0) continue;
     const apply = roundMoney(Math.min(remaining, due));
     allocations.push({
       bill_name: inv.invoice_no,
@@ -243,7 +243,7 @@ export async function planFifoAllocationsAgainstOpenInvoices(
     remaining = roundMoney(remaining - apply);
   }
 
-  if (remaining > 0.009) {
+  if (remaining > 0) {
     allocations.push({
       bill_name: 'On Account',
       bill_type: 'on_account',
@@ -362,7 +362,7 @@ export async function createPaymentVoucher(
 
     for (const alloc of allocations) {
       const allocAmount = roundMoney(Math.abs(alloc.amount));
-      if (!(allocAmount > 0.009)) continue;
+      if (!(allocAmount > 0)) continue;
 
       let billType = alloc.bill_type;
       let saleId: number | null = null;
@@ -379,7 +379,7 @@ export async function createPaymentVoucher(
             const due = roundMoney(Math.max(0, sale.total_amount - sale.paid_amount));
             // Never pay more than due — leftover stays on-account / advance.
             const payAmount = roundMoney(Math.min(allocAmount, due));
-            if (payAmount > 0.009) {
+            if (payAmount > 0) {
               const payResult = await db.runAsync(
                 `INSERT INTO sale_payments (sale_id, account_id, amount, date, notes)
                  VALUES (?, ?, ?, ?, ?)`,
@@ -429,7 +429,7 @@ export async function createPaymentVoucher(
             purchaseId = purchase.id;
             const due = roundMoney(Math.max(0, purchase.total_amount - purchase.paid_amount));
             const payAmount = roundMoney(Math.min(allocAmount, due));
-            if (payAmount > 0.009) {
+            if (payAmount > 0) {
               const payResult = await db.runAsync(
                 `INSERT INTO purchase_payments (purchase_id, account_id, amount, date, notes)
                  VALUES (?, ?, ?, ?, ?)`,
@@ -476,7 +476,7 @@ export async function createPaymentVoucher(
       }
 
       const billName = alloc.bill_name.trim() || 'On Account';
-      if (billType === 'agst_ref' && appliedToInvoice > 0.009) {
+      if (billType === 'agst_ref' && appliedToInvoice > 0) {
         await insertAllocation({
           bill_name: billName,
           bill_type: 'agst_ref',
@@ -487,7 +487,7 @@ export async function createPaymentVoucher(
           purchase_payment_id: purchasePaymentId,
         });
         const leftover = roundMoney(allocAmount - appliedToInvoice);
-        if (leftover > 0.009) {
+        if (leftover > 0) {
           await insertAllocation({
             bill_name: 'On Account',
             bill_type: 'on_account',
@@ -512,7 +512,7 @@ export async function createPaymentVoucher(
     }
 
     const unallocated = roundMoney(Math.max(0, amount - allocatedToInvoices));
-    if (unallocated > 0.009) {
+    if (unallocated > 0) {
       await recordTransaction(db, {
         account_id: accountId,
         type: params.voucher_type === 'receipt' ? 'party_receipt' : 'party_payment',
@@ -659,7 +659,7 @@ export async function getOpenInvoicesForParty(
     }>(
       `SELECT id, invoice_no, date, total_amount, paid_amount FROM sales
        WHERE party_name = ? COLLATE NOCASE
-         AND total_amount - paid_amount > 0.01
+         AND total_amount - paid_amount > 0
        ORDER BY date ASC, id ASC`,
       [partyName.trim()]
     );
@@ -679,7 +679,7 @@ export async function getOpenInvoicesForParty(
   }>(
     `SELECT id, invoice_no, date, total_amount, paid_amount FROM purchases
      WHERE supplier_name = ? COLLATE NOCASE
-       AND total_amount - paid_amount > 0.01
+       AND total_amount - paid_amount > 0
      ORDER BY date ASC, id ASC`,
     [partyName.trim()]
   );
@@ -771,7 +771,7 @@ export async function applyPartyAdvanceToSale(
   date: string
 ): Promise<number> {
   const applyAmount = roundMoney(Math.abs(amount));
-  if (!(applyAmount > 0.009)) return 0;
+  if (!(applyAmount > 0)) return 0;
 
   const db = await getDatabase();
   const sale = await db.getFirstAsync<{
@@ -787,7 +787,7 @@ export async function applyPartyAdvanceToSale(
 
   const due = roundMoney(Math.max(0, sale.total_amount - sale.paid_amount));
   const toApply = roundMoney(Math.min(applyAmount, due));
-  if (!(toApply > 0.009)) return 0;
+  if (!(toApply > 0)) return 0;
 
   const opens = await listOpenAdvanceAllocations(sale.party_name, 'customer');
   if (opens.length === 0) throw new Error('No advance credit available for this customer');
@@ -801,9 +801,9 @@ export async function applyPartyAdvanceToSale(
 
   await db.withTransactionAsync(async () => {
     for (const open of opens) {
-      if (remaining <= 0.009) break;
+      if (remaining <= 0) break;
       const slice = roundMoney(Math.min(remaining, open.amount));
-      if (!(slice > 0.009)) continue;
+      if (!(slice > 0)) continue;
 
       const payResult = await db.runAsync(
         `INSERT INTO sale_payments (sale_id, account_id, amount, date, notes)
@@ -813,7 +813,7 @@ export async function applyPartyAdvanceToSale(
       const salePaymentId = payResult.lastInsertRowId;
       touchedVoucherIds.add(open.voucher_id);
 
-      if (slice + 0.009 >= open.amount) {
+      if (slice + 0 >= open.amount) {
         await db.runAsync(
           `UPDATE payment_voucher_allocations
            SET bill_type = 'agst_ref', bill_name = ?, sale_id = ?, sale_payment_id = ?
@@ -876,7 +876,7 @@ export async function applyPartyAdvanceToPurchase(
   date: string
 ): Promise<number> {
   const applyAmount = roundMoney(Math.abs(amount));
-  if (!(applyAmount > 0.009)) return 0;
+  if (!(applyAmount > 0)) return 0;
 
   const db = await getDatabase();
   const purchase = await db.getFirstAsync<{
@@ -893,7 +893,7 @@ export async function applyPartyAdvanceToPurchase(
 
   const due = roundMoney(Math.max(0, purchase.total_amount - purchase.paid_amount));
   const toApply = roundMoney(Math.min(applyAmount, due));
-  if (!(toApply > 0.009)) return 0;
+  if (!(toApply > 0)) return 0;
 
   const opens = await listOpenAdvanceAllocations(purchase.supplier_name, 'vendor');
   if (opens.length === 0) throw new Error('No advance credit available for this vendor');
@@ -907,9 +907,9 @@ export async function applyPartyAdvanceToPurchase(
 
   await db.withTransactionAsync(async () => {
     for (const open of opens) {
-      if (remaining <= 0.009) break;
+      if (remaining <= 0) break;
       const slice = roundMoney(Math.min(remaining, open.amount));
-      if (!(slice > 0.009)) continue;
+      if (!(slice > 0)) continue;
 
       const payResult = await db.runAsync(
         `INSERT INTO purchase_payments (purchase_id, account_id, amount, date, notes)
@@ -919,7 +919,7 @@ export async function applyPartyAdvanceToPurchase(
       const purchasePaymentId = payResult.lastInsertRowId;
       touchedVoucherIds.add(open.voucher_id);
 
-      if (slice + 0.009 >= open.amount) {
+      if (slice + 0 >= open.amount) {
         await db.runAsync(
           `UPDATE payment_voucher_allocations
            SET bill_type = 'agst_ref', bill_name = ?, purchase_id = ?, purchase_payment_id = ?

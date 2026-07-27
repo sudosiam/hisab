@@ -61,7 +61,7 @@ async function postJournalEntry(
 ): Promise<number> {
   const totalDebit = roundMoney(params.lines.reduce((sum, line) => sum + line.debit, 0));
   const totalCredit = roundMoney(params.lines.reduce((sum, line) => sum + line.credit, 0));
-  if (Math.abs(totalDebit - totalCredit) > 0.009) {
+  if (Math.abs(totalDebit - totalCredit) > 0) {
     throw new Error(`Journal entry not balanced: Dr ${totalDebit} Cr ${totalCredit}`);
   }
   if (params.lines.length < 2) {
@@ -679,7 +679,7 @@ async function performGeneralLedgerRebuild(
      JOIN products p ON p.id = si.product_id
      WHERE (${saleCogsFilter.clause})
      GROUP BY s.id
-     HAVING cogs > 0.009`,
+     HAVING cogs > 0`,
     saleCogsFilter.params
   );
 
@@ -852,7 +852,7 @@ async function performGeneralLedgerRebuild(
 
   for (const voucher of paymentVouchers) {
     const unallocated = roundMoney(voucher.unallocated);
-    if (unallocated <= 0.009 || !voucher.account_id) continue;
+    if (unallocated <= 0 || !voucher.account_id) continue;
     const cashAccount = accounts.get(`cash:${voucher.account_id}`);
     if (!cashAccount) continue;
     const partyId = await resolvePartyId(
@@ -970,7 +970,7 @@ async function performGeneralLedgerRebuild(
 
   for (const movement of stockMovements) {
     const amount = roundMoney(Math.abs(movement.qty) * Math.abs(movement.unit_cost));
-    if (amount < 0.009) continue;
+    if (amount < 1) continue;
     const isIncrease = movement.qty > 0;
     const description =
       movement.type === 'opening'
@@ -1117,7 +1117,7 @@ async function performGeneralLedgerRebuild(
     name: string;
     value: number;
     created_at: string;
-  }>(`SELECT id, name, value, created_at FROM fixed_assets WHERE value > 0.009`);
+  }>(`SELECT id, name, value, created_at FROM fixed_assets WHERE value > 0`);
 
   for (const asset of fixedAssetRows) {
     const amount = roundMoney(asset.value);
@@ -1141,7 +1141,7 @@ async function performGeneralLedgerRebuild(
     created_at: string;
   }>(
     `SELECT id, lender_name, outstanding_amount, start_date, created_at
-     FROM loans WHERE outstanding_amount > 0.009`
+     FROM loans WHERE outstanding_amount > 0`
   );
 
   for (const loan of loanRows) {
@@ -1381,14 +1381,14 @@ export async function getTrialBalanceFromLedger(): Promise<{
      FROM ledger_accounts la
      LEFT JOIN journal_lines jl ON jl.ledger_account_id = la.id
      GROUP BY la.id
-     HAVING ABS(net) > 0.009
+     HAVING ABS(net) > 0
      ORDER BY la.account_type, la.name`
   );
 
   const mapped = rows.map((row) => ({
     account: row.account,
-    debit: row.net > 0.009 ? roundMoney(row.net) : 0,
-    credit: row.net < -0.009 ? roundMoney(Math.abs(row.net)) : 0,
+    debit: row.net > 0 ? roundMoney(row.net) : 0,
+    credit: row.net < 0 ? roundMoney(Math.abs(row.net)) : 0,
   }));
 
   return {

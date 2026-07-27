@@ -9,7 +9,7 @@ import { DRAFT_KEYS, loadDraft, type InventoryFormDraft } from '../../../src/ser
 import { useFormDraft } from '../../../src/hooks/useFormDraft';
 import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { formatSqliteError } from '../../../src/db/database';
-import { parseAmountInput } from '../../../src/utils/format';
+import { parseAmountInput, parseMoneyInput } from '../../../src/utils/format';
 import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 
 function isInventoryDraftEmpty(d: InventoryFormDraft): boolean {
@@ -123,8 +123,8 @@ export default function NewProductScreen() {
       return;
     }
     const qty = openingQty.trim() ? parseAmountInput(openingQty) : 0;
-    const cost = openingCost.trim() ? parseAmountInput(openingCost) : 0;
-    const price = sellPrice.trim() ? parseAmountInput(sellPrice) : undefined;
+    const cost = openingCost.trim() ? parseMoneyInput(openingCost) : 0;
+    const price = sellPrice.trim() ? parseMoneyInput(sellPrice) : undefined;
     if (!Number.isFinite(qty) || qty < 0) {
       Alert.alert('Error', 'Opening stock quantity cannot be negative');
       return;

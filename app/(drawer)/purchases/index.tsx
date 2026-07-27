@@ -111,7 +111,7 @@ export default function PurchasesListScreen() {
           label={search.trim() ? 'Filtered Total' : getPeriodTotalLabel(monthKey)}
           amount={periodTotal}
         />
-        {periodDue > 0.01 ? (
+        {periodDue > 0 ? (
           <MoneyTotalRow
             label="Outstanding in period"
             amount={periodDue}

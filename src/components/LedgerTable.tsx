@@ -61,7 +61,7 @@ function AmountCell({
   style?: StyleProp<TextStyle>;
   bold?: boolean;
 }) {
-  if (amount <= 0.009) {
+  if (amount <= 0) {
     return (
       <Text style={[style, bold && staticStyles.boldCell]} numberOfLines={1}>
         —

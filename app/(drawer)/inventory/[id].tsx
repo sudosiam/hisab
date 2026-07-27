@@ -29,7 +29,7 @@ import { CategoryPicker } from '../../../src/components/CategoryPicker';
 import { OverflowMenu } from '../../../src/components/OverflowMenu';
 import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { parseRouteId } from '../../../src/utils/route';
-import { formatAmountInput, formatCurrency, formatQty, parseAmountInput } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency, formatQty, parseAmountInput, parseMoneyInput } from '../../../src/utils/format';
 import { roundMoney } from '../../../src/utils/money';
 import { formatSqliteError } from '../../../src/db/database';
 import { useDatabaseActions } from '../../../src/context/DatabaseContext';
@@ -122,7 +122,7 @@ export default function ProductDetailScreen() {
 
   const isEditDirty = useMemo(() => {
     if (!product) return false;
-    const price = sellPrice.trim() ? parseAmountInput(sellPrice) : 0;
+    const price = sellPrice.trim() ? parseMoneyInput(sellPrice) : 0;
     const editingDirty =
       editing &&
       (name.trim() !== product.name ||
@@ -141,7 +141,7 @@ export default function ProductDetailScreen() {
       Alert.alert('Error', 'Product name is required');
       return;
     }
-    const price = sellPrice.trim() ? parseAmountInput(sellPrice) : 0;
+    const price = sellPrice.trim() ? parseMoneyInput(sellPrice) : 0;
     if (!Number.isFinite(price) || price < 0) {
       Alert.alert('Error', 'Enter a valid sell price');
       return;

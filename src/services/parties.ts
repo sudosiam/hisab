@@ -40,7 +40,7 @@ export async function getPartiesWithSummary(): Promise<PartyWithSummary[]> {
     SELECT p.*,
       COUNT(s.id) as invoice_count,
       MAX(0,
-        COALESCE(SUM(CASE WHEN s.total_amount - s.paid_amount > 0.01 THEN s.total_amount - s.paid_amount ELSE 0 END), 0)
+        COALESCE(SUM(CASE WHEN s.total_amount - s.paid_amount > 0 THEN s.total_amount - s.paid_amount ELSE 0 END), 0)
         - COALESCE((
             SELECT SUM(a.amount) FROM payment_voucher_allocations a
             JOIN payment_vouchers v ON v.id = a.voucher_id
@@ -61,7 +61,7 @@ export async function getPartiesWithSummary(): Promise<PartyWithSummary[]> {
     SELECT p.*,
       COUNT(pu.id) as invoice_count,
       MAX(0,
-        COALESCE(SUM(CASE WHEN pu.total_amount - pu.paid_amount > 0.01 THEN pu.total_amount - pu.paid_amount ELSE 0 END), 0)
+        COALESCE(SUM(CASE WHEN pu.total_amount - pu.paid_amount > 0 THEN pu.total_amount - pu.paid_amount ELSE 0 END), 0)
         - COALESCE((
             SELECT SUM(a.amount) FROM payment_voucher_allocations a
             JOIN payment_vouchers v ON v.id = a.voucher_id
@@ -100,7 +100,7 @@ export async function getPartySummary(partyId: number): Promise<PartySummary | n
       `SELECT COUNT(*) as count,
               COALESCE(SUM(total_amount), 0) as billed,
               COALESCE(SUM(paid_amount), 0) as paid,
-              COALESCE(SUM(CASE WHEN total_amount - paid_amount > 0.01 THEN total_amount - paid_amount ELSE 0 END), 0) as due,
+              COALESCE(SUM(CASE WHEN total_amount - paid_amount > 0 THEN total_amount - paid_amount ELSE 0 END), 0) as due,
               MAX(date) as last_date
        FROM sales WHERE party_id = ? OR (party_id IS NULL AND party_name = ? COLLATE NOCASE)`,
       [party.id, party.name]
@@ -129,7 +129,7 @@ export async function getPartySummary(partyId: number): Promise<PartySummary | n
     `SELECT COUNT(*) as count,
             COALESCE(SUM(total_amount), 0) as billed,
             COALESCE(SUM(paid_amount), 0) as paid,
-            COALESCE(SUM(CASE WHEN total_amount - paid_amount > 0.01 THEN total_amount - paid_amount ELSE 0 END), 0) as due,
+            COALESCE(SUM(CASE WHEN total_amount - paid_amount > 0 THEN total_amount - paid_amount ELSE 0 END), 0) as due,
             MAX(date) as last_date
      FROM purchases WHERE party_id = ? OR (party_id IS NULL AND supplier_name = ? COLLATE NOCASE)`,
     [party.id, party.name]

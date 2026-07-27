@@ -31,7 +31,7 @@ import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuar
 import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
-import { formatCurrency, parseAmountInput } from '../../../src/utils/format';
+import { formatCurrency, parseMoneyInput } from '../../../src/utils/format';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
 import { alertLoadFailed } from '../../../src/utils/uiFeedback';
 import { spacing, radius } from '../../../src/constants/theme';
@@ -256,7 +256,7 @@ export default function NewPaymentScreen() {
 
   const handleSave = async () => {
     if (saving) return;
-    const amt = parseAmountInput(amount);
+    const amt = parseMoneyInput(amount);
     if (!partyName.trim()) {
       Alert.alert('Missing party', voucherType === 'receipt' ? 'Enter customer name' : 'Enter vendor name');
       return;

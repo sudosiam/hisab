@@ -166,7 +166,7 @@ export default function PartiesScreen() {
           title={item.name}
           subtitle={metaParts.join(' · ')}
           amount={item.balance_due}
-          amountColor={item.balance_due > 0.01 ? colors.danger : colors.success}
+          amountColor={item.balance_due > 0 ? colors.danger : colors.success}
           pill={item.type}
           pillTone={item.type === 'vendor' ? 'warn' : 'default'}
           meta={dueLabel}

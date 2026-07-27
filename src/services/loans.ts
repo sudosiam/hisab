@@ -45,7 +45,7 @@ export async function addLoan(params: {
   if (!Number.isFinite(params.outstanding_amount) || params.outstanding_amount < 0) {
     throw new Error('Outstanding amount cannot be negative');
   }
-  if (params.outstanding_amount > params.principal_amount + 0.01) {
+  if (params.outstanding_amount > params.principal_amount + 1) {
     throw new Error('Outstanding amount cannot exceed principal amount');
   }
 
@@ -86,7 +86,7 @@ export async function updateLoan(
   if (!Number.isFinite(params.outstanding_amount) || params.outstanding_amount < 0) {
     throw new Error('Outstanding amount cannot be negative');
   }
-  if (params.outstanding_amount > params.principal_amount + 0.01) {
+  if (params.outstanding_amount > params.principal_amount + 1) {
     throw new Error('Outstanding amount cannot exceed principal amount');
   }
 

@@ -91,7 +91,7 @@ export default function CashMovementScreen() {
       Alert.alert('Error', 'Select an account');
       return;
     }
-    if (mode === 'withdraw' && selected && amt > selected.current_balance + 0.01) {
+    if (mode === 'withdraw' && selected && amt > selected.current_balance + 1) {
       Alert.alert(
         'Insufficient balance',
         `This account has only ${formatCurrency(selected.current_balance)} available.`

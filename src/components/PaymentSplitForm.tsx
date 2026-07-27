@@ -12,7 +12,7 @@ import { AccountPicker } from './AccountPicker';
 import { DatePickerField } from './DatePickerField';
 import type { Account } from '../types';
 import { todayISO } from '../utils/date';
-import { formatAmountInput, formatCurrency, parseAmountInput } from '../utils/format';
+import { formatAmountInput, formatCurrency, parseMoneyInput } from '../utils/format';
 import { configureExpandAnimation } from '../utils/layoutAnimation';
 import { roundMoney } from '../utils/money';
 
@@ -49,14 +49,14 @@ function nextRowKey(): string {
 }
 
 function amountsMatch(a: number, b: number): boolean {
-  return Math.abs(a - b) <= 0.01;
+  return Math.abs(a - b) <= 1;
 }
 
 function deriveUiMode(payments: PaymentRow[], totalDue: number): PaymentUiMode {
   if (payments.length === 0) return 'unpaid';
   if (payments.length === 1) {
-    const amt = parseAmountInput(payments[0].amount) || 0;
-    if (totalDue <= 0.009 || amountsMatch(amt, totalDue)) return 'full';
+    const amt = parseMoneyInput(payments[0].amount) || 0;
+    if (totalDue <= 0 || amountsMatch(amt, totalDue)) return 'full';
   }
   return 'split';
 }
@@ -80,11 +80,11 @@ export function PaymentSplitForm({
   /** True after the user picks a mode — blocks draft-hydrate from overriding Split/Full. */
   const userPickedModeRef = useRef(payments.length > 0);
 
-  const cashPaid = payments.reduce((sum, p) => sum + (parseAmountInput(p.amount) || 0), 0);
+  const cashPaid = payments.reduce((sum, p) => sum + (parseMoneyInput(p.amount) || 0), 0);
   const receivedTotal = roundMoney(cashPaid + Math.max(0, advanceApplied));
   const balance = roundMoney(totalDue - cashPaid);
-  const overpaid = balance < -0.009;
-  const showAdvance = advanceCredit > 0.009 && typeof onApplyAdvanceChange === 'function';
+  const overpaid = balance < 0;
+  const showAdvance = advanceCredit > 0 && typeof onApplyAdvanceChange === 'function';
 
   const labels =
     mode === 'pay'
@@ -134,7 +134,7 @@ export function PaymentSplitForm({
   useEffect(() => {
     if (uiMode !== 'full' || payments.length !== 1 || accounts.length === 0) return;
     const due = Math.max(0, totalDue);
-    const current = parseAmountInput(payments[0].amount) || 0;
+    const current = parseMoneyInput(payments[0].amount) || 0;
     if (amountsMatch(current, due)) return;
     onChange([{ ...payments[0], amount: due > 0 ? formatAmountInput(due) : '' }]);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sync full-mode amount to due only
@@ -192,7 +192,7 @@ export function PaymentSplitForm({
 
   const fillRemaining = (index: number) => {
     const otherPaid = payments.reduce(
-      (sum, p, i) => (i === index ? sum : sum + (parseAmountInput(p.amount) || 0)),
+      (sum, p, i) => (i === index ? sum : sum + (parseMoneyInput(p.amount) || 0)),
       0
     );
     const due = Math.max(0, totalDue - otherPaid);

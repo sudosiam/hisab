@@ -28,7 +28,7 @@ import { computeUntaxedDocument } from '../../../src/services/documentTotals';
 import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
-import { formatAmountInput, formatCurrency, formatQtyInput, parseAmountInput } from '../../../src/utils/format';
+import { formatAmountInput, formatCurrency, formatQtyInput, parseAmountInput, parseMoneyInput } from '../../../src/utils/format';
 import { MoneyText } from '../../../src/components/MoneyText';
 import { isValidISODate } from '../../../src/utils/date';
 import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
@@ -140,7 +140,7 @@ export default function EditPurchaseScreen() {
         // Reverse discount on taxable amounts — never divide by tax-inclusive totals.
         const discountAmt = p.discount_amount ?? 0;
         const taxableBase = Math.max(0, p.subtotal - discountAmt);
-        const grossFactor = taxableBase > 0.009 ? p.subtotal / taxableBase : 1;
+        const grossFactor = taxableBase > 0 ? p.subtotal / taxableBase : 1;
         setPurchase(p);
         setSupplierName(p.supplier_name);
         setInvoiceNo(p.invoice_no);
@@ -222,7 +222,7 @@ export default function EditPurchaseScreen() {
       return computeUntaxedDocument({
         lines: items.map((item) => ({
           qty: parseAmountInput(item.qty) || 0,
-          unit_price: parseAmountInput(item.unit_cost) || 0,
+          unit_price: parseMoneyInput(item.unit_cost) || 0,
           hsn_sac: item.hsn_sac.trim() || null,
         })),
         discount_amount: discountAmount,
@@ -299,14 +299,14 @@ export default function EditPurchaseScreen() {
       Alert.alert('Invalid date', 'Select a valid purchase date');
       return;
     }
-    if (discountAmount > subtotal + 0.01) {
+    if (discountAmount > subtotal + 1) {
       Alert.alert(
         'Discount too high for new subtotal',
         `This purchase has a ${formatCurrency(discountAmount)} discount built into item costs. The new subtotal is only ${formatCurrency(subtotal)}. Add line items, or delete this purchase and create a new one to change the discount.`
       );
       return;
     }
-    if (total + 0.01 < purchase.paid_amount) {
+    if (total + 1 < purchase.paid_amount) {
       Alert.alert(
         'Error',
         `New total (${formatCurrency(total)}) cannot be less than the amount already paid (${formatCurrency(purchase.paid_amount)}). Remove payments first.`
@@ -320,7 +320,7 @@ export default function EditPurchaseScreen() {
         return;
       }
       const qty = parseAmountInput(item.qty);
-      const unitCost = parseAmountInput(item.unit_cost);
+      const unitCost = parseMoneyInput(item.unit_cost);
       if (!Number.isFinite(qty) || qty <= 0) {
         Alert.alert('Error', 'Each item must have quantity greater than zero');
         return;
@@ -347,7 +347,7 @@ export default function EditPurchaseScreen() {
             items: items.map((item) => ({
               product_id: item.product_id,
               qty: parseAmountInput(item.qty) || 0,
-              unit_cost: parseAmountInput(item.unit_cost) || 0,
+              unit_cost: parseMoneyInput(item.unit_cost) || 0,
               hsn_sac: item.hsn_sac.trim() || null,
             })),
           });

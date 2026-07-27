@@ -58,7 +58,7 @@ export function computeUntaxedDocument(params: {
   const subtotal = rawLines.reduce((sum, l) => addMoney(sum, l.line_total), 0);
   const discount = roundMoney(Math.max(0, params.discount_amount ?? 0));
   const serviceCharges = roundMoney(Math.max(0, params.service_charges ?? 0));
-  if (discount > subtotal + 0.01) {
+  if (discount > subtotal + 1) {
     throw new Error('Discount cannot exceed subtotal');
   }
 

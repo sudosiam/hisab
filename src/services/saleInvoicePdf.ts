@@ -6,7 +6,7 @@ import { getSaleById, getSaleItems } from './sales';
 import { getPartyById } from './parties';
 import { formatCurrency } from '../utils/format';
 import { formatDisplayDate } from '../utils/date';
-import { roundMoney } from '../utils/money';
+import { paiseToFixedRupees, roundMoney } from '../utils/money';
 import { deferDeleteCacheFile } from '../utils/tempShareFiles';
 import { savePdfToDevice } from '../utils/pdfExport';
 import { sharePdfToWhatsApp } from '../utils/whatsappShare';
@@ -32,7 +32,7 @@ function buildUpiQrUrl(params: {
 }): { upi: string; qrDataUri: string | null } | null {
   const pa = params.upiId.trim();
   if (!pa) return null;
-  const am = params.amount > 0.009 ? params.amount.toFixed(2) : '';
+  const am = params.amount > 0 ? paiseToFixedRupees(params.amount) : '';
   const query = [
     `pa=${encodeURIComponent(pa)}`,
     `pn=${encodeURIComponent(params.payeeName.slice(0, 50))}`,
@@ -46,7 +46,7 @@ function buildUpiQrUrl(params: {
   return { upi, qrDataUri: buildUpiQrDataUri(upi) };
 }
 
-function amountInWordsInr(amount: number): string {
+function amountInWordsInr(paiseAmount: number): string {
   const ones = [
     '', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
     'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
@@ -58,8 +58,9 @@ function amountInWordsInr(amount: number): string {
     return `${tens[Math.floor(n / 10)]}${ones[n % 10] ? ` ${ones[n % 10]}` : ''}`.trim();
   };
   const section = (n: number, label: string) => (n > 0 ? `${twoDigits(n)} ${label}` : '');
-  const rupees = Math.floor(Math.abs(amount));
-  const paise = Math.round((Math.abs(amount) - rupees) * 100);
+  const abs = Math.abs(Math.round(paiseAmount));
+  const rupees = Math.floor(abs / 100);
+  const paise = abs % 100;
   if (rupees === 0 && paise === 0) return 'Zero Rupees Only';
   const crore = Math.floor(rupees / 10000000);
   const lakh = Math.floor((rupees % 10000000) / 100000);
@@ -102,13 +103,13 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
   const qr = buildUpiQrUrl({
     upiId: profile.business_upi_id,
     payeeName: businessName,
-    amount: due > 0.009 ? due : sale.total_amount,
+    amount: due > 0 ? due : sale.total_amount,
     note: sale.invoice_no,
   });
   const words = amountInWordsInr(sale.total_amount);
 
-  const statusLabel = due > 0.009 ? 'Balance due' : 'Paid in full';
-  const statusTone = due > 0.009 ? 'due' : 'paid';
+  const statusLabel = due > 0 ? 'Balance due' : 'Paid in full';
+  const statusTone = due > 0 ? 'due' : 'paid';
 
   const itemRows = items
     .map((item, index) => {
@@ -131,13 +132,13 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
         <div class="pay-title">Pay with UPI</div>
         <img src="${qr.qrDataUri}" alt="UPI QR" width="118" height="118"/>
         <div class="pay-upi mono">${escapeHtml(profile.business_upi_id)}</div>
-        ${due > 0.009 ? `<div class="pay-due">Due ${money(due)}</div>` : `<div class="pay-ok">No balance due</div>`}
+        ${due > 0 ? `<div class="pay-due">Due ${money(due)}</div>` : `<div class="pay-ok">No balance due</div>`}
       </div>`
     : qr
       ? `<div class="pay-card">
           <div class="pay-title">Pay with UPI</div>
           <div class="pay-upi mono" style="margin-top:10px;word-break:break-all">${escapeHtml(profile.business_upi_id)}</div>
-          ${due > 0.009 ? `<div class="pay-due">Due ${money(due)}</div>` : `<div class="pay-ok">No balance due</div>`}
+          ${due > 0 ? `<div class="pay-due">Due ${money(due)}</div>` : `<div class="pay-ok">No balance due</div>`}
         </div>`
       : `<div class="pay-card muted-card">
           <div class="pay-title">Payment</div>
@@ -424,7 +425,7 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
       <div class="doc-type${isBos ? ' bos' : ''}">${escapeHtml(docLabel)}</div>
       <div class="inv-no mono">${escapeHtml(sale.invoice_no)}</div>
       <div class="inv-date">${escapeHtml(formatDisplayDate(sale.date))}</div>
-      <span class="status-pill ${statusTone}">${statusLabel}${due > 0.009 ? ` · ${money(due)}` : ''}</span>
+      <span class="status-pill ${statusTone}">${statusLabel}${due > 0 ? ` · ${money(due)}` : ''}</span>
     </div>
   </div>
 
@@ -462,7 +463,7 @@ export async function buildSaleInvoiceHtml(saleId: number): Promise<{
       ${sale.discount_amount > 0 ? `<div class="row"><span>Discount</span><span class="mono">− ${money(sale.discount_amount)}</span></div>` : ''}
       ${(sale.service_charges ?? 0) > 0 ? `<div class="row"><span>Service charges</span><span class="mono">${money(sale.service_charges)}</span></div>` : ''}
       <div class="row grand"><span>Grand Total</span><span class="mono">${money(sale.total_amount)}</span></div>
-      ${due > 0.009 ? `<div class="row due-row"><span>Balance due</span><span class="mono">${money(due)}</span></div>` : ''}
+      ${due > 0 ? `<div class="row due-row"><span>Balance due</span><span class="mono">${money(due)}</span></div>` : ''}
     </div>
   </div>
 

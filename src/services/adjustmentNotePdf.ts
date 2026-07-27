@@ -40,8 +40,9 @@ function amountInWordsInr(amount: number): string {
     return `${tens[Math.floor(n / 10)]}${ones[n % 10] ? ` ${ones[n % 10]}` : ''}`.trim();
   };
   const section = (n: number, label: string) => (n > 0 ? `${twoDigits(n)} ${label}` : '');
-  const rupees = Math.floor(Math.abs(amount));
-  const paise = Math.round((Math.abs(amount) - rupees) * 100);
+  const abs = Math.abs(Math.round(amount));
+  const rupees = Math.floor(abs / 100);
+  const paise = abs % 100;
   if (rupees === 0 && paise === 0) return 'Zero Rupees Only';
   const crore = Math.floor(rupees / 10000000);
   const lakh = Math.floor((rupees % 10000000) / 100000);

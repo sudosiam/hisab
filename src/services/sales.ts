@@ -59,7 +59,7 @@ function validatePaymentAmount(
 ): void {
   if (paymentAmount <= 0) throw new Error('Payment amount must be greater than zero');
   const remaining = subMoney(totalAmount, paidAmount);
-  if (paymentAmount > remaining + 0.01) {
+  if (paymentAmount > remaining + 1) {
     throw new Error(`Payment exceeds amount due (${formatCurrency(remaining)} remaining)`);
   }
 }
@@ -176,7 +176,7 @@ export async function createSale(params: {
     if (payment.amount <= 0) continue;
     paidAmount = addMoney(paidAmount, payment.amount);
   }
-  if (paidAmount > totalAmount + 0.01) {
+  if (paidAmount > totalAmount + 1) {
     throw new Error('Total payments cannot exceed invoice amount');
   }
 
@@ -456,7 +456,7 @@ export async function updateSale(
     }
 
     const totalAmount = totals.total_amount;
-    if (totalAmount + 0.01 < sale.paid_amount) {
+    if (totalAmount + 1 < sale.paid_amount) {
       throw new Error(
         `New total (${formatCurrency(totalAmount)}) cannot be less than the amount already paid (${formatCurrency(sale.paid_amount)}). Remove payments first.`
       );

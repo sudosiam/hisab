@@ -150,7 +150,7 @@ export async function updateOpeningBalance(accountId: number, newOpening: number
     }
 
     await db.runAsync(
-      'UPDATE accounts SET opening_balance = ?, current_balance = ROUND(current_balance + ?, 2) WHERE id = ?',
+      'UPDATE accounts SET opening_balance = ?, current_balance = current_balance + ? WHERE id = ?',
       [opening, delta, accountId]
     );
   });
@@ -463,14 +463,14 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
   const receivables = await db.getFirstAsync<{ total: number }>(
     `SELECT COALESCE(SUM(total_amount - paid_amount), 0) as total
      FROM sales
-     WHERE total_amount - paid_amount > 0.01
+     WHERE total_amount - paid_amount > 0
        AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = sales.id)`
   );
 
   const payables = await db.getFirstAsync<{ total: number }>(
     `SELECT COALESCE(SUM(total_amount - paid_amount), 0) as total
      FROM purchases
-     WHERE total_amount - paid_amount > 0.01
+     WHERE total_amount - paid_amount > 0
        AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = purchases.id)`
   );
   const loans = await db.getFirstAsync<{ total: number }>(
@@ -497,20 +497,20 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
     { key: 'receivables', label: 'Accounts Receivable', amount: recv },
     { key: 'inventory', label: 'Inventory', amount: inv },
     { key: 'input_tax', label: 'Input Tax Credit', amount: inputTax },
-  ].filter((line) => Math.abs(line.amount) > 0.009 || line.key !== 'input_tax');
+  ].filter((line) => Math.abs(line.amount) > 0 || line.key !== 'input_tax');
 
   const nonCurrentAssets: BalanceSheet['assets']['nonCurrentAssets'] = [
     { key: 'fixed_assets', label: 'Fixed Assets', amount: fixed },
-  ].filter((line) => Math.abs(line.amount) > 0.009 || line.key === 'fixed_assets');
+  ].filter((line) => Math.abs(line.amount) > 0 || line.key === 'fixed_assets');
 
   const currentLiabilities: BalanceSheet['liabilities']['currentLiabilities'] = [
     { key: 'payables', label: 'Accounts Payable', amount: pay },
     { key: 'output_tax', label: 'Output Tax Payable', amount: outTax },
-  ].filter((line) => Math.abs(line.amount) > 0.009 || line.key !== 'output_tax');
+  ].filter((line) => Math.abs(line.amount) > 0 || line.key !== 'output_tax');
 
   const nonCurrentLiabilities: BalanceSheet['liabilities']['nonCurrentLiabilities'] = [
     { key: 'loans', label: 'Loans', amount: loan },
-  ].filter((line) => Math.abs(line.amount) > 0.009 || line.key === 'loans');
+  ].filter((line) => Math.abs(line.amount) > 0 || line.key === 'loans');
 
   const totalAssets = addMoney(cash, inv, recv, fixed, inputTax);
   const totalLiabilities = addMoney(pay, loan, outTax);

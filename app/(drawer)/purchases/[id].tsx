@@ -247,7 +247,7 @@ export default function PurchaseDetailScreen() {
       return;
     }
     const due = purchase.total_amount - purchase.paid_amount;
-    if (amount > due + 0.01) {
+    if (amount > due + 1) {
       Alert.alert('Error', `Amount exceeds due (${formatCurrency(due)})`);
       return;
     }

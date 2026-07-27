@@ -353,7 +353,7 @@ export async function getReceivablesReport(): Promise<
   return db.getAllAsync(
     `SELECT id, party_name, invoice_no, invoice_type, (total_amount - paid_amount) as due, date
      FROM sales
-     WHERE total_amount - paid_amount > 0.01
+     WHERE total_amount - paid_amount > 0
        AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = sales.id)
      ORDER BY date DESC`
   );
@@ -366,7 +366,7 @@ export async function getPayablesReport(): Promise<
   return db.getAllAsync(
     `SELECT id, supplier_name, invoice_no, (total_amount - paid_amount) as due, date
      FROM purchases
-     WHERE total_amount - paid_amount > 0.01
+     WHERE total_amount - paid_amount > 0
        AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = purchases.id)
      ORDER BY date DESC`
   );
@@ -557,9 +557,9 @@ export async function getTrialBalanceReport(): Promise<{
     { account: 'Output Tax', debit: 0, credit: sheet.liabilities.outputTax },
     { account: 'Loans', debit: 0, credit: sheet.liabilities.loans },
     { account: 'Owner\'s Equity', debit: 0, credit: Math.max(0, sheet.equity) },
-  ].filter((row) => row.debit > 0.009 || row.credit > 0.009);
+  ].filter((row) => row.debit > 0 || row.credit > 0);
 
-  if (sheet.equity < -0.009) {
+  if (sheet.equity < 0) {
     rows.push({ account: 'Accumulated Loss', debit: Math.abs(sheet.equity), credit: 0 });
   }
 

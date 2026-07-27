@@ -191,13 +191,13 @@ export async function getDashboardStats(
       db.getFirstAsync<{ total: number }>(
         `SELECT COALESCE(SUM(total_amount - paid_amount), 0) as total
          FROM sales
-         WHERE total_amount - paid_amount > 0.01
+         WHERE total_amount - paid_amount > 0
            AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = sales.id)`
       ),
       db.getFirstAsync<{ total: number }>(
         `SELECT COALESCE(SUM(total_amount - paid_amount), 0) as total
          FROM purchases
-         WHERE total_amount - paid_amount > 0.01
+         WHERE total_amount - paid_amount > 0
            AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = purchases.id)`
       ),
       getInventoryValue(),
