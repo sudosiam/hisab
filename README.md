@@ -2,7 +2,13 @@
 
 Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. Books stay on the device. Optional private cloud backup via Supabase (TLS + private storage — not multi-device sync).
 
-**Current version:** `10.7.0` (Android `versionCode` 37 · schema v28)
+**Current version:** `11.0.0` (Android `versionCode` 38 · schema v28)
+
+## What's new in 11.0.0
+
+- Full UI/reliability polish (focus refresh, field errors, backup gates, shared KPI layouts)
+- Inventory valuation clamped to positive qty (matches balance sheet)
+- GST UI removed; Invoice / Bill of Supply use untaxed document totals
 
 ## What's in Hisab
 
@@ -88,8 +94,8 @@ Copy into `releases/` for handoff (APKs are gitignored):
 
 ```powershell
 New-Item -ItemType Directory -Force releases | Out-Null
-Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-10.7.0.apk" -Force
-adb install -r "releases\hisab-10.7.0.apk"
+Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-11.0.0.apk" -Force
+adb install -r "releases\hisab-11.0.0.apk"
 ```
 
 ## Build APK (EAS cloud)
