@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   Alert,
-  TouchableOpacity,
 } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter, useNavigation } from 'expo-router';
 import type { NavigationProp, ParamListBase } from '@react-navigation/native';
@@ -32,6 +31,7 @@ import {
   PrimaryButton,
   DatePickerField,
   SectionHeader,
+  ThemedPressable,
   useScreenStyles,
 } from '../../../src/components/ui';
 import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
@@ -41,7 +41,8 @@ import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { todayISO, isValidISODate, formatDisplayDate } from '../../../src/utils/date';
 import { stackDetailBeforeRemove } from '../../../src/navigation/screenOptions';
-import { spacing } from '../../../src/constants/theme';
+import { cardSurface } from '../../../src/constants/shadows';
+import { radius, spacing, typography } from '../../../src/constants/theme';
 import type { Account, Purchase, PurchaseItem, PurchasePayment } from '../../../src/types';
 
 export default function PurchaseDetailScreen() {
@@ -50,7 +51,7 @@ export default function PurchaseDetailScreen() {
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { refresh } = useDatabaseActions();
   const styles = useScreenStyles();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
 
   useEffect(() => {
     const unsub = navigation.addListener('beforeRemove', (e) => {
@@ -61,24 +62,116 @@ export default function PurchaseDetailScreen() {
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-        invoice: { fontSize: 20, fontWeight: '700', color: colors.text },
-        party: { color: colors.textSecondary, marginTop: 4 },
-        date: { fontSize: 13, color: colors.textSecondary },
-        itemRow: {
+        stack: {
+          gap: spacing.md,
+        },
+        panel: {
+          ...cardSurface(colors, isDark),
+          padding: spacing.md,
+          gap: spacing.sm,
+        },
+        identityTop: {
           flexDirection: 'row',
           justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: spacing.sm,
+        },
+        invoice: {
+          ...typography.title,
+          fontSize: 18,
+          fontWeight: '700',
+          color: colors.text,
+          flex: 1,
+          minWidth: 0,
+        },
+        partyRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: spacing.sm,
+        },
+        party: {
+          ...typography.bodyMedium,
+          color: colors.textSecondary,
+          flex: 1,
+          minWidth: 0,
+        },
+        meta: {
+          ...typography.caption,
+          color: colors.textMuted,
+        },
+        matrix: {
+          borderRadius: radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
+          overflow: 'hidden',
+          backgroundColor: isDark ? colors.surfaceContainer : colors.surfaceContainerHigh,
+        },
+        matrixRow: {
+          flexDirection: 'row',
+          alignItems: 'stretch',
+        },
+        vRule: {
+          width: StyleSheet.hairlineWidth,
+          backgroundColor: colors.border,
+          alignSelf: 'stretch',
+        },
+        hRule: {
+          height: StyleSheet.hairlineWidth,
+          backgroundColor: colors.border,
+        },
+        listHeader: {
+          marginBottom: spacing.xs,
+        },
+        listRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: spacing.sm,
           paddingVertical: spacing.sm,
-          borderBottomWidth: 1,
+          borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: colors.border,
         },
-        itemName: { fontWeight: '500', color: colors.text },
-        itemMeta: { fontSize: 12, color: colors.textSecondary },
-        itemTotal: { fontWeight: '600', color: colors.text },
-        muted: { color: colors.textSecondary, fontSize: 13 },
-        paySection: { marginTop: spacing.md },
+        listRowLast: {
+          borderBottomWidth: 0,
+          paddingBottom: 0,
+        },
+        listBody: {
+          flex: 1,
+          minWidth: 0,
+          gap: 2,
+        },
+        itemName: {
+          ...typography.bodyMedium,
+          fontWeight: '500',
+          color: colors.text,
+        },
+        itemMeta: {
+          ...typography.caption,
+          color: colors.textSecondary,
+        },
+        muted: {
+          ...typography.caption,
+          color: colors.textMuted,
+        },
+        payActions: {
+          marginTop: spacing.sm,
+          gap: spacing.sm,
+        },
+        payForm: {
+          marginTop: spacing.sm,
+          paddingTop: spacing.sm,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.border,
+          gap: spacing.sm,
+        },
+        removeBtn: {
+          paddingVertical: 4,
+          paddingHorizontal: 2,
+          minHeight: 44,
+          justifyContent: 'center',
+        },
       }),
-    [colors]
+    [colors, isDark]
   );
   const [purchase, setPurchase] = useState<Purchase | null>(null);
   const [items, setItems] = useState<PurchaseItem[]>([]);
@@ -317,116 +410,168 @@ export default function PurchaseDetailScreen() {
 
   return (
     <FormScreen>
-      <View style={localStyles.header}>
-        <Text style={localStyles.invoice}>{purchase.invoice_no}</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-          <TouchableOpacity
-            onPress={() => router.push(`/(drawer)/purchases/edit?id=${purchase.id}` as never)}
-          >
-            <Text style={styles.link}>Edit</Text>
-          </TouchableOpacity>
-          <StatusBadge status={purchase.status} />
-        </View>
-      </View>
-      <Text style={localStyles.party}>{purchase.supplier_name}</Text>
-      <Text style={localStyles.date}>{formatDisplayDate(purchase.date)}</Text>
-      {purchase.vendor_invoice_no ? (
-        <Text style={localStyles.date}>Vendor invoice: {purchase.vendor_invoice_no}</Text>
-      ) : null}
-
-      {hasDiscount ? (
-        <Text style={localStyles.date}>
-          Subtotal {formatCurrency(subtotal)} · Discount {formatCurrency(purchase.discount_amount)}
-        </Text>
-      ) : null}
-
-      
-
-      <View style={styles.detailKpiRow}>
-        <StatCard label="Total" value={purchase.total_amount} color={colors.primary} />
-        <StatCard
-          label="Due"
-          value={due}
-          color={due > 0 ? colors.danger : colors.success}
-          subtitle={`Paid ${formatCurrency(purchase.paid_amount)}`}
-        />
-        <StatCard
-          label="Items"
-          displayValue={String(items.length)}
-          color={colors.accent}
-          subtitle={`${totalQty} units · ${formatCurrency(itemsCost)} cost`}
-        />
-      </View>
-
-      
-
-      <SectionHeader title="Items" />
-      {items.map((item) => (
-          <View key={item.id} style={localStyles.itemRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={localStyles.itemName}>{item.product_name}</Text>
-              <Text style={localStyles.itemMeta}>
-                {item.qty} × {formatCurrency(item.unit_cost)}
-              </Text>
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <MoneyText amount={item.total} size="md" style={localStyles.itemTotal} />
-            </View>
+      <View style={localStyles.stack}>
+        <View style={localStyles.panel}>
+          <View style={localStyles.identityTop}>
+            <Text style={localStyles.invoice} numberOfLines={1}>
+              {purchase.invoice_no}
+            </Text>
+            <StatusBadge status={purchase.status} />
           </View>
-      ))}
-
-      <SectionHeader title="Payments" />
-      {payments.length === 0 ? (
-        <Text style={localStyles.muted}>No payments recorded</Text>
-      ) : (
-        payments.map((p) => (
-          <View key={p.id} style={localStyles.itemRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.value}>{p.account_name}</Text>
-              <Text style={localStyles.itemMeta}>{formatDisplayDate(p.date)}</Text>
-            </View>
-            <Text style={styles.amount}>{formatCurrency(p.amount)}</Text>
-            <TouchableOpacity
-              onPress={() => handleRemovePayment(p)}
-              disabled={removingPaymentId === p.id}
+          <View style={localStyles.partyRow}>
+            <Text style={localStyles.party} numberOfLines={2}>
+              {purchase.supplier_name}
+            </Text>
+            <ThemedPressable
+              onPress={() => router.push(`/(drawer)/purchases/edit?id=${purchase.id}` as never)}
               accessibilityRole="button"
-              accessibilityLabel={`Remove payment ${formatCurrency(p.amount)}`}
+              accessibilityLabel="Edit purchase"
             >
-              <Text style={[styles.link, { color: colors.warning }]}>
-                {removingPaymentId === p.id ? '…' : 'Remove'}
-              </Text>
-            </TouchableOpacity>
+              <Text style={styles.link}>Edit</Text>
+            </ThemedPressable>
           </View>
-        ))
-      )}
-
-      {due > 0 && (
-        <View style={localStyles.paySection}>
-          <SectionHeader title="Add Payment" />
-          <AccountPicker
-            label="Payment Account"
-            accounts={accounts}
-            value={selectedAccount}
-            onChange={setSelectedAccount}
-          />
-          <FormInput label="Amount" value={payAmount} onChangeText={setPayAmount} money />
-          <DatePickerField label="Payment date" value={payDate} onChange={setPayDate} />
-          <TouchableOpacity
-            onPress={() => setPayAmount(formatAmountInput(due))}
-            style={{ marginBottom: spacing.sm }}
-          >
-            <Text style={styles.link}>Fill remaining ({formatCurrency(due)})</Text>
-          </TouchableOpacity>
-          <PrimaryButton title="Record Payment" onPress={handleAddPayment} loading={saving} />
+          <Text style={localStyles.meta}>{formatDisplayDate(purchase.date)}</Text>
+          {purchase.vendor_invoice_no ? (
+            <Text style={localStyles.meta}>Vendor invoice: {purchase.vendor_invoice_no}</Text>
+          ) : null}
+          {hasDiscount ? (
+            <Text style={localStyles.meta}>
+              Subtotal {formatCurrency(subtotal)} · Discount{' '}
+              {formatCurrency(purchase.discount_amount)}
+            </Text>
+          ) : null}
         </View>
-      )}
 
-      {purchase.notes ? (
-        <>
-          <SectionHeader title="Notes" />
-          <Text style={localStyles.muted}>{purchase.notes}</Text>
-        </>
-      ) : null}
+        <View style={localStyles.matrix}>
+          <View style={localStyles.matrixRow}>
+            <StatCard
+              equal
+              variant="matrix"
+              icon="receipt-outline"
+              label="Total"
+              value={purchase.total_amount}
+              color={colors.primary}
+            />
+            <View style={localStyles.vRule} />
+            <StatCard
+              equal
+              variant="matrix"
+              icon="wallet-outline"
+              label="Due"
+              value={due}
+              color={due > 0 ? colors.danger : colors.success}
+              valueColor={due > 0 ? colors.danger : colors.success}
+              subtitle={`Paid ${formatCurrency(purchase.paid_amount)}`}
+            />
+          </View>
+          <View style={localStyles.hRule} />
+          <StatCard
+            equal
+            variant="matrix"
+            icon="cube-outline"
+            label="Items"
+            displayValue={String(items.length)}
+            color={colors.accent}
+            subtitle={`${totalQty} units · ${formatCurrency(itemsCost)} cost`}
+          />
+        </View>
+
+        <View style={localStyles.panel}>
+          <View style={localStyles.listHeader}>
+            <SectionHeader title="Items" tight />
+          </View>
+          {items.map((item, index) => (
+            <View
+              key={item.id}
+              style={[
+                localStyles.listRow,
+                index === items.length - 1 && localStyles.listRowLast,
+              ]}
+            >
+              <View style={localStyles.listBody}>
+                <Text style={localStyles.itemName} numberOfLines={2}>
+                  {item.product_name}
+                </Text>
+                <Text style={localStyles.itemMeta}>
+                  {item.qty} × {formatCurrency(item.unit_cost)}
+                </Text>
+              </View>
+              <MoneyText amount={item.total} size="md" style={{ textAlign: 'right' }} />
+            </View>
+          ))}
+        </View>
+
+        <View style={localStyles.panel}>
+          <View style={localStyles.listHeader}>
+            <SectionHeader title="Payments" tight />
+          </View>
+          {payments.length === 0 ? (
+            <Text style={localStyles.muted}>No payments recorded</Text>
+          ) : (
+            payments.map((p, index) => (
+              <View
+                key={p.id}
+                style={[
+                  localStyles.listRow,
+                  index === payments.length - 1 && due <= 0 && localStyles.listRowLast,
+                ]}
+              >
+                <View style={localStyles.listBody}>
+                  <Text style={localStyles.itemName} numberOfLines={1}>
+                    {p.account_name}
+                  </Text>
+                  <Text style={localStyles.itemMeta}>{formatDisplayDate(p.date)}</Text>
+                </View>
+                <MoneyText amount={p.amount} size="md" style={{ textAlign: 'right' }} />
+                <ThemedPressable
+                  style={localStyles.removeBtn}
+                  onPress={() => handleRemovePayment(p)}
+                  disabled={removingPaymentId === p.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove payment ${formatCurrency(p.amount)}`}
+                >
+                  <Text style={[styles.link, { color: colors.warning }]}>
+                    {removingPaymentId === p.id ? '…' : 'Remove'}
+                  </Text>
+                </ThemedPressable>
+              </View>
+            ))
+          )}
+
+          {due > 0 ? (
+            <View style={localStyles.payForm}>
+              <SectionHeader title="Add payment" tight />
+              <AccountPicker
+                label="Payment Account"
+                accounts={accounts}
+                value={selectedAccount}
+                onChange={setSelectedAccount}
+              />
+              <FormInput label="Amount" value={payAmount} onChangeText={setPayAmount} money />
+              <DatePickerField label="Payment date" value={payDate} onChange={setPayDate} />
+              <View style={localStyles.payActions}>
+                <ThemedPressable
+                  onPress={() => setPayAmount(formatAmountInput(due))}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Fill remaining ${formatCurrency(due)}`}
+                >
+                  <Text style={styles.link}>Fill remaining ({formatCurrency(due)})</Text>
+                </ThemedPressable>
+                <PrimaryButton title="Record Payment" onPress={handleAddPayment} loading={saving} />
+              </View>
+            </View>
+          ) : null}
+        </View>
+
+        {purchase.notes ? (
+          <View style={localStyles.panel}>
+            <View style={localStyles.listHeader}>
+              <SectionHeader title="Notes" tight />
+            </View>
+            <Text style={localStyles.muted}>{purchase.notes}</Text>
+          </View>
+        ) : null}
+      </View>
     </FormScreen>
   );
 }

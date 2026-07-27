@@ -113,18 +113,30 @@ export default function DashboardScreen() {
         kpiPanel: {
           ...cardSurface(colors, isDark),
           padding: spacing.md,
-          gap: spacing.sm,
+          gap: spacing.md,
         },
         kpiHeader: {
-          marginBottom: spacing.xs,
+          marginBottom: 0,
         },
-        metricGrid: {
-          gap: spacing.sm,
+        kpiMatrix: {
+          borderRadius: radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
+          overflow: 'hidden',
+          backgroundColor: isDark ? colors.surfaceContainer : colors.surfaceContainerHigh,
         },
         metricRow: {
           flexDirection: 'row',
-          gap: spacing.sm,
           alignItems: 'stretch',
+        },
+        kpiVRule: {
+          width: StyleSheet.hairlineWidth,
+          backgroundColor: colors.border,
+          alignSelf: 'stretch',
+        },
+        kpiHRule: {
+          height: StyleSheet.hairlineWidth,
+          backgroundColor: colors.border,
         },
       }),
     [colors, isDark]
@@ -242,16 +254,18 @@ export default function DashboardScreen() {
       </View>
 
       {stats ? (
-        <FinanceHero
-          stats={stats}
-          amountsHidden={amountsHidden}
-          onToggleAmountsHidden={toggleAmountsHidden}
-          onNetWorthPress={() => router.push('/(drawer)/balance-sheet')}
-          onCashPress={() => router.push('/(drawer)/banking' as never)}
-          onReceivablePress={() => router.push('/(drawer)/reports/receivables' as never)}
-          onPayablePress={() => router.push('/(drawer)/reports/payables' as never)}
-          onInventoryPress={() => router.push('/(drawer)/inventory' as never)}
-        />
+        <View style={local.sectionBlock}>
+          <FinanceHero
+            stats={stats}
+            amountsHidden={amountsHidden}
+            onToggleAmountsHidden={toggleAmountsHidden}
+            onNetWorthPress={() => router.push('/(drawer)/balance-sheet')}
+            onCashPress={() => router.push('/(drawer)/banking' as never)}
+            onReceivablePress={() => router.push('/(drawer)/reports/receivables' as never)}
+            onPayablePress={() => router.push('/(drawer)/reports/payables' as never)}
+            onInventoryPress={() => router.push('/(drawer)/inventory' as never)}
+          />
+        </View>
       ) : null}
 
       <View style={local.sectionBlock}>
@@ -259,11 +273,11 @@ export default function DashboardScreen() {
           <View style={local.kpiHeader}>
             <SectionHeader title={periodTitle} tight />
           </View>
-          <View style={local.metricGrid}>
+          <View style={local.kpiMatrix}>
             <View style={local.metricRow}>
               <StatCard
                 equal
-                variant="inset"
+                variant="matrix"
                 icon="cart-outline"
                 label="Revenue"
                 value={stats?.sold ?? 0}
@@ -271,9 +285,10 @@ export default function DashboardScreen() {
                 onPress={() => router.push('/(drawer)/sales' as never)}
                 blurred={amountsHidden}
               />
+              <View style={local.kpiVRule} />
               <StatCard
                 equal
-                variant="inset"
+                variant="matrix"
                 icon="bag-handle-outline"
                 label="Purchased"
                 value={stats?.purchased ?? 0}
@@ -282,10 +297,11 @@ export default function DashboardScreen() {
                 blurred={amountsHidden}
               />
             </View>
+            <View style={local.kpiHRule} />
             <View style={local.metricRow}>
               <StatCard
                 equal
-                variant="inset"
+                variant="matrix"
                 icon="cash-outline"
                 label="Other Income"
                 value={stats?.otherIncome ?? 0}
@@ -293,9 +309,10 @@ export default function DashboardScreen() {
                 onPress={() => router.push('/(drawer)/other-income' as never)}
                 blurred={amountsHidden}
               />
+              <View style={local.kpiVRule} />
               <StatCard
                 equal
-                variant="inset"
+                variant="matrix"
                 icon="receipt-outline"
                 label="Expenses"
                 value={stats?.expense ?? 0}

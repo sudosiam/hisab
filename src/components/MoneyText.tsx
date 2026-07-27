@@ -1,7 +1,7 @@
 import React from 'react';
 import { Text, View, type StyleProp, type TextStyle, StyleSheet } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, formatCurrencyWhole } from '../utils/format';
 import { typography } from '../constants/theme';
 
 export type MoneyTextSize = 'sm' | 'md' | 'lg' | 'hero';
@@ -41,6 +41,8 @@ interface MoneyTextProps {
   minimumFontScale?: number;
   /** When true, amount is replaced with a privacy mask. */
   blurred?: boolean;
+  /** Hide paise — show whole rupees only (dashboard KPIs). */
+  hidePaise?: boolean;
 }
 
 /**
@@ -56,9 +58,11 @@ export function MoneyText({
   lines = 2,
   minimumFontScale = 0.5,
   blurred = false,
+  hidePaise = false,
 }: MoneyTextProps) {
   const { colors } = useTheme();
-  const value = blurred ? HIDDEN_MASK[size] : (text ?? formatCurrency(amount));
+  const formatted = hidePaise ? formatCurrencyWhole(amount) : formatCurrency(amount);
+  const value = blurred ? HIDDEN_MASK[size] : (text ?? formatted);
   const ink = color ?? colors.text;
 
   return (

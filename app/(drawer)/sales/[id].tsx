@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   Alert,
-  TouchableOpacity,
 } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter, useNavigation } from 'expo-router';
 import type { NavigationProp, ParamListBase } from '@react-navigation/native';
@@ -26,6 +25,7 @@ import {
   PrimaryButton,
   DatePickerField,
   SectionHeader,
+  ThemedPressable,
   useScreenStyles,
 } from '../../../src/components/ui';
 import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
@@ -35,7 +35,8 @@ import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { todayISO, isValidISODate, formatDisplayDate } from '../../../src/utils/date';
 import { stackDetailBeforeRemove } from '../../../src/navigation/screenOptions';
-import { radius, spacing } from '../../../src/constants/theme';
+import { cardSurface } from '../../../src/constants/shadows';
+import { radius, spacing, typography } from '../../../src/constants/theme';
 import type { Account, Sale, SaleItem, SalePayment } from '../../../src/types';
 
 export default function SaleDetailScreen() {
@@ -51,60 +52,120 @@ export default function SaleDetailScreen() {
     return unsub;
   }, [navigation]);
   const styles = useScreenStyles();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-        invoice: { fontSize: 20, fontWeight: '700', color: colors.text },
-        typeBadge: {
-          alignSelf: 'flex-start',
-          marginTop: spacing.xs,
-          paddingHorizontal: spacing.sm,
-          paddingVertical: 2,
-          borderRadius: radius.sm,
-          backgroundColor: colors.primary + '18',
+        stack: {
+          gap: spacing.md,
         },
-        typeBadgeBos: { backgroundColor: colors.warning + '22' },
-        typeBadgeText: {
-          fontSize: 11,
-          fontWeight: '700',
-          color: colors.primary,
+        panel: {
+          ...cardSurface(colors, isDark),
+          padding: spacing.md,
+          gap: spacing.sm,
         },
-        typeBadgeTextBos: { color: colors.warning },
-        party: { fontSize: 16, color: colors.textSecondary, marginTop: 4 },
-        date: { fontSize: 13, color: colors.textSecondary },
-        discountNote: {
-          fontSize: 12,
-          color: colors.textMuted,
-          marginBottom: spacing.xs,
-        },
-        itemRow: {
+        identityTop: {
           flexDirection: 'row',
           justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: spacing.sm,
+        },
+        invoice: {
+          ...typography.title,
+          fontSize: 18,
+          fontWeight: '700',
+          color: colors.text,
+          flex: 1,
+          minWidth: 0,
+        },
+        partyRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: spacing.sm,
+        },
+        party: {
+          ...typography.bodyMedium,
+          color: colors.textSecondary,
+          flex: 1,
+          minWidth: 0,
+        },
+        meta: {
+          ...typography.caption,
+          color: colors.textMuted,
+        },
+        matrix: {
+          borderRadius: radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
+          overflow: 'hidden',
+          backgroundColor: isDark ? colors.surfaceContainer : colors.surfaceContainerHigh,
+        },
+        matrixRow: {
+          flexDirection: 'row',
+          alignItems: 'stretch',
+        },
+        vRule: {
+          width: StyleSheet.hairlineWidth,
+          backgroundColor: colors.border,
+          alignSelf: 'stretch',
+        },
+        hRule: {
+          height: StyleSheet.hairlineWidth,
+          backgroundColor: colors.border,
+        },
+        listHeader: {
+          marginBottom: spacing.xs,
+        },
+        listRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: spacing.sm,
           paddingVertical: spacing.sm,
-          borderBottomWidth: 1,
+          borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: colors.border,
         },
-        itemName: { fontWeight: '500', color: colors.text },
-        itemMeta: { fontSize: 12, color: colors.textSecondary },
-        itemTotal: { fontWeight: '600', color: colors.text },
-        muted: { color: colors.textSecondary, fontSize: 13 },
-        paySection: { marginTop: spacing.md },
-        chip: {
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.xs,
-          backgroundColor: colors.chip,
-          borderRadius: radius.sm,
-          marginRight: spacing.xs,
-          borderWidth: 1,
-          borderColor: colors.border,
+        listRowLast: {
+          borderBottomWidth: 0,
+          paddingBottom: 0,
         },
-        chipActive: { backgroundColor: colors.chipActive, borderColor: colors.chipActive },
-        chipText: { color: colors.chipText, fontSize: 13 },
-        chipTextActive: { color: colors.chipTextActive, fontWeight: '600' },
+        listBody: {
+          flex: 1,
+          minWidth: 0,
+          gap: 2,
+        },
+        itemName: {
+          ...typography.bodyMedium,
+          fontWeight: '500',
+          color: colors.text,
+        },
+        itemMeta: {
+          ...typography.caption,
+          color: colors.textSecondary,
+        },
+        muted: {
+          ...typography.caption,
+          color: colors.textMuted,
+        },
+        payActions: {
+          marginTop: spacing.sm,
+          gap: spacing.sm,
+        },
+        payForm: {
+          marginTop: spacing.sm,
+          paddingTop: spacing.sm,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.border,
+          gap: spacing.sm,
+        },
+        removeBtn: {
+          paddingVertical: 4,
+          paddingHorizontal: 2,
+          minHeight: 44,
+          justifyContent: 'center',
+        },
       }),
-    [colors]
+    [colors, isDark]
   );
   const [sale, setSale] = useState<Sale | null>(null);
   const [items, setItems] = useState<SaleItem[]>([]);
@@ -386,119 +447,170 @@ export default function SaleDetailScreen() {
 
   return (
     <FormScreen>
-      <View style={localStyles.header}>
-        <Text style={localStyles.invoice}>{sale.invoice_no}</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-          <TouchableOpacity onPress={() => router.push(`/(drawer)/sales/edit?id=${sale.id}` as never)}>
-            <Text style={styles.link}>Edit</Text>
-          </TouchableOpacity>
-          <StatusBadge status={sale.status} />
-        </View>
-      </View>
-      
-      <Text style={localStyles.party}>{sale.party_name}</Text>
-      <Text style={localStyles.date}>
-        {formatDisplayDate(sale.date)} · {isBos ? 'Bill of Supply' : 'Invoice'}
-      </Text>
-      
-
-      {hasDiscount || hasServiceCharges ? (
-        <Text style={localStyles.discountNote}>
-          Subtotal {formatCurrency(sale.subtotal)}
-          {hasDiscount ? ` · Discount ${formatCurrency(sale.discount_amount)}` : ''}
-          {hasServiceCharges ? ` · Service ${formatCurrency(sale.service_charges)}` : ''}
-        </Text>
-      ) : null}
-
-      <View style={styles.detailKpiRow}>
-        <StatCard label="Total" value={sale.total_amount} color={colors.primary} />
-        <StatCard
-          label="Due"
-          value={due}
-          color={due > 0 ? colors.danger : colors.success}
-          subtitle={`Paid ${formatCurrency(sale.paid_amount)}`}
-        />
-        <StatCard
-          label="Profit"
-          value={grossProfit}
-          color={grossProfit >= 0 ? colors.success : colors.danger}
-          subtitle={`${marginPct}% margin · Cost ${formatCurrency(totalCost)}`}
-        />
-      </View>
-
-      
-
-      <SectionHeader title="Items" />
-      {items.map((item) => (
-          <View key={item.id} style={localStyles.itemRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={localStyles.itemName}>{item.product_name}</Text>
-              <Text style={localStyles.itemMeta}>
-                {item.qty} × {formatCurrency(item.unit_price)} · Cost{' '}
-                {formatCurrency(item.unit_cost)}
-              </Text>
-            </View>
-            <MoneyText amount={item.total} size="md" style={localStyles.itemTotal} />
+      <View style={localStyles.stack}>
+        <View style={localStyles.panel}>
+          <View style={localStyles.identityTop}>
+            <Text style={localStyles.invoice} numberOfLines={1}>
+              {sale.invoice_no}
+            </Text>
+            <StatusBadge status={sale.status} />
           </View>
-      ))}
-
-      <SectionHeader title="Payments" />
-      {payments.length === 0 ? (
-        <Text style={localStyles.muted}>No payments recorded</Text>
-      ) : (
-        payments.map((p) => (
-          <View key={p.id} style={localStyles.itemRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.value}>{p.account_name}</Text>
-              <Text style={localStyles.itemMeta}>{formatDisplayDate(p.date)}</Text>
-            </View>
-            <Text style={styles.amount}>{formatCurrency(p.amount)}</Text>
-            <TouchableOpacity
-              onPress={() => handleRemovePayment(p)}
-              disabled={removingPaymentId === p.id}
+          <View style={localStyles.partyRow}>
+            <Text style={localStyles.party} numberOfLines={2}>
+              {sale.party_name}
+            </Text>
+            <ThemedPressable
+              onPress={() => router.push(`/(drawer)/sales/edit?id=${sale.id}` as never)}
               accessibilityRole="button"
-              accessibilityLabel={`Remove payment ${formatCurrency(p.amount)}`}
+              accessibilityLabel="Edit sale"
             >
-              <Text style={[styles.link, { color: colors.danger }]}>
-                {removingPaymentId === p.id ? '…' : 'Remove'}
-              </Text>
-            </TouchableOpacity>
+              <Text style={styles.link}>Edit</Text>
+            </ThemedPressable>
           </View>
-        ))
-      )}
-
-      {due > 0 && (
-        <View style={localStyles.paySection}>
-          <SectionHeader title="Add Payment" />
-          <AccountPicker
-            label="Payment Account"
-            accounts={accounts}
-            value={selectedAccount}
-            onChange={setSelectedAccount}
-          />
-          <FormInput
-            label="Amount"
-            value={payAmount}
-            onChangeText={setPayAmount}
-            money
-          />
-          <DatePickerField label="Payment date" value={payDate} onChange={setPayDate} />
-          <TouchableOpacity
-            onPress={() => setPayAmount(formatAmountInput(due))}
-            style={{ marginBottom: spacing.sm }}
-          >
-            <Text style={styles.link}>Fill remaining ({formatCurrency(due)})</Text>
-          </TouchableOpacity>
-          <PrimaryButton title="Record Payment" onPress={handleAddPayment} loading={saving} />
+          <Text style={localStyles.meta}>
+            {formatDisplayDate(sale.date)} · {isBos ? 'Bill of Supply' : 'Invoice'}
+          </Text>
+          {hasDiscount || hasServiceCharges ? (
+            <Text style={localStyles.meta}>
+              Subtotal {formatCurrency(sale.subtotal)}
+              {hasDiscount ? ` · Discount ${formatCurrency(sale.discount_amount)}` : ''}
+              {hasServiceCharges ? ` · Service ${formatCurrency(sale.service_charges)}` : ''}
+            </Text>
+          ) : null}
         </View>
-      )}
 
-      {sale.notes ? (
-        <>
-          <SectionHeader title="Notes" />
-          <Text style={localStyles.muted}>{sale.notes}</Text>
-        </>
-      ) : null}
+        <View style={localStyles.matrix}>
+          <View style={localStyles.matrixRow}>
+            <StatCard
+              equal
+              variant="matrix"
+              icon="receipt-outline"
+              label="Total"
+              value={sale.total_amount}
+              color={colors.primary}
+            />
+            <View style={localStyles.vRule} />
+            <StatCard
+              equal
+              variant="matrix"
+              icon="wallet-outline"
+              label="Due"
+              value={due}
+              color={due > 0 ? colors.danger : colors.success}
+              valueColor={due > 0 ? colors.danger : colors.success}
+              subtitle={`Paid ${formatCurrency(sale.paid_amount)}`}
+            />
+          </View>
+          <View style={localStyles.hRule} />
+          <StatCard
+            equal
+            variant="matrix"
+            icon="trending-up-outline"
+            label="Profit"
+            value={grossProfit}
+            color={grossProfit >= 0 ? colors.success : colors.danger}
+            valueColor={grossProfit >= 0 ? colors.success : colors.danger}
+            subtitle={`${marginPct}% margin · Cost ${formatCurrency(totalCost)}`}
+          />
+        </View>
+
+        <View style={localStyles.panel}>
+          <View style={localStyles.listHeader}>
+            <SectionHeader title="Items" tight />
+          </View>
+          {items.map((item, index) => (
+            <View
+              key={item.id}
+              style={[
+                localStyles.listRow,
+                index === items.length - 1 && localStyles.listRowLast,
+              ]}
+            >
+              <View style={localStyles.listBody}>
+                <Text style={localStyles.itemName} numberOfLines={2}>
+                  {item.product_name}
+                </Text>
+                <Text style={localStyles.itemMeta}>
+                  {item.qty} × {formatCurrency(item.unit_price)} · Cost{' '}
+                  {formatCurrency(item.unit_cost)}
+                </Text>
+              </View>
+              <MoneyText amount={item.total} size="md" style={{ textAlign: 'right' }} />
+            </View>
+          ))}
+        </View>
+
+        <View style={localStyles.panel}>
+          <View style={localStyles.listHeader}>
+            <SectionHeader title="Payments" tight />
+          </View>
+          {payments.length === 0 ? (
+            <Text style={localStyles.muted}>No payments recorded</Text>
+          ) : (
+            payments.map((p, index) => (
+              <View
+                key={p.id}
+                style={[
+                  localStyles.listRow,
+                  index === payments.length - 1 && due <= 0 && localStyles.listRowLast,
+                ]}
+              >
+                <View style={localStyles.listBody}>
+                  <Text style={localStyles.itemName} numberOfLines={1}>
+                    {p.account_name}
+                  </Text>
+                  <Text style={localStyles.itemMeta}>{formatDisplayDate(p.date)}</Text>
+                </View>
+                <MoneyText amount={p.amount} size="md" style={{ textAlign: 'right' }} />
+                <ThemedPressable
+                  style={localStyles.removeBtn}
+                  onPress={() => handleRemovePayment(p)}
+                  disabled={removingPaymentId === p.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove payment ${formatCurrency(p.amount)}`}
+                >
+                  <Text style={[styles.link, { color: colors.danger }]}>
+                    {removingPaymentId === p.id ? '…' : 'Remove'}
+                  </Text>
+                </ThemedPressable>
+              </View>
+            ))
+          )}
+
+          {due > 0 ? (
+            <View style={localStyles.payForm}>
+              <SectionHeader title="Add payment" tight />
+              <AccountPicker
+                label="Payment Account"
+                accounts={accounts}
+                value={selectedAccount}
+                onChange={setSelectedAccount}
+              />
+              <FormInput label="Amount" value={payAmount} onChangeText={setPayAmount} money />
+              <DatePickerField label="Payment date" value={payDate} onChange={setPayDate} />
+              <View style={localStyles.payActions}>
+                <ThemedPressable
+                  onPress={() => setPayAmount(formatAmountInput(due))}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Fill remaining ${formatCurrency(due)}`}
+                >
+                  <Text style={styles.link}>Fill remaining ({formatCurrency(due)})</Text>
+                </ThemedPressable>
+                <PrimaryButton title="Record Payment" onPress={handleAddPayment} loading={saving} />
+              </View>
+            </View>
+          ) : null}
+        </View>
+
+        {sale.notes ? (
+          <View style={localStyles.panel}>
+            <View style={localStyles.listHeader}>
+              <SectionHeader title="Notes" tight />
+            </View>
+            <Text style={localStyles.muted}>{sale.notes}</Text>
+          </View>
+        ) : null}
+      </View>
     </FormScreen>
   );
 }

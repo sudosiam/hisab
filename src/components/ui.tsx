@@ -19,8 +19,8 @@ import { useTheme } from '../context/ThemeContext';
 import type { ThemeColors } from '../constants/theme';
 import { spacing, radius, typography } from '../constants/theme';
 import { cardSurface, elevatedSurface, fabShadow } from '../constants/shadows';
-import { formatCurrency } from '../utils/format';
 import { MoneyText } from './MoneyText';
+import { StatCard } from './StatCard';
 import type { DashboardStats } from '../types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedPressable, ACTIVE_OPACITY } from './ThemedPressable';
@@ -319,110 +319,50 @@ export function FinanceHero({
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        hero: {
-          ...elevatedSurface(colors, isDark),
+        panel: {
+          ...cardSurface(colors, isDark),
           padding: spacing.md,
-          marginBottom: spacing.md,
-          overflow: 'hidden',
           gap: spacing.md,
         },
-        topBar: {
+        header: {
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: spacing.sm,
+          minHeight: 28,
         },
-        kicker: {
-          ...typography.section,
-          color: colors.textSecondary,
-          textTransform: 'uppercase',
-          letterSpacing: 0.6,
+        headerTitle: {
+          flex: 1,
+          minWidth: 0,
         },
         eyeBtn: {
-          width: 44,
-          height: 44,
+          width: 40,
+          height: 40,
+          marginTop: -6,
+          marginRight: -6,
           alignItems: 'center',
           justifyContent: 'center',
           borderRadius: radius.full,
-          backgroundColor: colors.surfaceContainerHigh,
         },
-        profitBlock: {
-          gap: 4,
-        },
-        profitLabel: {
-          ...typography.caption,
-          color: colors.textSecondary,
-          fontWeight: '500',
-        },
-        grossLine: {
-          ...typography.caption,
-          color: colors.textMuted,
-          marginTop: 2,
-        },
-        worthRow: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: spacing.md,
-          paddingVertical: spacing.sm,
-          paddingHorizontal: spacing.sm,
-          minHeight: 52,
-          backgroundColor: colors.surfaceContainerHigh,
+        matrix: {
           borderRadius: radius.md,
-          borderWidth: isDark ? StyleSheet.hairlineWidth : 0,
+          borderWidth: StyleSheet.hairlineWidth,
           borderColor: colors.border,
+          overflow: 'hidden',
+          backgroundColor: isDark ? colors.surfaceContainer : colors.surfaceContainerHigh,
         },
-        worthLeft: { flex: 1, minWidth: 0, gap: 2 },
-        worthLabel: {
-          ...typography.micro,
-          color: colors.textSecondary,
-          textTransform: 'uppercase',
-          letterSpacing: 0.4,
-          fontWeight: '600',
-        },
-        tileGrid: {
-          gap: spacing.sm,
-        },
-        tileRow: {
-          flexDirection: 'row',
-          gap: spacing.sm,
-        },
-        tile: {
-          flex: 1,
-          minWidth: 0,
+        matrixRow: {
           flexDirection: 'row',
           alignItems: 'stretch',
-          overflow: 'hidden',
-          backgroundColor: colors.surfaceContainerHigh,
-          borderRadius: radius.md,
-          borderWidth: isDark ? StyleSheet.hairlineWidth : 0,
-          borderColor: colors.border,
-          minHeight: 68,
         },
-        tileAccent: {
-          width: 3,
+        vRule: {
+          width: StyleSheet.hairlineWidth,
+          backgroundColor: colors.border,
           alignSelf: 'stretch',
         },
-        tileBody: {
-          flex: 1,
-          minWidth: 0,
-          paddingVertical: spacing.sm,
-          paddingHorizontal: spacing.sm,
-          justifyContent: 'center',
-          gap: 4,
-        },
-        tileLabelRow: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 4,
-        },
-        tileLabel: {
-          ...typography.micro,
-          color: colors.textSecondary,
-          textTransform: 'uppercase',
-          letterSpacing: 0.3,
-          fontWeight: '600',
-          flexShrink: 1,
+        hRule: {
+          height: StyleSheet.hairlineWidth,
+          backgroundColor: colors.border,
         },
       }),
     [colors, isDark]
@@ -430,52 +370,12 @@ export function FinanceHero({
 
   const netProfitColor = stats.netProfit >= 0 ? colors.success : colors.danger;
 
-  const tiles: {
-    label: string;
-    amount: number;
-    color: string;
-    icon: React.ComponentProps<typeof Ionicons>['name'];
-    onPress?: () => void;
-    a11y: string;
-  }[] = [
-    {
-      label: 'Cash & Bank',
-      amount: stats.totalLiquid,
-      color: colors.primary,
-      icon: 'wallet-outline',
-      onPress: onCashPress,
-      a11y: 'View banking',
-    },
-    {
-      label: 'Receivable',
-      amount: stats.receivable,
-      color: colors.danger,
-      icon: 'arrow-down-circle-outline',
-      onPress: onReceivablePress,
-      a11y: 'View receivables',
-    },
-    {
-      label: 'Payable',
-      amount: stats.payable,
-      color: colors.warning,
-      icon: 'arrow-up-circle-outline',
-      onPress: onPayablePress,
-      a11y: 'View payables',
-    },
-    {
-      label: 'Inventory',
-      amount: stats.inventoryValue,
-      color: colors.primaryLight,
-      icon: 'cube-outline',
-      onPress: onInventoryPress,
-      a11y: 'View inventory',
-    },
-  ];
-
   return (
-    <View style={styles.hero}>
-      <View style={styles.topBar}>
-        <Text style={styles.kicker}>This period</Text>
+    <View style={styles.panel}>
+      <View style={styles.header}>
+        <View style={styles.headerTitle}>
+          <SectionHeader title="Overview" tight />
+        </View>
         {onToggleAmountsHidden ? (
           <ThemedPressable
             style={styles.eyeBtn}
@@ -483,7 +383,7 @@ export function FinanceHero({
             hitSlop={4}
             accessibilityRole="button"
             accessibilityLabel={amountsHidden ? 'Show amounts' : 'Hide amounts'}
-            android_ripple={{ color: colors.overlay, borderless: true, radius: 22 }}
+            android_ripple={{ color: colors.overlay, borderless: true, radius: 20 }}
           >
             <Ionicons
               name={amountsHidden ? 'eye-off-outline' : 'eye-outline'}
@@ -494,111 +394,91 @@ export function FinanceHero({
         ) : null}
       </View>
 
-      <View style={styles.profitBlock}>
-        <Text style={styles.profitLabel}>Net profit</Text>
-        <MoneyText
-          amount={stats.netProfit}
-          size="hero"
-          color={netProfitColor}
-          style={{ width: '100%', textAlign: 'left' }}
-          blurred={amountsHidden}
-          lines={1}
-        />
-        <Text style={styles.grossLine} numberOfLines={1}>
-          Gross{' '}
-          {amountsHidden ? (
-            <Text style={{ letterSpacing: 1.5, opacity: 0.45 }}>••••••</Text>
-          ) : (
-            formatCurrency(stats.grossProfit)
-          )}
-        </Text>
-      </View>
-
-      <ThemedPressable
-        style={styles.worthRow}
-        onPress={onNetWorthPress}
-        disabled={!onNetWorthPress}
-        haptic={onNetWorthPress ? 'light' : false}
-        accessibilityRole={onNetWorthPress ? 'button' : undefined}
-        accessibilityLabel="View balance sheet"
-      >
-        <View style={styles.worthLeft}>
-          <Text style={styles.worthLabel}>Net worth</Text>
-          <MoneyText
-            amount={stats.netWorth}
-            size="lg"
-            style={{ width: '100%', textAlign: 'left' }}
+      <View style={styles.matrix}>
+        <View style={styles.matrixRow}>
+          <StatCard
+            equal
+            variant="matrix"
+            icon="trending-up-outline"
+            label="Net profit"
+            value={stats.netProfit}
+            color={netProfitColor}
+            valueColor={netProfitColor}
             blurred={amountsHidden}
-            lines={1}
+          />
+          <View style={styles.vRule} />
+          <StatCard
+            equal
+            variant="matrix"
+            icon="stats-chart-outline"
+            label="Gross profit"
+            value={stats.grossProfit}
+            color={colors.primary}
+            blurred={amountsHidden}
           />
         </View>
-        {onNetWorthPress ? (
-          <Ionicons name="chevron-forward" size={ICON.chevron} color={colors.textMuted} />
-        ) : null}
-      </ThemedPressable>
+      </View>
 
-      <View style={styles.tileGrid}>
-        <View style={styles.tileRow}>
-          {tiles.slice(0, 2).map((tile) => (
-            <ThemedPressable
-              key={tile.label}
-              style={styles.tile}
-              onPress={tile.onPress}
-              disabled={!tile.onPress}
-              haptic={tile.onPress ? 'light' : false}
-              accessibilityRole={tile.onPress ? 'button' : undefined}
-              accessibilityLabel={tile.a11y}
-            >
-              <View style={[styles.tileAccent, { backgroundColor: tile.color }]} />
-              <View style={styles.tileBody}>
-                <View style={styles.tileLabelRow}>
-                  <Ionicons name={tile.icon} size={14} color={tile.color} />
-                  <Text style={styles.tileLabel} numberOfLines={1}>
-                    {tile.label}
-                  </Text>
-                </View>
-                <MoneyText
-                  amount={tile.amount}
-                  size="md"
-                  color={colors.text}
-                  style={{ width: '100%', textAlign: 'left' }}
-                  blurred={amountsHidden}
-                  lines={1}
-                />
-              </View>
-            </ThemedPressable>
-          ))}
+      <View style={styles.matrix}>
+        <StatCard
+          equal
+          variant="matrix"
+          icon="pie-chart-outline"
+          label="Net worth"
+          value={stats.netWorth}
+          color={colors.primary}
+          onPress={onNetWorthPress}
+          blurred={amountsHidden}
+        />
+      </View>
+
+      <View style={styles.matrix}>
+        <View style={styles.matrixRow}>
+          <StatCard
+            equal
+            variant="matrix"
+            icon="wallet-outline"
+            label="Cash & bank"
+            value={stats.totalLiquid}
+            color={colors.primary}
+            onPress={onCashPress}
+            blurred={amountsHidden}
+          />
+          <View style={styles.vRule} />
+          <StatCard
+            equal
+            variant="matrix"
+            icon="arrow-down-circle-outline"
+            label="Receivable"
+            value={stats.receivable}
+            color={colors.danger}
+            onPress={onReceivablePress}
+            blurred={amountsHidden}
+          />
         </View>
-        <View style={styles.tileRow}>
-          {tiles.slice(2, 4).map((tile) => (
-            <ThemedPressable
-              key={tile.label}
-              style={styles.tile}
-              onPress={tile.onPress}
-              disabled={!tile.onPress}
-              haptic={tile.onPress ? 'light' : false}
-              accessibilityRole={tile.onPress ? 'button' : undefined}
-              accessibilityLabel={tile.a11y}
-            >
-              <View style={[styles.tileAccent, { backgroundColor: tile.color }]} />
-              <View style={styles.tileBody}>
-                <View style={styles.tileLabelRow}>
-                  <Ionicons name={tile.icon} size={14} color={tile.color} />
-                  <Text style={styles.tileLabel} numberOfLines={1}>
-                    {tile.label}
-                  </Text>
-                </View>
-                <MoneyText
-                  amount={tile.amount}
-                  size="md"
-                  color={colors.text}
-                  style={{ width: '100%', textAlign: 'left' }}
-                  blurred={amountsHidden}
-                  lines={1}
-                />
-              </View>
-            </ThemedPressable>
-          ))}
+        <View style={styles.hRule} />
+        <View style={styles.matrixRow}>
+          <StatCard
+            equal
+            variant="matrix"
+            icon="arrow-up-circle-outline"
+            label="Payable"
+            value={stats.payable}
+            color={colors.warning}
+            onPress={onPayablePress}
+            blurred={amountsHidden}
+          />
+          <View style={styles.vRule} />
+          <StatCard
+            equal
+            variant="matrix"
+            icon="cube-outline"
+            label="Inventory"
+            value={stats.inventoryValue}
+            color={colors.primaryLight}
+            onPress={onInventoryPress}
+            blurred={amountsHidden}
+          />
         </View>
       </View>
     </View>

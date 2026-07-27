@@ -126,24 +126,45 @@ export function DashboardSkeleton() {
           backgroundColor: colors.surfaceElevated,
           gap: spacing.sm,
         },
-        tileRow: { flexDirection: 'row', gap: spacing.sm },
+        scoreRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          minHeight: 40,
+          paddingVertical: 6,
+        },
+        tileRow: { flexDirection: 'row', alignItems: 'stretch' },
         tile: {
           flex: 1,
-          minHeight: 56,
-          borderRadius: radius.md,
-          backgroundColor: colors.surfaceContainer,
-          padding: spacing.sm,
-          gap: 6,
+          minHeight: 64,
+          paddingVertical: spacing.sm,
+          paddingHorizontal: spacing.sm + 2,
+          gap: 4,
           justifyContent: 'center',
         },
-        metricRow: { flexDirection: 'row', gap: spacing.sm },
+        matrix: {
+          borderRadius: radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
+          overflow: 'hidden',
+          backgroundColor: isDark ? colors.surfaceContainer : colors.surfaceContainerHigh,
+        },
+        vRule: {
+          width: StyleSheet.hairlineWidth,
+          backgroundColor: colors.border,
+          alignSelf: 'stretch',
+        },
+        hRule: {
+          height: StyleSheet.hairlineWidth,
+          backgroundColor: colors.border,
+        },
+        metricRow: { flexDirection: 'row', alignItems: 'stretch' },
         metric: {
           flex: 1,
-          minHeight: 64,
-          borderRadius: radius.lg,
-          backgroundColor: colors.surfaceContainer,
-          padding: spacing.sm,
-          gap: 6,
+          minHeight: 74,
+          paddingVertical: spacing.sm,
+          paddingHorizontal: spacing.sm + 2,
+          gap: 4,
           justifyContent: 'center',
         },
         actionRow: { flexDirection: 'row', gap: spacing.sm },
@@ -166,52 +187,80 @@ export function DashboardSkeleton() {
       <View style={styles.wrap} accessibilityLabel="Loading dashboard">
         <SkeletonBar width="100%" height={40} style={{ borderRadius: radius.full }} />
         <View style={styles.hero}>
-          <SkeletonBar width="28%" height={10} />
-          <SkeletonBar width="36%" height={12} />
-          <SkeletonBar width="62%" height={26} />
-          <SkeletonBar width="40%" height={10} />
-          <SkeletonBar width="100%" height={52} style={{ borderRadius: radius.md }} />
-          <View style={styles.tileRow}>
-            <View style={styles.tile}>
-              <SkeletonBar width="55%" height={8} />
-              <SkeletonBar width="70%" height={14} />
-            </View>
-            <View style={styles.tile}>
-              <SkeletonBar width="55%" height={8} />
-              <SkeletonBar width="70%" height={14} />
+          <View style={styles.scoreRow}>
+            <SkeletonBar width="28%" height={10} />
+            <SkeletonBar width={28} height={28} style={{ borderRadius: radius.full }} />
+          </View>
+          <View style={styles.matrix}>
+            <View style={styles.tileRow}>
+              <View style={styles.tile}>
+                <SkeletonBar width="55%" height={8} />
+                <SkeletonBar width="70%" height={14} />
+              </View>
+              <View style={styles.vRule} />
+              <View style={styles.tile}>
+                <SkeletonBar width="55%" height={8} />
+                <SkeletonBar width="70%" height={14} />
+              </View>
             </View>
           </View>
-          <View style={styles.tileRow}>
+          <View style={styles.matrix}>
             <View style={styles.tile}>
-              <SkeletonBar width="55%" height={8} />
-              <SkeletonBar width="70%" height={14} />
+              <SkeletonBar width="40%" height={8} />
+              <SkeletonBar width="55%" height={14} />
             </View>
-            <View style={styles.tile}>
-              <SkeletonBar width="55%" height={8} />
-              <SkeletonBar width="70%" height={14} />
+          </View>
+          <View style={styles.matrix}>
+            <View style={styles.tileRow}>
+              <View style={styles.tile}>
+                <SkeletonBar width="55%" height={8} />
+                <SkeletonBar width="70%" height={14} />
+              </View>
+              <View style={styles.vRule} />
+              <View style={styles.tile}>
+                <SkeletonBar width="55%" height={8} />
+                <SkeletonBar width="70%" height={14} />
+              </View>
+            </View>
+            <View style={styles.hRule} />
+            <View style={styles.tileRow}>
+              <View style={styles.tile}>
+                <SkeletonBar width="55%" height={8} />
+                <SkeletonBar width="70%" height={14} />
+              </View>
+              <View style={styles.vRule} />
+              <View style={styles.tile}>
+                <SkeletonBar width="55%" height={8} />
+                <SkeletonBar width="70%" height={14} />
+              </View>
             </View>
           </View>
         </View>
         <View style={styles.hero}>
           <SkeletonBar width="40%" height={12} />
-          <View style={styles.metricRow}>
-            <View style={styles.metric}>
-              <SkeletonBar width="50%" height={8} />
-              <SkeletonBar width="70%" height={14} />
+          <View style={styles.matrix}>
+            <View style={styles.metricRow}>
+              <View style={styles.metric}>
+                <SkeletonBar width="50%" height={8} />
+                <SkeletonBar width="70%" height={14} />
+              </View>
+              <View style={styles.vRule} />
+              <View style={styles.metric}>
+                <SkeletonBar width="50%" height={8} />
+                <SkeletonBar width="70%" height={14} />
+              </View>
             </View>
-            <View style={styles.metric}>
-              <SkeletonBar width="50%" height={8} />
-              <SkeletonBar width="70%" height={14} />
-            </View>
-          </View>
-          <View style={styles.metricRow}>
-            <View style={styles.metric}>
-              <SkeletonBar width="50%" height={8} />
-              <SkeletonBar width="70%" height={14} />
-            </View>
-            <View style={styles.metric}>
-              <SkeletonBar width="50%" height={8} />
-              <SkeletonBar width="70%" height={14} />
+            <View style={styles.hRule} />
+            <View style={styles.metricRow}>
+              <View style={styles.metric}>
+                <SkeletonBar width="50%" height={8} />
+                <SkeletonBar width="70%" height={14} />
+              </View>
+              <View style={styles.vRule} />
+              <View style={styles.metric}>
+                <SkeletonBar width="50%" height={8} />
+                <SkeletonBar width="70%" height={14} />
+              </View>
             </View>
           </View>
         </View>

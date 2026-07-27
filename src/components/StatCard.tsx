@@ -16,10 +16,14 @@ interface Props {
   displayValue?: string;
   color?: string;
   subtitle?: string;
+  /** Optional amount color (defaults to theme text). */
+  valueColor?: string;
   onPress?: () => void;
   style?: ViewStyle;
   /** Blur the value for privacy (dashboard hide-amounts). */
   blurred?: boolean;
+  /** Hide paise on the amount (dashboard KPIs). */
+  hidePaise?: boolean;
   /** Stretch equally in a flex row (dashboard 2-col grids). */
   equal?: boolean;
   /** Optional leading icon. */
@@ -27,8 +31,13 @@ interface Props {
   /**
    * `card` — elevated surface (default).
    * `inset` — tonal tile for use inside a parent panel (no nested elevation).
+   * `matrix` — flush cell for divider grids (no fill / radius / border).
    */
-  variant?: 'card' | 'inset';
+  variant?: 'card' | 'inset' | 'matrix';
+}
+
+function tint(hex: string, alpha: string) {
+  return hex.length === 7 ? `${hex}${alpha}` : hex;
 }
 
 export function StatCard({
@@ -36,10 +45,12 @@ export function StatCard({
   value,
   displayValue,
   color,
+  valueColor,
   subtitle,
   onPress,
   style,
   blurred = false,
+  hidePaise = false,
   equal = false,
   icon,
   variant = 'card',
@@ -47,8 +58,41 @@ export function StatCard({
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const accent = color ?? colors.primary;
+  const amountColor = valueColor ?? colors.text;
+  const stacked = variant === 'inset' || variant === 'matrix';
+  const omitPaise = hidePaise || variant === 'matrix';
 
-  const body = (
+  const body = stacked ? (
+    <View style={styles.stackBody}>
+      <View style={styles.stackHeader}>
+        {icon ? (
+          <View style={[styles.iconBadge, { backgroundColor: tint(accent, isDark ? '26' : '14') }]}>
+            <Ionicons name={icon} size={12} color={accent} />
+          </View>
+        ) : null}
+        <Text style={styles.label} numberOfLines={1}>
+          {label}
+        </Text>
+      </View>
+      <View style={styles.valueSlot}>
+        <MoneyText
+          amount={value ?? 0}
+          text={displayValue}
+          size="md"
+          color={amountColor}
+          style={styles.valueText}
+          lines={1}
+          blurred={blurred}
+          hidePaise={omitPaise}
+        />
+      </View>
+      {subtitle ? (
+        <Text style={styles.subtitle} numberOfLines={2}>
+          {subtitle}
+        </Text>
+      ) : null}
+    </View>
+  ) : (
     <>
       <View style={[styles.accent, { backgroundColor: accent }]} />
       <View style={styles.body}>
@@ -64,10 +108,11 @@ export function StatCard({
           amount={value ?? 0}
           text={displayValue}
           size="md"
-          color={colors.text}
+          color={amountColor}
           style={{ width: '100%', textAlign: 'left' }}
           lines={1}
           blurred={blurred}
+          hidePaise={omitPaise}
         />
         {subtitle ? (
           <Text style={styles.subtitle} numberOfLines={2}>
@@ -79,7 +124,7 @@ export function StatCard({
   );
 
   const cardStyle = [
-    variant === 'inset' ? styles.inset : styles.card,
+    variant === 'matrix' ? styles.matrix : variant === 'inset' ? styles.inset : styles.card,
     equal && styles.equal,
     style,
   ];
@@ -117,19 +162,28 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       minHeight: 76,
     },
     inset: {
-      flexDirection: 'row',
-      alignItems: 'stretch',
       overflow: 'hidden',
       flexGrow: 1,
       flexShrink: 1,
       flexBasis: '31%',
       minWidth: 96,
       maxWidth: '100%',
-      minHeight: 76,
+      minHeight: 72,
       backgroundColor: colors.surfaceContainerHigh,
       borderRadius: radius.md,
       borderWidth: isDark ? StyleSheet.hairlineWidth : 0,
       borderColor: colors.border,
+    },
+    matrix: {
+      overflow: 'hidden',
+      flexGrow: 1,
+      flexShrink: 1,
+      flexBasis: 0,
+      minWidth: 0,
+      minHeight: 74,
+      backgroundColor: 'transparent',
+      borderRadius: 0,
+      borderWidth: 0,
     },
     equal: {
       flex: 1,
@@ -150,6 +204,38 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       justifyContent: 'center',
       gap: 4,
     },
+    stackBody: {
+      flex: 1,
+      minWidth: 0,
+      paddingHorizontal: spacing.sm + 2,
+      paddingVertical: spacing.sm,
+      justifyContent: 'center',
+      gap: 4,
+    },
+    stackHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      minHeight: 22,
+      minWidth: 0,
+    },
+    iconBadge: {
+      width: 22,
+      height: 22,
+      borderRadius: 6,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    valueSlot: {
+      minHeight: 18,
+      justifyContent: 'center',
+    },
+    valueText: {
+      width: '100%',
+      textAlign: 'left',
+      fontVariant: ['tabular-nums'],
+    },
     labelRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -166,6 +252,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       letterSpacing: 0.4,
       textTransform: 'uppercase',
       flexShrink: 1,
+      minWidth: 0,
     },
     subtitle: {
       ...typography.micro,

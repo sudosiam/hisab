@@ -34,6 +34,15 @@ export function formatCurrency(amount: number): string {
   return `₹${body}`;
 }
 
+/** Indian-grouped rupees only — no paise (nearest rupee). For compact KPIs. */
+export function formatCurrencyWhole(amount: number): string {
+  const safe = roundMoney(Number.isFinite(amount) ? amount : 0);
+  const rounded = Math.round(safe);
+  const negative = rounded < 0;
+  const body = formatIndianGrouping(Math.abs(rounded));
+  return negative ? `-₹${body}` : `₹${body}`;
+}
+
 /**
  * Plain decimal string for prefilling input fields — no grouping, always two
  * decimal places so paise is never lost on save.

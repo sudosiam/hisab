@@ -1,6 +1,7 @@
 import {
   formatAmountInput,
   formatCurrency,
+  formatCurrencyWhole,
   formatIndianMoney,
   formatQtyInput,
   formatSignedCurrency,
@@ -15,6 +16,14 @@ describe('format utilities', () => {
     expect(formatCurrency(10.7)).toBe('₹10.70');
     expect(formatCurrency(-500.5)).toBe('-₹500.50');
     expect(formatCurrency(0)).toBe('₹0.00');
+  });
+
+  it('formats whole rupees without paise', () => {
+    expect(formatCurrencyWhole(1234567)).toBe('₹12,34,567');
+    expect(formatCurrencyWhole(10.75)).toBe('₹11');
+    expect(formatCurrencyWhole(10.4)).toBe('₹10');
+    expect(formatCurrencyWhole(-500.6)).toBe('-₹501');
+    expect(formatCurrencyWhole(0)).toBe('₹0');
   });
 
   it('formats plain indian money without symbol', () => {
