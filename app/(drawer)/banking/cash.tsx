@@ -35,7 +35,6 @@ export default function CashMovementScreen() {
           padding: spacing.md,
           marginBottom: spacing.md,
         },
-        infoText: { fontSize: 13, color: colors.textSecondary, lineHeight: 20 },
       }),
     [colors, isDark]
   );
@@ -123,18 +122,13 @@ export default function CashMovementScreen() {
 
   return (
     <FormScreen>
-      <View style={localStyles.info}>
-        <Text style={localStyles.infoText}>
-          {mode === 'deposit'
-            ? 'Record money added to an account (e.g. cash deposited in bank).'
-            : 'Record money taken out of an account. Balance must be sufficient.'}
-        </Text>
-        {selected ? (
-          <Text style={[styles.cardSub, { marginTop: spacing.sm }]}>
-            Current balance: {formatCurrency(selected.current_balance)}
+      {selected ? (
+        <View style={localStyles.info}>
+          <Text style={styles.cardSub}>
+            Balance: {formatCurrency(selected.current_balance)}
           </Text>
-        ) : null}
-      </View>
+        </View>
+      ) : null}
 
       <AccountPicker
         label="Account"

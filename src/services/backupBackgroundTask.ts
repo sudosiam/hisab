@@ -10,8 +10,8 @@
 import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
-import { isAutoBackupEnabled, runDailyBackupIfDue } from './backup';
-import { isCloudBackupEnabled, runCloudDailyBackupIfDue } from './cloudBackup';
+import { isAutoBackupEnabled } from './backup';
+import { isCloudBackupEnabled } from './cloudBackup';
 
 export const BACKUP_BACKGROUND_TASK = 'hisab-daily-backup';
 
@@ -20,8 +20,8 @@ const MINIMUM_INTERVAL_MINUTES = 24 * 60;
 
 TaskManager.defineTask(BACKUP_BACKGROUND_TASK, async () => {
   try {
-    await runDailyBackupIfDue().catch(() => {});
-    await runCloudDailyBackupIfDue().catch(() => {});
+    const { runDueBackups } = await import('./backup');
+    await runDueBackups();
     return BackgroundTask.BackgroundTaskResult.Success;
   } catch {
     return BackgroundTask.BackgroundTaskResult.Failed;

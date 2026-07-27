@@ -6,12 +6,14 @@ import { ListItem } from '../../../src/components/ListItem';
 import { MoneyTotalRow } from '../../../src/components/MoneyText';
 import { ListSkeleton } from '../../../src/components/Skeleton';
 import {
+  EmptyState,
   ErrorState,
   Fab,
   FilterChip,
   FilterRow,
   SearchField,
   useScreenStyles,
+  useFabListPadding,
 } from '../../../src/components/ui';
 import { listAdjustmentNotes } from '../../../src/services/adjustmentNotes';
 import { formatDisplayDate, getPeriodTotalLabel } from '../../../src/utils/date';
@@ -20,8 +22,9 @@ import { useTheme } from '../../../src/context/ThemeContext';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
-import { FLATLIST_PERF } from '../../../src/constants/listPerf';
+import { FLATLIST_PERF, listCardGetItemLayout } from '../../../src/constants/listPerf';
 import { spacing } from '../../../src/constants/theme';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 import type { AdjustmentNote, AdjustmentNoteKind } from '../../../src/types';
 
 type Filter = 'all' | AdjustmentNoteKind;
@@ -35,6 +38,7 @@ export default function NotesListScreen() {
   const { refreshKey } = useDatabase();
   const { colors } = useTheme();
   const styles = useScreenStyles();
+  const fabListPadding = useFabListPadding();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [notes, setNotes] = useState<AdjustmentNote[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
@@ -139,41 +143,50 @@ export default function NotesListScreen() {
         ))}
       </FilterRow>
 
-      <SearchField value={search} onChangeText={setSearch} placeholder="Search notes…" />
+      <SearchField value={search} onChangeText={setSearch} placeholder="Search adjustments…" />
 
-      {booting ? (
+      {booting && notes.length === 0 ? (
         <ListSkeleton />
       ) : (
         <FlatList
           data={filtered}
           keyExtractor={(item) => String(item.id)}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingHorizontal: spacing.md, paddingBottom: 88 }}
+          contentContainerStyle={{ paddingHorizontal: spacing.md, paddingBottom: fabListPadding }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={async () => {
+              onRefresh={() => {
                 setRefreshing(true);
-                try {
-                  await load();
-                } finally {
-                  setRefreshing(false);
-                }
+                load()
+                  .catch((e) => alertRefreshFailed(e))
+                  .finally(() => setRefreshing(false));
               }}
+              colors={[colors.primary]}
+              tintColor={colors.primary}
             />
           }
           ListEmptyComponent={
-            <Text style={styles.empty}>
-              {search.trim() || filter !== 'all'
-                ? 'No notes match your filters.'
-                : 'No notes in this period.'}
-            </Text>
+            search.trim() || filter !== 'all' ? (
+              <EmptyState
+                title="No matches"
+                message="Try a different filter or search."
+              />
+            ) : (
+              <EmptyState
+                title="No adjustments yet"
+                message="Record stock or price adjustments for this period."
+                actionLabel="New Adjustment"
+                onAction={() => router.push('/(drawer)/notes/new' as never)}
+              />
+            )
           }
+          getItemLayout={listCardGetItemLayout}
           {...FLATLIST_PERF}
         />
       )}
 
-      <Fab label="+ New Note" onPress={() => router.push('/(drawer)/notes/new' as never)} />
+      <Fab label="+ New Adjustment" onPress={() => router.push('/(drawer)/notes/new' as never)} />
     </View>
   );
 }

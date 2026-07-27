@@ -32,7 +32,10 @@ export interface ThemeColors {
   chipActive: string;
   chipText: string;
   chipTextActive: string;
+  /** Pressable ripple / light wash — not for full-screen scrims. */
   overlay: string;
+  /** Drawer / modal dim behind content — always a dark translucent scrim. */
+  scrim: string;
   shadow: string;
   inputBg: string;
 }
@@ -71,29 +74,31 @@ export const lightColors: ThemeColors = {
   chipText: '#5C6570',
   chipTextActive: '#0F243D',
   overlay: 'rgba(28, 28, 30, 0.04)',
+  scrim: 'rgba(15, 23, 42, 0.48)',
   shadow: '#1C1C1E',
   inputBg: '#E8EBEF',
 };
 
+/** AMOLED dark — pure black canvas; stepped near-black surfaces for hierarchy. */
 export const darkColors: ThemeColors = {
   primary: '#9EC5EF',
   primaryLight: '#B8D4F4',
-  primaryContainer: '#2A3F5C',
+  primaryContainer: '#1A2A3D',
   onPrimaryContainer: '#D6E3F5',
   accent: '#9EC5EF',
-  background: '#0E1014',
-  surface: '#171B22',
-  surfaceElevated: '#1E242C',
-  surfaceContainer: '#1A1F27',
-  surfaceContainerHigh: '#232933',
-  header: '#171B22',
-  headerText: '#F3F4F6',
-  drawer: '#12161C',
-  text: '#F3F4F6',
-  textSecondary: '#B8C0CC',
-  textMuted: '#909AA8',
-  border: '#2D343E',
-  borderLight: '#242A33',
+  background: '#000000',
+  surface: '#0A0A0A',
+  surfaceElevated: '#141414',
+  surfaceContainer: '#141414',
+  surfaceContainerHigh: '#1F1F1F',
+  header: '#000000',
+  headerText: '#F5F5F5',
+  drawer: '#000000',
+  text: '#F5F5F5',
+  textSecondary: '#B3B3B3',
+  textMuted: '#9A9A9A',
+  border: '#333333',
+  borderLight: '#2A2A2A',
   success: '#4ADE80',
   warning: '#FBBF24',
   danger: '#F87171',
@@ -101,15 +106,17 @@ export const darkColors: ThemeColors = {
   partial: '#FBBF24',
   unpaid: '#F87171',
   onPrimary: '#0F243D',
-  navActive: '#2A3F5C',
+  navActive: '#1A2A3D',
   navActiveText: '#D6E3F5',
-  chip: '#1E242C',
-  chipActive: '#2A3F5C',
-  chipText: '#D1D5DB',
+  chip: '#1A1A1A',
+  chipActive: '#1A2A3D',
+  chipText: '#D4D4D4',
   chipTextActive: '#D6E3F5',
-  overlay: 'rgba(255, 255, 255, 0.05)',
+  overlay: 'rgba(255, 255, 255, 0.06)',
+  /** Dark scrim only — never a white wash over AMOLED content. */
+  scrim: 'rgba(0, 0, 0, 0.62)',
   shadow: '#000000',
-  inputBg: '#1A1F27',
+  inputBg: '#1A1A1A',
 };
 
 /** @deprecated Use useTheme() instead */
@@ -141,5 +148,6 @@ export const typography = {
   bodyMedium: { fontSize: 14, fontWeight: '500' as const, lineHeight: 20 },
   caption: { fontSize: 12, fontWeight: '400' as const, lineHeight: 16 },
   label: { fontSize: 12, fontWeight: '500' as const, lineHeight: 16 },
+  micro: { fontSize: 10, fontWeight: '500' as const, lineHeight: 13 },
   metric: { fontSize: 18, fontWeight: '600' as const, letterSpacing: -0.3, lineHeight: 24 },
 };

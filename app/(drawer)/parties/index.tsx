@@ -8,13 +8,12 @@ import {
   Alert,
   RefreshControl,
   KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ListItem } from '../../../src/components/ListItem';
-import { MoneyText } from '../../../src/components/MoneyText';
 import { ListSkeleton } from '../../../src/components/Skeleton';
 import {
+  EmptyState,
   ErrorState,
   Fab,
   FilterChip,
@@ -22,7 +21,10 @@ import {
   FormInput,
   PrimaryButton,
   SearchField,
+  SegmentedControl,
+  SummaryHero,
   useScreenStyles,
+  useFabListPadding,
 } from '../../../src/components/ui';
 import {
   createParty,
@@ -30,39 +32,27 @@ import {
 } from '../../../src/services/parties';
 import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
-import { useGstEnabled } from '../../../src/context/GstContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { matchesSearch } from '../../../src/utils/search';
-import { spacing, radius } from '../../../src/constants/theme';
+import { spacing } from '../../../src/constants/theme';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
-import { FLATLIST_PERF } from '../../../src/constants/listPerf';
+import { FLATLIST_PERF, listCardGetItemLayout } from '../../../src/constants/listPerf';
 import { cardSurface } from '../../../src/constants/shadows';
-import { stateName } from '../../../src/services/gst';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
+import { configureExpandAnimation } from '../../../src/utils/layoutAnimation';
 import type { PartyType, PartyWithSummary } from '../../../src/types';
 
 type Filter = 'all' | PartyType;
 
 export default function PartiesScreen() {
-  const gstEnabled = useGstEnabled();
   const router = useRouter();
   const { refreshKey, refresh } = useDatabase();
   const { colors, isDark } = useTheme();
   const styles = useScreenStyles();
+  const fabListPadding = useFabListPadding();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        summary: {
-          ...cardSurface(colors, isDark),
-          flexDirection: 'row',
-          marginHorizontal: spacing.md,
-          marginTop: spacing.sm,
-          marginBottom: spacing.sm,
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm + 2,
-          gap: spacing.sm,
-        },
-        summaryItem: { flex: 1, minWidth: 0, alignItems: 'center' },
-        summaryLabel: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
         form: {
           ...cardSurface(colors, isDark),
           marginHorizontal: spacing.md,
@@ -70,19 +60,6 @@ export default function PartiesScreen() {
           paddingHorizontal: spacing.md,
           paddingVertical: spacing.sm + 2,
         },
-        typeRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
-        typeChip: {
-          flex: 1,
-          paddingVertical: 10,
-          borderRadius: radius.md,
-          alignItems: 'center',
-          borderWidth: 1,
-          borderColor: colors.border,
-          backgroundColor: colors.surface,
-        },
-        typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-        typeChipText: { fontWeight: '600', color: colors.text },
-        typeChipTextActive: { color: colors.onPrimary },
       }),
     [colors, isDark]
   );
@@ -95,8 +72,6 @@ export default function PartiesScreen() {
   const [type, setType] = useState<PartyType>('customer');
   const [phone, setPhone] = useState('');
   const [notes, setNotes] = useState('');
-  const [gstin, setGstin] = useState('');
-  const [stateCode, setStateCode] = useState('');
   const [address, setAddress] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -128,14 +103,27 @@ export default function PartiesScreen() {
   }, [parties]);
 
   const resetForm = () => {
+    configureExpandAnimation();
     setName('');
     setType('customer');
     setPhone('');
     setNotes('');
-    setGstin('');
-    setStateCode('');
     setAddress('');
     setShowForm(false);
+  };
+
+  const openForm = () => {
+    configureExpandAnimation();
+    resetFormFields();
+    setShowForm(true);
+  };
+
+  const resetFormFields = () => {
+    setName('');
+    setType('customer');
+    setPhone('');
+    setNotes('');
+    setAddress('');
   };
 
   const handleSave = async () => {
@@ -151,8 +139,6 @@ export default function PartiesScreen() {
         type,
         phone: phone.trim() || undefined,
         notes: notes.trim() || undefined,
-        gstin: gstin.trim() || undefined,
-        state: stateCode.trim() || undefined,
         address: address.trim() || undefined,
       });
       if (!id) {
@@ -170,31 +156,43 @@ export default function PartiesScreen() {
     }
   };
 
+  const renderPartyItem = useCallback(
+    ({ item }: { item: PartyWithSummary }) => {
+      const dueLabel = item.type === 'customer' ? 'Receivable' : 'Payable';
+      const metaParts = [`${item.invoice_count} invoices`];
+      if (item.last_activity) metaParts.push(`Last ${item.last_activity}`);
+      return (
+        <ListItem
+          title={item.name}
+          subtitle={metaParts.join(' · ')}
+          amount={item.balance_due}
+          amountColor={item.balance_due > 0.01 ? colors.danger : colors.success}
+          pill={item.type}
+          pillTone={item.type === 'vendor' ? 'warn' : 'default'}
+          meta={dueLabel}
+          onPress={() => router.push(`/(drawer)/parties/${item.id}` as never)}
+          accessibilityLabel={`Party ${item.name}`}
+        />
+      );
+    },
+    [colors.danger, colors.success, router]
+  );
+
   if (error) {
     return <ErrorState message={error} onRetry={retry} />;
   }
 
   return (
     <View style={styles.container}>
-      <View style={localStyles.summary}>
-        <View style={localStyles.summaryItem}>
-          <MoneyText
-            amount={totalReceivable}
-            size="lg"
-            color={colors.success}
-            style={{ width: '100%', textAlign: 'center' }}
-          />
-          <Text style={localStyles.summaryLabel}>To Receive</Text>
-        </View>
-        <View style={localStyles.summaryItem}>
-          <MoneyText
-            amount={totalPayable}
-            size="lg"
-            color={colors.danger}
-            style={{ width: '100%', textAlign: 'center' }}
-          />
-          <Text style={localStyles.summaryLabel}>To Pay</Text>
-        </View>
+      <View style={{ paddingHorizontal: spacing.md, paddingTop: spacing.sm }}>
+        <SummaryHero
+          label="Party Balances"
+          amount={totalReceivable - totalPayable}
+          secondary={[
+            { label: 'To Receive', amount: totalReceivable, color: colors.danger },
+            { label: 'To Pay', amount: totalPayable, color: colors.warning },
+          ]}
+        />
       </View>
 
       <FilterRow>
@@ -215,47 +213,20 @@ export default function PartiesScreen() {
       />
 
       {showForm ? (
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={80}>
           <View style={localStyles.form}>
           <Text style={styles.cardTitle}>New Party</Text>
-          <View style={localStyles.typeRow}>
-            {(['customer', 'vendor'] as PartyType[]).map((t) => (
-              <TouchableOpacity
-                key={t}
-                style={[localStyles.typeChip, type === t && localStyles.typeChipActive]}
-                onPress={() => setType(t)}
-              >
-                <Text style={[localStyles.typeChipText, type === t && localStyles.typeChipTextActive]}>
-                  {t === 'customer' ? 'Customer' : 'Vendor'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <SegmentedControl
+            options={[
+              { value: 'customer', label: 'Customer' },
+              { value: 'vendor', label: 'Vendor' },
+            ]}
+            value={type}
+            onChange={setType}
+          />
           <FormInput label="Name" value={name} onChangeText={setName} placeholder="Company or person name" />
           <FormInput label="Phone (optional)" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-          {gstEnabled ? (
-            <>
-              <FormInput
-                label="GSTIN (optional)"
-                value={gstin}
-                onChangeText={setGstin}
-                placeholder="15-character GSTIN"
-                autoCapitalize="characters"
-              />
-              <FormInput
-                label="State code (optional)"
-                value={stateCode}
-                onChangeText={setStateCode}
-                placeholder="e.g. 27"
-                keyboardType="number-pad"
-                helperText={
-                  stateCode.trim()
-                    ? stateName(stateCode.trim()) || 'Unknown state code'
-                    : '2-digit GST state code for CGST/SGST vs IGST'
-                }
-              />
-            </>
-          ) : null}
+          
           <FormInput
             label="Address (optional)"
             value={address}
@@ -264,7 +235,7 @@ export default function PartiesScreen() {
           />
           <FormInput label="Notes (optional)" value={notes} onChangeText={setNotes} multiline />
           <PrimaryButton title="Add Party" onPress={handleSave} loading={saving} />
-          <TouchableOpacity style={{ marginTop: spacing.sm, alignItems: 'center' }} onPress={resetForm}>
+          <TouchableOpacity style={{ marginTop: spacing.sm, alignItems: 'center', minHeight: 44, justifyContent: 'center' }} onPress={resetForm}>
             <Text style={styles.link}>Cancel</Text>
           </TouchableOpacity>
         </View>
@@ -277,56 +248,48 @@ export default function PartiesScreen() {
         <FlatList
           data={filteredParties}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: fabListPadding }]}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => {
                 setRefreshing(true);
                 load()
-                  .catch(() => {})
+                  .catch((e) => alertRefreshFailed(e))
                   .finally(() => setRefreshing(false));
               }}
               colors={[colors.primary]}
               tintColor={colors.primary}
             />
           }
+          getItemLayout={listCardGetItemLayout}
           {...FLATLIST_PERF}
           ListEmptyComponent={
-            <Text style={styles.empty}>
-              {search.trim() || filter !== 'all'
-                ? 'No parties match your search.'
-                : 'No parties yet. Tap + Add Party below.'}
-            </Text>
-          }
-          renderItem={({ item }) => {
-            const dueLabel = item.type === 'customer' ? 'Receivable' : 'Payable';
-            const metaParts = [`${item.invoice_count} invoices`];
-            if (item.last_activity) metaParts.push(`Last ${item.last_activity}`);
-            return (
-              <ListItem
-                title={item.name}
-                subtitle={metaParts.join(' · ')}
-                amount={item.balance_due}
-                amountColor={item.balance_due > 0.01 ? colors.danger : colors.success}
-                pill={item.type}
-                pillTone={item.type === 'vendor' ? 'warn' : 'default'}
-                meta={dueLabel}
-                onPress={() => router.push(`/(drawer)/parties/${item.id}` as never)}
-                accessibilityLabel={`Party ${item.name}`}
+            search.trim() || filter !== 'all' ? (
+              <EmptyState
+                title="No matches"
+                message="Try a different filter or search."
               />
-            );
-          }}
+            ) : (
+              <EmptyState
+                title="No parties yet"
+                message="Add customers and suppliers to track invoices and balances."
+                actionLabel="Add Party"
+                onAction={() => {
+                  resetForm();
+                  setShowForm(true);
+                }}
+              />
+            )
+          }
+          renderItem={renderPartyItem}
         />
       )}
 
       {!showForm ? (
         <Fab
           label="+ Add Party"
-          onPress={() => {
-            resetForm();
-            setShowForm(true);
-          }}
+          onPress={openForm}
         />
       ) : null}
     </View>

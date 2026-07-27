@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { View, Text, StyleSheet, Image } from 'react-native';
 import {
   DrawerContentScrollView,
   DrawerContentComponentProps,
@@ -8,7 +8,9 @@ import { usePathname, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
-import { spacing, radius } from '../constants/theme';
+import { spacing, radius, typography } from '../constants/theme';
+import { ThemedPressable } from './ThemedPressable';
+import { APP_VERSION } from '../constants/appVersion';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -27,28 +29,28 @@ interface NavSection {
 
 const NAV_SECTIONS: NavSection[] = [
   {
-    title: 'Overview',
+    title: 'Home',
     items: [
       { label: 'Dashboard', route: '/', icon: 'home-outline', activeIcon: 'home', match: ['/', '/index'] },
     ],
   },
   {
-    title: 'Business',
+    title: 'Trading',
     items: [
       { label: 'Sales', route: '/sales', icon: 'cart-outline', activeIcon: 'cart', match: ['/sales'] },
       { label: 'Purchases', route: '/purchases', icon: 'bag-handle-outline', activeIcon: 'bag-handle', match: ['/purchases'] },
+      { label: 'Inventory', route: '/inventory', icon: 'cube-outline', activeIcon: 'cube', match: ['/inventory'] },
       {
-        label: 'Credit Notes',
+        label: 'Adjustments',
         route: '/notes',
         icon: 'document-text-outline',
         activeIcon: 'document-text',
         match: ['/notes'],
       },
-      { label: 'Inventory', route: '/inventory', icon: 'cube-outline', activeIcon: 'cube', match: ['/inventory'] },
     ],
   },
   {
-    title: 'Finance',
+    title: 'Cash & parties',
     items: [
       { label: 'Banking', route: '/banking', icon: 'wallet-outline', activeIcon: 'wallet', match: ['/banking'] },
       {
@@ -67,30 +69,44 @@ const NAV_SECTIONS: NavSection[] = [
         activeIcon: 'cash',
         match: ['/other-income'],
       },
-      { label: 'Balance Sheet', route: '/balance-sheet', icon: 'scale-outline', activeIcon: 'scale', match: ['/balance-sheet'] },
     ],
   },
   {
-    title: 'Reports',
+    title: 'Books',
     items: [
-      { label: 'All Reports', route: '/reports', icon: 'bar-chart-outline', activeIcon: 'bar-chart', match: ['/reports'] },
+      { label: 'Balance Sheet', route: '/balance-sheet', icon: 'scale-outline', activeIcon: 'scale', match: ['/balance-sheet'] },
+      { label: 'Reports', route: '/reports', icon: 'bar-chart-outline', activeIcon: 'bar-chart', match: ['/reports'] },
       { label: 'Growth', route: '/growth', icon: 'analytics-outline', activeIcon: 'analytics', match: ['/growth'] },
     ],
   },
   {
-    title: 'More',
+    title: 'Capital',
     items: [
       {
-        label: 'More',
-        route: '/more',
-        icon: 'grid-outline',
-        activeIcon: 'grid',
-        match: ['/more', '/investments', '/others', '/loans'],
+        label: 'Investments',
+        route: '/investments',
+        icon: 'trending-up-outline',
+        activeIcon: 'trending-up',
+        match: ['/investments'],
+      },
+      {
+        label: 'Fixed Assets',
+        route: '/others',
+        icon: 'layers-outline',
+        activeIcon: 'layers',
+        match: ['/others'],
+      },
+      {
+        label: 'Loans',
+        route: '/loans',
+        icon: 'card-outline',
+        activeIcon: 'card',
+        match: ['/loans'],
       },
     ],
   },
   {
-    title: 'Settings',
+    title: 'App',
     items: [
       { label: 'Settings', route: '/settings', icon: 'settings-outline', activeIcon: 'settings', match: ['/settings'] },
     ],
@@ -122,14 +138,17 @@ export function CustomDrawerContent(props: DrawerContentComponentProps) {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.brand}>
         <Image source={require('../../assets/logo.png')} style={styles.logoImage} />
-        <View style={{ flex: 1 }}>
-          <Text style={styles.appName}>Hisab</Text>
-          <Text style={styles.appTagline}>Business accounts</Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.appName} numberOfLines={1}>
+            Hisab
+          </Text>
         </View>
       </View>
 
       <DrawerContentScrollView
         {...props}
+        // Force theme fill — RN drawer defaults can flash white behind nav rows.
+        style={styles.scrollView}
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
@@ -139,14 +158,14 @@ export function CustomDrawerContent(props: DrawerContentComponentProps) {
             {section.items.map((item) => {
               const active = isActive(pathname, item);
               return (
-                <TouchableOpacity
+                <ThemedPressable
                   key={item.route}
                   style={[styles.navItem, active && styles.navItemActive]}
                   onPress={() => navigate(item.route)}
-                  activeOpacity={0.75}
                   accessibilityRole="button"
                   accessibilityState={{ selected: active }}
                   accessibilityLabel={item.label}
+                  hitSlop={4}
                 >
                   <Ionicons
                     name={active ? item.activeIcon : item.icon}
@@ -157,7 +176,7 @@ export function CustomDrawerContent(props: DrawerContentComponentProps) {
                   <Text style={[styles.navLabel, active && styles.navLabelActive]} numberOfLines={1}>
                     {item.label}
                   </Text>
-                </TouchableOpacity>
+                </ThemedPressable>
               );
             })}
           </View>
@@ -165,7 +184,7 @@ export function CustomDrawerContent(props: DrawerContentComponentProps) {
       </DrawerContentScrollView>
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
-        <Text style={styles.footerText}>Hisab</Text>
+        <Text style={styles.footerText}>v{APP_VERSION}</Text>
       </View>
     </View>
   );
@@ -177,15 +196,19 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       flex: 1,
       backgroundColor: colors.drawer,
     },
+    scrollView: {
+      flex: 1,
+      backgroundColor: colors.drawer,
+    },
     brand: {
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.md,
-      borderBottomWidth: 1,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.borderLight,
       gap: spacing.sm,
-      backgroundColor: colors.surfaceContainer,
+      backgroundColor: colors.drawer,
     },
     logoImage: {
       width: 40,
@@ -193,68 +216,63 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       borderRadius: radius.md,
     },
     appName: {
-      fontSize: 16,
+      ...typography.title,
       fontWeight: '700',
       color: colors.text,
-      letterSpacing: -0.1,
-    },
-    appTagline: {
-      fontSize: 11,
-      color: colors.textSecondary,
-      marginTop: 1,
     },
     scroll: {
-      paddingTop: spacing.xs,
-      paddingBottom: spacing.sm,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.md,
+      backgroundColor: colors.drawer,
+      flexGrow: 1,
     },
     section: {
-      marginBottom: spacing.xs,
+      marginBottom: spacing.sm,
     },
     sectionTitle: {
-      fontSize: 11,
-      fontWeight: '600',
-      letterSpacing: 0.5,
+      ...typography.section,
       color: colors.textMuted,
       textTransform: 'uppercase',
       paddingHorizontal: spacing.md,
       paddingTop: spacing.sm,
-      paddingBottom: 4,
+      paddingBottom: spacing.xs,
     },
     navItem: {
       flexDirection: 'row',
       alignItems: 'center',
       marginHorizontal: spacing.sm,
-      marginVertical: 1,
-      paddingVertical: 10,
+      marginVertical: 2,
+      paddingVertical: spacing.sm,
       paddingHorizontal: spacing.sm,
       minHeight: 44,
       borderRadius: radius.full,
+      gap: spacing.sm,
     },
     navItemActive: {
       backgroundColor: colors.navActive,
     },
     navIcon: {
       width: 22,
-      marginRight: spacing.sm,
     },
     navLabel: {
-      fontSize: 14,
+      ...typography.body,
       color: colors.text,
-      fontWeight: '400',
       flex: 1,
+      minWidth: 0,
     },
     navLabelActive: {
       color: colors.navActiveText,
       fontWeight: '600',
     },
     footer: {
-      borderTopWidth: 1,
+      borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.borderLight,
       paddingTop: spacing.sm,
       paddingHorizontal: spacing.md,
+      backgroundColor: colors.drawer,
     },
     footerText: {
-      fontSize: 11,
+      ...typography.caption,
       color: colors.textMuted,
     },
   });

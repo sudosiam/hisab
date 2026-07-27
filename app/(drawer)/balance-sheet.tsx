@@ -4,56 +4,34 @@ import {
   Text,
   ScrollView,
   StyleSheet,
-  ActivityIndicator,
   RefreshControl,
   ViewStyle,
   TextStyle,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
-import { ErrorState, SectionHeader, useScreenStyles } from '../../src/components/ui';
+import { ErrorState, SectionHeader, SummaryHero, useScreenStyles } from '../../src/components/ui';
 import { getBalanceSheet } from '../../src/services/banking';
 import { formatCurrency } from '../../src/utils/format';
 import { MoneyText, moneyRowStyles } from '../../src/components/MoneyText';
+import { DetailSkeleton } from '../../src/components/Skeleton';
 import { useDatabase } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
 import { useReportPdfHeader } from '../../src/hooks/useReportPdfHeader';
 import { shareBalanceSheetPdf } from '../../src/services/reportPdf';
-import { spacing, typography } from '../../src/constants/theme';
-import { cardSurface } from '../../src/constants/shadows';
+import { spacing } from '../../src/constants/theme';
+import { alertRefreshFailed } from '../../src/utils/uiFeedback';
 import type { BalanceSheet, BalanceSheetLine } from '../../src/types';
 
 export default function BalanceSheetScreen() {
   const styles = useScreenStyles();
   const { refreshKey } = useDatabase();
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const [data, setData] = useState<BalanceSheet | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        hero: {
-          ...cardSurface(colors, isDark),
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.md,
-          marginBottom: spacing.lg,
-          alignItems: 'center',
-        },
-        heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
-        heroValue: {
-          ...typography.display,
-          color: colors.text,
-          marginTop: spacing.sm,
-          textAlign: 'center',
-          width: '100%',
-        },
-        section: {
-          ...cardSurface(colors, isDark),
-          padding: spacing.md,
-          marginBottom: spacing.md,
-        },
         subsection: {
           fontSize: 11,
           fontWeight: '700',
@@ -65,44 +43,26 @@ export default function BalanceSheetScreen() {
         },
         subsectionFirst: { marginTop: 0 },
         sectionTotal: {
-          borderTopWidth: 1,
+          borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: colors.borderLight,
           marginTop: spacing.sm,
           paddingTop: spacing.sm,
         },
-        equity: { backgroundColor: colors.navActive },
-        info: {
-          backgroundColor: colors.navActive,
-          borderRadius: 16,
-          padding: spacing.md,
-          marginBottom: spacing.lg,
-          borderWidth: isDark ? 1 : 0,
-          borderColor: colors.border,
-        },
-        infoText: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
         row: { ...moneyRowStyles.row, paddingVertical: spacing.sm },
         rowLabel: { fontSize: 14, color: colors.text, flex: 1, minWidth: 0, paddingRight: spacing.sm },
         rowValue: { maxWidth: '62%', flexShrink: 1, minWidth: 88, width: '100%', textAlign: 'right' },
         bold: { fontWeight: '700' },
         highlight: { color: colors.text, fontSize: 17, fontWeight: '600' },
+        hairline: { height: StyleSheet.hairlineWidth, backgroundColor: colors.borderLight },
       }),
-    [colors, isDark]
+    [colors]
   );
 
   const load = useCallback(async () => {
-    void refreshKey;
-    setLoading(true);
-    try {
-      setData(await getBalanceSheet());
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load balance sheet');
-    } finally {
-      setLoading(false);
-    }
-  }, [refreshKey]);
+    setData(await getBalanceSheet());
+  }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const { booting, error, retry } = useFocusRefresh(load, [refreshKey]);
 
   const exportPdf = useCallback(async () => {
     if (!data) return { success: false, message: 'Report not loaded yet.' };
@@ -112,15 +72,15 @@ export default function BalanceSheetScreen() {
   useReportPdfHeader({ disabled: !data || !!error, onExport: exportPdf });
 
   if (error && !data) {
-    return <ErrorState message={error} onRetry={load} />;
+    return <ErrorState message={error} onRetry={retry} />;
   }
 
-  if (loading || !data) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+  if (booting && !data) {
+    return <DetailSkeleton />;
+  }
+
+  if (!data) {
+    return <DetailSkeleton />;
   }
 
   const rowStyles = {
@@ -140,64 +100,50 @@ export default function BalanceSheetScreen() {
           refreshing={refreshing}
           onRefresh={() => {
             setRefreshing(true);
-            load().finally(() => setRefreshing(false));
+            load()
+              .catch((e) => alertRefreshFailed(e))
+              .finally(() => setRefreshing(false));
           }}
           colors={[colors.primary]}
           tintColor={colors.primary}
         />
       }
     >
-      <View style={localStyles.hero}>
-        <Text style={localStyles.heroLabel}>Owner{"'"}s Equity</Text>
-        <MoneyText
-          amount={data.equity}
-          size="hero"
-          style={[localStyles.heroValue, { width: '100%', textAlign: 'center' }]}
-        />
-        <Text
-          style={{ color: colors.textSecondary, marginTop: spacing.sm, fontSize: 12, textAlign: 'center' }}
-          numberOfLines={3}
-          adjustsFontSizeToFit
-          minimumFontScale={0.7}
-        >
-          Assets {formatCurrency(data.assets.total)} − Liabilities {formatCurrency(data.liabilities.total)}
-        </Text>
-      </View>
+      <SummaryHero
+        label={"Owner's Equity"}
+        amount={data.equity}
+        hint={`Assets ${formatCurrency(data.assets.total)} − Liabilities ${formatCurrency(data.liabilities.total)}`}
+      />
 
       <SectionHeader title="Assets" />
-      <View style={localStyles.section}>
-        <Text style={[localStyles.subsection, localStyles.subsectionFirst]}>Current assets</Text>
-        <LineRows lines={data.assets.currentAssets} localStyles={rowStyles} />
-        <View style={localStyles.sectionTotal}>
-          <Row
-            localStyles={rowStyles}
-            label="Total Current Assets"
-            value={data.assets.currentAssets.reduce((sum, line) => sum + line.amount, 0)}
-            bold
-          />
-        </View>
-        <Text style={localStyles.subsection}>Non-current assets</Text>
-        <LineRows lines={data.assets.nonCurrentAssets} localStyles={rowStyles} />
-        <View style={localStyles.sectionTotal}>
-          <Row localStyles={rowStyles} label="Total Assets" value={data.assets.total} bold />
-        </View>
+      <Text style={[localStyles.subsection, localStyles.subsectionFirst]}>Current assets</Text>
+      <LineRows lines={data.assets.currentAssets} localStyles={rowStyles} />
+      <View style={localStyles.sectionTotal}>
+        <Row
+          localStyles={rowStyles}
+          label="Total Current Assets"
+          value={data.assets.currentAssets.reduce((sum, line) => sum + line.amount, 0)}
+          bold
+        />
+      </View>
+      <Text style={localStyles.subsection}>Non-current assets</Text>
+      <LineRows lines={data.assets.nonCurrentAssets} localStyles={rowStyles} />
+      <View style={localStyles.sectionTotal}>
+        <Row localStyles={rowStyles} label="Total Assets" value={data.assets.total} bold />
       </View>
 
       <SectionHeader title="Liabilities" />
-      <View style={localStyles.section}>
-        <Text style={[localStyles.subsection, localStyles.subsectionFirst]}>Current liabilities</Text>
-        <LineRows lines={data.liabilities.currentLiabilities} localStyles={rowStyles} />
-        <Text style={localStyles.subsection}>Non-current liabilities</Text>
-        <LineRows lines={data.liabilities.nonCurrentLiabilities} localStyles={rowStyles} />
-        <View style={localStyles.sectionTotal}>
-          <Row localStyles={rowStyles} label="Total Liabilities" value={data.liabilities.total} bold />
-        </View>
+      <Text style={[localStyles.subsection, localStyles.subsectionFirst]}>Current liabilities</Text>
+      <LineRows lines={data.liabilities.currentLiabilities} localStyles={rowStyles} />
+      <Text style={localStyles.subsection}>Non-current liabilities</Text>
+      <LineRows lines={data.liabilities.nonCurrentLiabilities} localStyles={rowStyles} />
+      <View style={localStyles.sectionTotal}>
+        <Row localStyles={rowStyles} label="Total Liabilities" value={data.liabilities.total} bold />
       </View>
 
       <SectionHeader title="Summary" />
-      <View style={[localStyles.section, localStyles.equity]}>
-        <Row localStyles={rowStyles} label="Net Worth (Equity)" value={data.equity} bold highlight />
-      </View>
+      <View style={localStyles.hairline} />
+      <Row localStyles={rowStyles} label="Net Worth (Equity)" value={data.equity} bold highlight />
     </ScrollView>
   );
 }

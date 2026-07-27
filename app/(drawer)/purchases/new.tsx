@@ -1,12 +1,12 @@
-import React, { useDeferredValue, useMemo, useState } from 'react';
+import React, { useDeferredValue, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   Alert,
-  Switch,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import {
   FormInput,
@@ -15,6 +15,7 @@ import {
   DatePickerField,
   SectionHeader,
   useScreenStyles,
+  ICON,
 } from '../../../src/components/ui';
 import { CustomerAutocomplete } from '../../../src/components/CustomerAutocomplete';
 import { ProductPicker } from '../../../src/components/ProductPicker';
@@ -25,20 +26,23 @@ import { getPaymentAccounts } from '../../../src/services/banking';
 import { createPurchase } from '../../../src/services/purchases';
 import { getNextPurchaseInvoiceNo } from '../../../src/services/invoiceNumbers';
 import { getPartyByName } from '../../../src/services/parties';
-import { getBusinessState, isTaxInclusivePricing } from '../../../src/services/appSettings';
-import { useGstEnabled } from '../../../src/context/GstContext';
-import { computeGstDocument, isPlausibleHsnSac, resolveStateFromPartyFields } from '../../../src/services/gst';
-import { GstRateChips } from '../../../src/components/GstRateChips';
+import {
+  applyPartyAdvanceToPurchase,
+  getPartyUnallocatedPaymentCredit,
+} from '../../../src/services/paymentVouchers';
+import { computeUntaxedDocument } from '../../../src/services/documentTotals';
 import { DRAFT_KEYS, loadDraft, type PurchaseFormDraft } from '../../../src/services/formDrafts';
 import { useFormDraft } from '../../../src/hooks/useFormDraft';
-import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
+import { useDatabaseActions, useRefreshKey } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
 import { formatAmountInput, formatCurrency, parseAmountInput } from '../../../src/utils/format';
+import { MoneyText } from '../../../src/components/MoneyText';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
 import { addMoney, roundMoney } from '../../../src/utils/money';
 import { saveWithDuplicateInvoiceWarning } from '../../../src/utils/duplicateInvoice';
-import { spacing } from '../../../src/constants/theme';
+import { spacing, typography } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import type { Account, Product } from '../../../src/types';
 
@@ -47,9 +51,17 @@ interface LineItem {
   product_id: number;
   qty: string;
   unit_cost: string;
-  gst_rate: string;
   hsn_sac: string;
 }
+
+type FieldErrors = {
+  partyName?: string;
+  invoiceNo?: string;
+  date?: string;
+  discount?: string;
+  items?: string;
+  payments?: string;
+};
 
 let lineItemCounter = 0;
 function createEmptyLineItem(): LineItem {
@@ -59,7 +71,6 @@ function createEmptyLineItem(): LineItem {
     product_id: 0,
     qty: '1',
     unit_cost: '',
-    gst_rate: '',
     hsn_sac: '',
   };
 }
@@ -79,7 +90,6 @@ function isPurchaseDraftEmpty(d: PurchaseFormDraft): boolean {
         item.product_id > 0 ||
         item.unit_cost.trim() ||
         item.qty !== '1' ||
-        (item.gst_rate ?? '').trim() ||
         (item.hsn_sac ?? '').trim()
     )
   ) {
@@ -91,8 +101,10 @@ function isPurchaseDraftEmpty(d: PurchaseFormDraft): boolean {
 export default function NewPurchaseScreen() {
   const router = useRouter();
   const { supplierName: supplierNameParam } = useLocalSearchParams<{ supplierName?: string }>();
-  const { refresh, refreshKey } = useDatabase();
+  const { refresh } = useDatabaseActions();
+  const refreshKey = useRefreshKey();
   const styles = useScreenStyles();
+
   const { colors, isDark } = useTheme();
   const localStyles = useMemo(
     () =>
@@ -106,8 +118,7 @@ export default function NewPurchaseScreen() {
         itemRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm },
         qtyField: { flex: 1 },
         costField: { flex: 1.2 },
-        removeBtn: { padding: spacing.sm, marginBottom: spacing.md },
-        removeText: { color: colors.danger, fontSize: 18 },
+        removeBtn: { padding: spacing.sm, marginBottom: spacing.md, alignItems: 'center', justifyContent: 'center' },
         totals: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
@@ -129,15 +140,16 @@ export default function NewPurchaseScreen() {
           color: colors.primary,
           fontVariant: ['tabular-nums'],
         },
-        hint: { color: colors.warning },
-        hsnWarning: { fontSize: 12, color: colors.textMuted, marginTop: -4, marginBottom: spacing.xs },
-        rcmRow: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginVertical: spacing.sm,
+        fieldError: {
+          ...typography.caption,
+          color: colors.danger,
+          marginTop: spacing.xs,
         },
-        rcmLabel: { fontSize: 14, fontWeight: '600', color: colors.text, flex: 1 },
+        itemsError: {
+          ...typography.caption,
+          color: colors.danger,
+          marginBottom: spacing.sm,
+        },
       }),
     [colors, isDark]
   );
@@ -155,13 +167,13 @@ export default function NewPurchaseScreen() {
   const [items, setItems] = useState<LineItem[]>(() => [createEmptyLineItem()]);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [businessState, setBusinessState] = useState('');
-  const gstEnabled = useGstEnabled();
-  const [taxInclusive, setTaxInclusive] = useState(false);
-  const [partyState, setPartyState] = useState<string | null>(null);
-  const [isReverseCharge, setIsReverseCharge] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [advanceCredit, setAdvanceCredit] = useState(0);
+  const [applyAdvance, setApplyAdvance] = useState(false);
   const productsRef = React.useRef<Product[]>([]);
   productsRef.current = products;
+  const leaveBypassRef = useRef(false);
+  const skipAdvanceAutoRef = useRef(false);
 
   const draftPayload = useMemo<PurchaseFormDraft>(
     () => ({
@@ -173,8 +185,9 @@ export default function NewPurchaseScreen() {
       discount,
       items,
       payments,
+      applyAdvance,
     }),
-    [supplierName, invoiceNo, date, vendorInvoiceNo, notes, discount, items, payments]
+    [supplierName, invoiceNo, date, vendorInvoiceNo, notes, discount, items, payments, applyAdvance]
   );
 
   const { markReady, discardDraft, clearDraftOnSave, hasDraft, noteDraftLoaded } = useFormDraft(
@@ -182,6 +195,11 @@ export default function NewPurchaseScreen() {
     draftPayload,
     { isEmpty: isPurchaseDraftEmpty }
   );
+
+  useUnsavedChangesGuard(!isPurchaseDraftEmpty(draftPayload) || hasDraft, {
+    bypassRef: leaveBypassRef,
+    message: 'You have an unsaved purchase draft that will be lost.',
+  });
 
   const resetForm = async () => {
     setSupplierName('');
@@ -191,7 +209,10 @@ export default function NewPurchaseScreen() {
     setNotes('');
     setDiscount('0');
     setPayments([]);
+    setApplyAdvance(false);
+    setAdvanceCredit(0);
     setItems([createEmptyLineItem()]);
+    setFieldErrors({});
   };
 
   const handleDiscardDraft = () => {
@@ -265,7 +286,6 @@ export default function NewPurchaseScreen() {
                       product_id: i.product_id,
                       qty: i.qty || '1',
                       unit_cost: i.unit_cost || '',
-                      gst_rate: i.gst_rate ?? '',
                       hsn_sac: i.hsn_sac ?? '',
                     };
                   });
@@ -273,6 +293,10 @@ export default function NewPurchaseScreen() {
               : [createEmptyLineItem()]
           );
           setPayments(draft.payments || []);
+          if (typeof draft.applyAdvance === 'boolean') {
+            skipAdvanceAutoRef.current = true;
+            setApplyAdvance(draft.applyAdvance);
+          }
           noteDraftLoaded();
           const paramSupplier =
             typeof supplierNameParam === 'string' && supplierNameParam
@@ -300,35 +324,33 @@ export default function NewPurchaseScreen() {
 
   React.useEffect(() => {
     let cancelled = false;
-    Promise.all([getBusinessState(), isTaxInclusivePricing()])
-      .then(([state, inclusive]) => {
-        if (!cancelled) {
-          setBusinessState(state);
-          setTaxInclusive(inclusive);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  React.useEffect(() => {
-    if (!gstEnabled) setIsReverseCharge(false);
-  }, [gstEnabled]);
-
-  React.useEffect(() => {
-    let cancelled = false;
     const name = supplierName.trim();
     if (!name) {
-      setPartyState(null);
+      setAdvanceCredit(0);
+      setApplyAdvance(false);
+      skipAdvanceAutoRef.current = false;
       return;
     }
     getPartyByName(name, 'vendor')
-      .then((party) => {
-        if (!cancelled) setPartyState(resolveStateFromPartyFields(party?.state, party?.gstin));
+      .then(async () => {
+        const credit = await getPartyUnallocatedPaymentCredit(name, 'vendor');
+        if (!cancelled) {
+          setAdvanceCredit(credit);
+          if (skipAdvanceAutoRef.current) {
+            skipAdvanceAutoRef.current = false;
+            if (credit <= 0.009) setApplyAdvance(false);
+          } else {
+            setApplyAdvance(credit > 0.009);
+          }
+        }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) {
+          setAdvanceCredit(0);
+          setApplyAdvance(false);
+          skipAdvanceAutoRef.current = false;
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -338,42 +360,43 @@ export default function NewPurchaseScreen() {
   const deferredItems = useDeferredValue(items);
   const deferredDiscount = useDeferredValue(discountAmount);
 
-  const gstDoc = useMemo(() => {
+  const docTotals = useMemo(() => {
     try {
-      return computeGstDocument({
+      return computeUntaxedDocument({
         lines: deferredItems.map((item) => ({
           qty: parseAmountInput(item.qty) || 0,
           unit_price: parseAmountInput(item.unit_cost) || 0,
-          gst_rate: parseAmountInput(item.gst_rate) || 0,
           hsn_sac: item.hsn_sac.trim() || null,
         })),
         discount_amount: deferredDiscount,
-        business_state: businessState || null,
-        party_state: partyState,
-        gst_enabled: gstEnabled,
-        tax_inclusive: taxInclusive,
       });
     } catch {
       return null;
     }
-  }, [deferredItems, deferredDiscount, businessState, partyState, gstEnabled, taxInclusive]);
+  }, [deferredItems, deferredDiscount]);
 
-  const subtotal = gstDoc?.subtotal ?? 0;
-  const total = gstDoc?.total_amount ?? 0;
+  const subtotal = docTotals?.subtotal ?? 0;
+  const total = docTotals?.total_amount ?? 0;
 
-  const paidTotal = useMemo(
+  const cashPaidTotal = useMemo(
     () => payments.reduce((sum, p) => addMoney(sum, parseAmountInput(p.amount) || 0), 0),
     [payments]
   );
+  const advanceAppliedPreview =
+    applyAdvance && advanceCredit > 0.009
+      ? roundMoney(Math.min(advanceCredit, Math.max(0, total - cashPaidTotal)))
+      : 0;
+  const paidTotal = addMoney(cashPaidTotal, advanceAppliedPreview);
   const isOverpaid = paidTotal > total + 0.01;
 
   const addItem = () => {
     setItems([...items, createEmptyLineItem()]);
+    if (fieldErrors.items) setFieldErrors((e) => ({ ...e, items: undefined }));
   };
 
   const updateItem = (
     index: number,
-    field: 'product_id' | 'qty' | 'unit_cost' | 'gst_rate' | 'hsn_sac',
+    field: 'product_id' | 'qty' | 'unit_cost' | 'hsn_sac',
     value: string | number
   ) => {
     const updated = [...items];
@@ -382,76 +405,76 @@ export default function NewPurchaseScreen() {
       const product = productsRef.current.find((p) => p.id === value);
       if (product) {
         updated[index].unit_cost = formatAmountInput(product.avg_cost);
-        updated[index].gst_rate =
-          (product.gst_rate ?? 0) > 0 ? formatAmountInput(product.gst_rate ?? 0) : '';
         updated[index].hsn_sac = product.hsn_sac ?? '';
       }
     }
     setItems(updated);
+    if (fieldErrors.items) setFieldErrors((e) => ({ ...e, items: undefined }));
   };
 
   const removeItem = (index: number) => {
     setItems(items.filter((_, i) => i !== index));
+    if (fieldErrors.items) setFieldErrors((e) => ({ ...e, items: undefined }));
   };
 
   const handleSave = async () => {
     if (loading) return;
-    if (!supplierName.trim()) {
-      Alert.alert('Error', 'Supplier name is required');
-      return;
-    }
-    if (!invoiceNo.trim()) {
-      Alert.alert('Error', 'Purchase number is required');
-      return;
-    }
+
+    const nextErrors: FieldErrors = {};
+    if (!supplierName.trim()) nextErrors.partyName = 'Supplier name is required';
+    if (!invoiceNo.trim()) nextErrors.invoiceNo = 'Purchase number is required';
+    if (!isValidISODate(date)) nextErrors.date = 'Select a valid purchase date';
     if (items.length === 0) {
-      Alert.alert('Error', 'Add at least one item');
-      return;
+      nextErrors.items = 'Add at least one item';
+    } else {
+      for (const item of items) {
+        if (!item.product_id) {
+          nextErrors.items = 'Select a product for each line item';
+          break;
+        }
+        const qty = parseAmountInput(item.qty);
+        const cost = parseAmountInput(item.unit_cost);
+        if (!qty || qty <= 0) {
+          nextErrors.items = 'Each item must have quantity greater than zero';
+          break;
+        }
+        if (!cost || cost <= 0) {
+          nextErrors.items = 'Each item must have unit cost greater than zero';
+          break;
+        }
+      }
     }
-    if (discountAmount > subtotal) {
-      Alert.alert('Error', 'Discount cannot exceed subtotal');
-      return;
-    }
-    if (!isValidISODate(date)) {
-      Alert.alert('Invalid date', 'Select a valid purchase date');
-      return;
-    }
+    if (discountAmount > subtotal) nextErrors.discount = 'Discount cannot exceed subtotal';
+
     for (const p of payments) {
       const amt = parseAmountInput(p.amount);
       if (p.amount.trim() && (!Number.isFinite(amt) || amt <= 0)) {
-        Alert.alert('Error', 'Each payment amount must be greater than zero (or leave it empty)');
-        return;
+        nextErrors.payments =
+          'Each payment amount must be greater than zero (or leave it empty)';
+        break;
       }
       if (amt > 0 && !p.account_id) {
-        Alert.alert('Error', 'Select an account for each payment amount');
-        return;
+        nextErrors.payments = 'Select an account for each payment amount';
+        break;
       }
       if (amt > 0 && !isValidISODate(p.date)) {
-        Alert.alert('Invalid payment date', 'Select a valid payment date');
-        return;
+        nextErrors.payments = 'Select a valid payment date';
+        break;
       }
     }
-    const paidTotal = payments.reduce((sum, p) => addMoney(sum, parseAmountInput(p.amount) || 0), 0);
+
+    const cashPaid = payments.reduce((sum, p) => addMoney(sum, parseAmountInput(p.amount) || 0), 0);
+    const advanceToApply =
+      applyAdvance && advanceCredit > 0.009
+        ? roundMoney(Math.min(advanceCredit, Math.max(0, total - cashPaid)))
+        : 0;
+    const paidTotal = addMoney(cashPaid, advanceToApply);
     if (paidTotal > total + 0.01) {
-      Alert.alert('Payment too high', `Total payments cannot exceed purchase amount (${formatCurrency(total)}).`);
-      return;
+      nextErrors.payments = `Total payments cannot exceed purchase amount (${formatCurrency(total)}).`;
     }
-    for (const item of items) {
-      if (!item.product_id) {
-        Alert.alert('Error', 'Select a product for each line item');
-        return;
-      }
-      const qty = parseAmountInput(item.qty);
-      const cost = parseAmountInput(item.unit_cost);
-      if (!qty || qty <= 0) {
-        Alert.alert('Error', 'Each item must have quantity greater than zero');
-        return;
-      }
-      if (!cost || cost <= 0) {
-        Alert.alert('Error', 'Each item must have unit cost greater than zero');
-        return;
-      }
-    }
+
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
 
     const performSave = async () => {
       try {
@@ -462,12 +485,10 @@ export default function NewPurchaseScreen() {
           vendor_invoice_no: vendorInvoiceNo.trim() || undefined,
           notes: notes.trim() || undefined,
           discount_amount: discountAmount,
-          is_reverse_charge: isReverseCharge,
           items: items.map((i) => ({
             product_id: i.product_id,
             qty: parseAmountInput(i.qty) || 0,
             unit_cost: parseAmountInput(i.unit_cost) || 0,
-            gst_rate: parseAmountInput(i.gst_rate) || 0,
             hsn_sac: i.hsn_sac.trim() || null,
           })),
           payments: payments
@@ -479,6 +500,10 @@ export default function NewPurchaseScreen() {
               notes: p.notes || undefined,
             })),
         });
+        if (advanceToApply > 0.009) {
+          await applyPartyAdvanceToPurchase(id, advanceToApply, date);
+        }
+        leaveBypassRef.current = true;
         await clearDraftOnSave();
         refresh();
         router.replace(`/(drawer)/purchases/${id}`);
@@ -503,17 +528,37 @@ export default function NewPurchaseScreen() {
       <FormInput
         label="Purchase No"
         value={invoiceNo}
-        onChangeText={setInvoiceNo}
+        onChangeText={(v) => {
+          setInvoiceNo(v);
+          if (fieldErrors.invoiceNo) setFieldErrors((e) => ({ ...e, invoiceNo: undefined }));
+        }}
         placeholder="Auto-generated"
+        error={fieldErrors.invoiceNo}
       />
       <CustomerAutocomplete
         label="Supplier"
         partyType="vendor"
         value={supplierName}
-        onChange={setSupplierName}
+        onChange={(v) => {
+          setSupplierName(v);
+          if (fieldErrors.partyName) setFieldErrors((e) => ({ ...e, partyName: undefined }));
+        }}
         placeholder="Start typing vendor name"
       />
-      <DatePickerField label="Date" value={date} onChange={setDate} />
+      {fieldErrors.partyName ? (
+        <Text style={[localStyles.fieldError, { marginTop: -spacing.sm, marginBottom: spacing.sm }]}>
+          {fieldErrors.partyName}
+        </Text>
+      ) : null}
+      <DatePickerField
+        label="Date"
+        value={date}
+        onChange={(v) => {
+          setDate(v);
+          if (fieldErrors.date) setFieldErrors((e) => ({ ...e, date: undefined }));
+        }}
+        error={fieldErrors.date}
+      />
       <FormInput
         label="Vendor Invoice No (optional)"
         value={vendorInvoiceNo}
@@ -522,19 +567,6 @@ export default function NewPurchaseScreen() {
       />
       <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline />
 
-      {gstEnabled ? (
-        <View style={localStyles.rcmRow}>
-          <Text style={localStyles.rcmLabel}>Reverse charge (RCM)</Text>
-          <Switch
-            value={isReverseCharge}
-            onValueChange={setIsReverseCharge}
-            trackColor={{ false: colors.border, true: colors.primary }}
-            thumbColor={colors.surface}
-            accessibilityLabel="Reverse charge"
-          />
-        </View>
-      ) : null}
-
       <View style={styles.section}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <SectionHeader title="Line Items" />
@@ -542,131 +574,89 @@ export default function NewPurchaseScreen() {
             <Text style={styles.link}>+ Add Item</Text>
           </TouchableOpacity>
         </View>
+        {fieldErrors.items ? <Text style={localStyles.itemsError}>{fieldErrors.items}</Text> : null}
 
         {items.map((item, index) => (
-            <View key={item.key} style={localStyles.itemCard}>
-              <ProductPicker
-                products={products}
-                value={item.product_id}
-                onChange={(id) => updateItem(index, 'product_id', id)}
-                variant="purchase"
-                onCategoryDeleted={reloadProducts}
-                onProductCreated={async () => {
-                  await reloadProducts();
-                }}
-              />
-              <View style={localStyles.itemRow}>
-                <View style={localStyles.qtyField}>
-                  <FormInput
-                    label="Qty"
-                    value={item.qty}
-                    onChangeText={(v) => updateItem(index, 'qty', v)}
-                    qty
-                  />
-                </View>
-                <View style={localStyles.costField}>
-                  <FormInput
-                    label="Unit Cost (₹)"
-                    value={item.unit_cost}
-                    onChangeText={(v) => updateItem(index, 'unit_cost', v)}
-                    money
-                  />
-                </View>
-                <TouchableOpacity
-                  onPress={() => removeItem(index)}
-                  style={localStyles.removeBtn}
-                  hitSlop={10}
-                  accessibilityRole="button"
-                  accessibilityLabel="Remove line item"
-                >
-                  <Text style={localStyles.removeText}>✕</Text>
-                </TouchableOpacity>
+          <View key={item.key} style={localStyles.itemCard}>
+            <ProductPicker
+              products={products}
+              value={item.product_id}
+              onChange={(id) => updateItem(index, 'product_id', id)}
+              variant="purchase"
+              onCategoryDeleted={reloadProducts}
+              onProductCreated={async () => {
+                await reloadProducts();
+              }}
+            />
+            <View style={localStyles.itemRow}>
+              <View style={localStyles.qtyField}>
+                <FormInput
+                  label="Qty"
+                  value={item.qty}
+                  onChangeText={(v) => updateItem(index, 'qty', v)}
+                  qty
+                />
               </View>
-              {gstEnabled ? (
-                <View style={localStyles.itemRow}>
-                  <View style={localStyles.qtyField}>
-                    <FormInput
-                      label="HSN/SAC"
-                      value={item.hsn_sac}
-                      onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
-                      placeholder="Optional"
-                      keyboardType="number-pad"
-                    />
-                    {item.hsn_sac.trim() && !isPlausibleHsnSac(item.hsn_sac) ? (
-                      <Text style={localStyles.hsnWarning}>
-                        Usual HSN is 4, 6, or 8 digits
-                      </Text>
-                    ) : null}
-                  </View>
-                  <View style={localStyles.costField}>
-                    <FormInput
-                      label="GST %"
-                      value={item.gst_rate}
-                      onChangeText={(v) => updateItem(index, 'gst_rate', v)}
-                      money
-                      placeholder="0"
-                    />
-                    <GstRateChips
-                      value={item.gst_rate}
-                      onChange={(v) => updateItem(index, 'gst_rate', v)}
-                    />
-                  </View>
-                </View>
-              ) : null}
+              <View style={localStyles.costField}>
+                <FormInput
+                  label="Unit Cost (₹)"
+                  value={item.unit_cost}
+                  onChangeText={(v) => updateItem(index, 'unit_cost', v)}
+                  money
+                />
+              </View>
+              <TouchableOpacity
+                onPress={() => removeItem(index)}
+                style={localStyles.removeBtn}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Remove line item"
+              >
+                <Ionicons name="close" size={ICON.inline} color={colors.danger} />
+              </TouchableOpacity>
             </View>
-          ))}
+          </View>
+        ))}
 
         <View style={localStyles.totals}>
-          {gstEnabled ? (
-            <Text style={[localStyles.totalLabel, localStyles.hint, { marginBottom: spacing.xs }]}>
-              {taxInclusive ? 'Prices are tax-inclusive' : 'Prices are tax-exclusive'}
-            </Text>
-          ) : null}
           <View style={localStyles.totalRow}>
             <Text style={localStyles.totalLabel}>Subtotal</Text>
-            <Text style={localStyles.totalValue}>{formatCurrency(subtotal)}</Text>
+            <MoneyText amount={subtotal} size="md" />
           </View>
-          <FormInput label="Total Discount (₹)" value={discount} onChangeText={setDiscount} money />
-          {gstEnabled && gstDoc && gstDoc.tax_amount > 0.009 ? (
-            <>
-              <View style={localStyles.totalRow}>
-                <Text style={localStyles.totalLabel}>Taxable</Text>
-                <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.taxable_amount)}</Text>
-              </View>
-              {gstDoc.is_inter_state ? (
-                <View style={localStyles.totalRow}>
-                  <Text style={localStyles.totalLabel}>IGST</Text>
-                  <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.igst_amount)}</Text>
-                </View>
-              ) : (
-                <>
-                  <View style={localStyles.totalRow}>
-                    <Text style={localStyles.totalLabel}>CGST</Text>
-                    <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.cgst_amount)}</Text>
-                  </View>
-                  <View style={localStyles.totalRow}>
-                    <Text style={localStyles.totalLabel}>SGST</Text>
-                    <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.sgst_amount)}</Text>
-                  </View>
-                </>
-              )}
-            </>
-          ) : null}
+          <FormInput
+            label="Total Discount (₹)"
+            value={discount}
+            onChangeText={(v) => {
+              setDiscount(v);
+              if (fieldErrors.discount) setFieldErrors((e) => ({ ...e, discount: undefined }));
+            }}
+            money
+            error={fieldErrors.discount}
+          />
           <View style={[localStyles.totalRow, { marginTop: spacing.sm }]}>
             <Text style={localStyles.totalLabel}>Grand Total</Text>
-            <Text style={localStyles.grandTotal}>{formatCurrency(total)}</Text>
+            <MoneyText amount={total} size="lg" color={colors.primary} />
           </View>
         </View>
       </View>
 
-      <SectionHeader title="Payment" />
+      {fieldErrors.payments ? (
+        <Text style={[localStyles.fieldError, { marginBottom: spacing.sm }]}>{fieldErrors.payments}</Text>
+      ) : null}
       <PaymentSplitForm
         accounts={accounts}
         payments={payments}
-        onChange={setPayments}
-        totalDue={total}
+        onChange={(p) => {
+          setPayments(p);
+          if (fieldErrors.payments) setFieldErrors((e) => ({ ...e, payments: undefined }));
+        }}
+        totalDue={Math.max(0, roundMoney(total - advanceAppliedPreview))}
         defaultDate={isValidISODate(date) ? date : undefined}
         mode="pay"
+        advanceCredit={advanceCredit}
+        applyAdvance={applyAdvance}
+        onApplyAdvanceChange={setApplyAdvance}
+        advanceApplied={advanceAppliedPreview}
       />
 
       <PrimaryButton

@@ -1,9 +1,13 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, type ViewStyle } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
-import { spacing } from '../constants/theme';
+import { spacing, radius, typography } from '../constants/theme';
 import { cardSurface } from '../constants/shadows';
 import { MoneyText } from './MoneyText';
+import { ThemedPressable, ACTIVE_OPACITY } from './ThemedPressable';
+
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
 interface Props {
   label: string;
@@ -13,9 +17,18 @@ interface Props {
   color?: string;
   subtitle?: string;
   onPress?: () => void;
-  style?: import('react-native').ViewStyle;
+  style?: ViewStyle;
   /** Blur the value for privacy (dashboard hide-amounts). */
   blurred?: boolean;
+  /** Stretch equally in a flex row (dashboard 2-col grids). */
+  equal?: boolean;
+  /** Optional leading icon. */
+  icon?: IconName;
+  /**
+   * `card` — elevated surface (default).
+   * `inset` — tonal tile for use inside a parent panel (no nested elevation).
+   */
+  variant?: 'card' | 'inset';
 }
 
 export function StatCard({
@@ -27,6 +40,9 @@ export function StatCard({
   onPress,
   style,
   blurred = false,
+  equal = false,
+  icon,
+  variant = 'card',
 }: Props) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
@@ -34,67 +50,125 @@ export function StatCard({
 
   const body = (
     <>
-      <Text style={styles.label} numberOfLines={1}>
-        {label}
-      </Text>
-      <MoneyText
-        amount={value ?? 0}
-        text={displayValue}
-        size="md"
-        color={accent}
-        style={{ width: '100%', textAlign: 'left' }}
-        lines={2}
-        blurred={blurred}
-      />
-      {subtitle ? (
-        <Text style={styles.subtitle} numberOfLines={2}>
-          {subtitle}
-        </Text>
-      ) : null}
+      <View style={[styles.accent, { backgroundColor: accent }]} />
+      <View style={styles.body}>
+        <View style={styles.labelRow}>
+          {icon ? (
+            <Ionicons name={icon} size={14} color={accent} style={styles.icon} />
+          ) : null}
+          <Text style={styles.label} numberOfLines={1}>
+            {label}
+          </Text>
+        </View>
+        <MoneyText
+          amount={value ?? 0}
+          text={displayValue}
+          size="md"
+          color={colors.text}
+          style={{ width: '100%', textAlign: 'left' }}
+          lines={1}
+          blurred={blurred}
+        />
+        {subtitle ? (
+          <Text style={styles.subtitle} numberOfLines={2}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
     </>
   );
 
+  const cardStyle = [
+    variant === 'inset' ? styles.inset : styles.card,
+    equal && styles.equal,
+    style,
+  ];
+
   if (onPress) {
     return (
-      <TouchableOpacity
-        style={[styles.card, style]}
+      <ThemedPressable
+        style={cardStyle}
         onPress={onPress}
-        activeOpacity={0.75}
+        activeOpacity={ACTIVE_OPACITY}
         accessibilityRole="button"
         accessibilityLabel={label}
       >
         {body}
-      </TouchableOpacity>
+      </ThemedPressable>
     );
   }
 
-  return <View style={[styles.card, style]}>{body}</View>;
+  return <View style={cardStyle}>{body}</View>;
 }
 
 function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boolean) {
   return StyleSheet.create({
     card: {
       ...cardSurface(colors, isDark),
-      paddingHorizontal: spacing.sm + 2,
-      paddingVertical: spacing.sm,
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      overflow: 'hidden',
       flexGrow: 1,
-      flexBasis: '47%',
-      minWidth: 0,
+      flexShrink: 1,
+      // ~3-up on detail KPI rows; `equal` overrides for dashboard 2-col.
+      flexBasis: '31%',
+      minWidth: 96,
       maxWidth: '100%',
-      minHeight: 56,
+      minHeight: 76,
+    },
+    inset: {
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      overflow: 'hidden',
+      flexGrow: 1,
+      flexShrink: 1,
+      flexBasis: '31%',
+      minWidth: 96,
+      maxWidth: '100%',
+      minHeight: 76,
+      backgroundColor: colors.surfaceContainerHigh,
+      borderRadius: radius.md,
+      borderWidth: isDark ? StyleSheet.hairlineWidth : 0,
+      borderColor: colors.border,
+    },
+    equal: {
+      flex: 1,
+      flexBasis: 0,
+      flexGrow: 1,
+      minWidth: 0,
+      maxWidth: undefined,
+    },
+    accent: {
+      width: 3,
+      alignSelf: 'stretch',
+    },
+    body: {
+      flex: 1,
+      minWidth: 0,
+      paddingHorizontal: spacing.sm + 2,
+      paddingVertical: spacing.sm + 2,
       justifyContent: 'center',
-      overflow: 'visible',
+      gap: 4,
+    },
+    labelRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      minWidth: 0,
+    },
+    icon: {
+      marginTop: 1,
     },
     label: {
-      fontSize: 10,
+      ...typography.micro,
       color: colors.textSecondary,
-      marginBottom: 2,
       fontWeight: '600',
       letterSpacing: 0.4,
       textTransform: 'uppercase',
+      flexShrink: 1,
     },
     subtitle: {
-      fontSize: 11,
+      ...typography.micro,
       color: colors.textMuted,
       marginTop: 2,
     },

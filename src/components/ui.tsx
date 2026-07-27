@@ -22,6 +22,11 @@ import { cardSurface, elevatedSurface, fabShadow } from '../constants/shadows';
 import { formatCurrency } from '../utils/format';
 import { MoneyText } from './MoneyText';
 import type { DashboardStats } from '../types';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ThemedPressable, ACTIVE_OPACITY } from './ThemedPressable';
+
+export { ThemedPressable, ACTIVE_OPACITY };
+export const ICON = { nav: 20, inline: 18, chevron: 16 } as const;
 
 export { DatePickerField } from './DatePickerField';
 
@@ -30,26 +35,32 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
 
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
-    content: { padding: spacing.md, paddingBottom: spacing.xxl },
+    content: {
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.xxl,
+      gap: spacing.sm,
+    },
     center: {
       flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
       backgroundColor: colors.background,
+      paddingHorizontal: spacing.lg,
     },
-    section: { marginBottom: spacing.md },
+    section: { marginBottom: spacing.lg },
     sectionTitle: {
       ...typography.section,
       color: colors.textSecondary,
       textTransform: 'uppercase',
-      marginBottom: spacing.xs,
+      marginBottom: spacing.sm,
     },
     card: {
       ...surface,
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      marginBottom: spacing.xs + 2,
-      minHeight: 52,
+      paddingVertical: spacing.sm + 2,
+      marginBottom: spacing.sm,
+      minHeight: 56,
       justifyContent: 'center',
     },
     /** Compact summary / net-worth hero used on finance screens. */
@@ -57,7 +68,7 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
       ...elevatedSurface(colors, isDark),
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.md,
-      marginBottom: spacing.md,
+      marginBottom: spacing.lg,
     },
     cardTitle: { ...typography.bodyMedium, color: colors.text, fontWeight: '600' },
     cardSub: {
@@ -71,6 +82,12 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
       alignItems: 'center',
       gap: spacing.sm,
     },
+    detailKpiRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.sm,
+      marginVertical: spacing.md,
+    },
     label: { ...typography.label, color: colors.textSecondary, marginBottom: spacing.xs },
     value: { ...typography.bodyMedium, color: colors.text },
     amount: {
@@ -83,15 +100,29 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
     empty: {
       textAlign: 'center',
       color: colors.textSecondary,
-      marginTop: spacing.xl,
-      fontSize: 14,
-      lineHeight: 20,
+      marginTop: spacing.lg,
+      ...typography.body,
       paddingHorizontal: spacing.lg,
     },
     link: { color: colors.accent, fontWeight: '600', fontSize: 13 },
-    divider: { height: 1, backgroundColor: colors.borderLight, marginVertical: spacing.sm },
-    filters: { flexDirection: 'row', padding: spacing.md, gap: spacing.sm },
-    list: { paddingHorizontal: spacing.md, paddingTop: spacing.xs, paddingBottom: 96 },
+    divider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.borderLight,
+      marginVertical: spacing.sm,
+    },
+    filters: {
+      flexDirection: 'row',
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      gap: spacing.sm,
+      flexWrap: 'wrap',
+      alignItems: 'center',
+    },
+    list: {
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+      paddingBottom: 112,
+    },
     fab: {
       position: 'absolute',
       bottom: spacing.lg,
@@ -102,7 +133,7 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
       borderRadius: radius.full,
       alignItems: 'center',
       justifyContent: 'center',
-      ...fabShadow(isDark),
+      ...fabShadow(isDark, colors.shadow),
     },
     fabText: { color: colors.onPrimaryContainer, fontWeight: '600', fontSize: 12 },
     dangerBtn: {
@@ -113,6 +144,8 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
       borderColor: colors.danger + '55',
       alignItems: 'center',
       backgroundColor: colors.surface,
+      minHeight: 44,
+      justifyContent: 'center',
     },
     dangerText: { color: colors.danger, fontWeight: '600', fontSize: 14 },
     infoBox: {
@@ -129,6 +162,12 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
 export function useScreenStyles() {
   const { colors, isDark } = useTheme();
   return useMemo(() => createScreenStyles(colors, isDark), [colors, isDark]);
+}
+
+/** Bottom padding for FlatList content when a FAB is present (112 + safe area). */
+export function useFabListPadding(base = 112): number {
+  const insets = useSafeAreaInsets();
+  return base + insets.bottom;
 }
 
 interface ButtonProps {
@@ -169,16 +208,11 @@ export function PrimaryButton({
         : colors.onPrimary;
 
   return (
-    <TouchableOpacity
+    <ThemedPressable
       style={[btnStyle, (disabled || loading) && styles.disabled]}
-      onPress={() => {
-        void import('../utils/haptics').then((m) =>
-          variant === 'danger' ? m.hapticWarning() : m.hapticLight()
-        );
-        onPress();
-      }}
+      onPress={onPress}
       disabled={disabled || loading}
-      activeOpacity={0.8}
+      haptic={variant === 'danger' ? 'warning' : 'light'}
       accessibilityRole="button"
       accessibilityLabel={title}
       accessibilityState={{ disabled: disabled || loading, busy: !!loading }}
@@ -188,11 +222,11 @@ export function PrimaryButton({
       ) : (
         <Text style={textStyle}>{title}</Text>
       )}
-    </TouchableOpacity>
+    </ThemedPressable>
   );
 }
 
-function createButtonStyles(colors: ThemeColors, _isDark: boolean) {
+function createButtonStyles(colors: ThemeColors, isDark: boolean) {
   return StyleSheet.create({
     primary: {
       backgroundColor: colors.primary,
@@ -219,6 +253,8 @@ function createButtonStyles(colors: ThemeColors, _isDark: boolean) {
       maxWidth: '100%',
       minHeight: 44,
       marginVertical: spacing.xs,
+      borderWidth: isDark ? 1 : 0,
+      borderColor: colors.border,
     },
     danger: {
       backgroundColor: 'transparent',
@@ -233,11 +269,23 @@ function createButtonStyles(colors: ThemeColors, _isDark: boolean) {
       minHeight: 44,
       marginVertical: spacing.xs,
       borderWidth: 1,
-      borderColor: colors.danger + '66',
+      borderColor: isDark ? colors.danger : colors.danger + '99',
     },
     disabled: { opacity: 0.5 },
-    primaryText: { color: colors.onPrimary, fontSize: 14, fontWeight: '600' },
-    secondaryText: { color: colors.onPrimaryContainer, fontSize: 14, fontWeight: '600' },
+    primaryText: {
+      color: colors.onPrimary,
+      fontSize: 14,
+      fontWeight: '600',
+      textAlign: 'center',
+      flexShrink: 1,
+    },
+    secondaryText: {
+      color: colors.onPrimaryContainer,
+      fontSize: 14,
+      fontWeight: '600',
+      textAlign: 'center',
+      flexShrink: 1,
+    },
     dangerText: {
       color: colors.danger,
       fontSize: 14,
@@ -275,65 +323,106 @@ export function FinanceHero({
           ...elevatedSurface(colors, isDark),
           padding: spacing.md,
           marginBottom: spacing.md,
-          backgroundColor: colors.surface,
-        },
-        heroTop: {
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
+          overflow: 'hidden',
           gap: spacing.md,
-          paddingBottom: spacing.sm,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.borderLight,
         },
-        heroBlock: { flex: 1, minWidth: 0 },
-        heroLabelRow: {
+        topBar: {
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: spacing.xs,
+          gap: spacing.sm,
         },
-        heroLabel: {
+        kicker: {
           ...typography.section,
           color: colors.textSecondary,
           textTransform: 'uppercase',
-          flexShrink: 1,
+          letterSpacing: 0.6,
         },
         eyeBtn: {
-          padding: 2,
-          marginRight: -2,
+          width: 44,
+          height: 44,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: radius.full,
+          backgroundColor: colors.surfaceContainerHigh,
         },
-        heroValue: {
-          marginTop: spacing.xs,
-          textAlign: 'left',
+        profitBlock: {
+          gap: 4,
         },
-        heroSub: { fontSize: 11, color: colors.textSecondary, marginTop: 2, lineHeight: 14 },
-        chipRow: {
+        profitLabel: {
+          ...typography.caption,
+          color: colors.textSecondary,
+          fontWeight: '500',
+        },
+        grossLine: {
+          ...typography.caption,
+          color: colors.textMuted,
+          marginTop: 2,
+        },
+        worthRow: {
           flexDirection: 'row',
-          flexWrap: 'wrap',
-          marginTop: spacing.sm,
-          gap: spacing.xs,
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: spacing.md,
+          paddingVertical: spacing.sm,
+          paddingHorizontal: spacing.sm,
+          minHeight: 52,
+          backgroundColor: colors.surfaceContainerHigh,
+          borderRadius: radius.md,
+          borderWidth: isDark ? StyleSheet.hairlineWidth : 0,
+          borderColor: colors.border,
         },
-        chip: {
-          width: '48%',
-          flexGrow: 1,
+        worthLeft: { flex: 1, minWidth: 0, gap: 2 },
+        worthLabel: {
+          ...typography.micro,
+          color: colors.textSecondary,
+          textTransform: 'uppercase',
+          letterSpacing: 0.4,
+          fontWeight: '600',
+        },
+        tileGrid: {
+          gap: spacing.sm,
+        },
+        tileRow: {
+          flexDirection: 'row',
+          gap: spacing.sm,
+        },
+        tile: {
+          flex: 1,
+          minWidth: 0,
+          flexDirection: 'row',
+          alignItems: 'stretch',
+          overflow: 'hidden',
+          backgroundColor: colors.surfaceContainerHigh,
+          borderRadius: radius.md,
+          borderWidth: isDark ? StyleSheet.hairlineWidth : 0,
+          borderColor: colors.border,
+          minHeight: 68,
+        },
+        tileAccent: {
+          width: 3,
+          alignSelf: 'stretch',
+        },
+        tileBody: {
+          flex: 1,
           minWidth: 0,
           paddingVertical: spacing.sm,
           paddingHorizontal: spacing.sm,
-          backgroundColor: colors.surfaceContainer,
-          borderRadius: radius.md,
-          minHeight: 48,
           justifyContent: 'center',
+          gap: 4,
         },
-        chipLabel: {
-          fontSize: 10,
+        tileLabelRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 4,
+        },
+        tileLabel: {
+          ...typography.micro,
           color: colors.textSecondary,
           textTransform: 'uppercase',
           letterSpacing: 0.3,
-          marginBottom: 2,
-        },
-        chipValue: {
-          marginTop: 1,
+          fontWeight: '600',
+          flexShrink: 1,
         },
       }),
     [colors, isDark]
@@ -341,130 +430,176 @@ export function FinanceHero({
 
   const netProfitColor = stats.netProfit >= 0 ? colors.success : colors.danger;
 
+  const tiles: {
+    label: string;
+    amount: number;
+    color: string;
+    icon: React.ComponentProps<typeof Ionicons>['name'];
+    onPress?: () => void;
+    a11y: string;
+  }[] = [
+    {
+      label: 'Cash & Bank',
+      amount: stats.totalLiquid,
+      color: colors.primary,
+      icon: 'wallet-outline',
+      onPress: onCashPress,
+      a11y: 'View banking',
+    },
+    {
+      label: 'Receivable',
+      amount: stats.receivable,
+      color: colors.danger,
+      icon: 'arrow-down-circle-outline',
+      onPress: onReceivablePress,
+      a11y: 'View receivables',
+    },
+    {
+      label: 'Payable',
+      amount: stats.payable,
+      color: colors.warning,
+      icon: 'arrow-up-circle-outline',
+      onPress: onPayablePress,
+      a11y: 'View payables',
+    },
+    {
+      label: 'Inventory',
+      amount: stats.inventoryValue,
+      color: colors.primaryLight,
+      icon: 'cube-outline',
+      onPress: onInventoryPress,
+      a11y: 'View inventory',
+    },
+  ];
+
   return (
     <View style={styles.hero}>
-      <View style={styles.heroTop}>
-        <View style={styles.heroBlock}>
-          <Text style={styles.heroLabel}>Net Profit</Text>
-          <MoneyText
-            amount={stats.netProfit}
-            size="hero"
-            color={netProfitColor}
-            style={[styles.heroValue, { width: '100%' }]}
-            blurred={amountsHidden}
-          />
-          <Text style={styles.heroSub} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
-            Gross{' '}
-            {amountsHidden ? (
-              <Text style={{ letterSpacing: 1.5, opacity: 0.45 }}>••••••</Text>
-            ) : (
-              formatCurrency(stats.grossProfit)
-            )}
-          </Text>
-        </View>
-        <View style={styles.heroBlock}>
-          <View style={styles.heroLabelRow}>
-            <Text style={styles.heroLabel}>Net Worth</Text>
-            {onToggleAmountsHidden ? (
-              <TouchableOpacity
-                style={styles.eyeBtn}
-                onPress={onToggleAmountsHidden}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityRole="button"
-                accessibilityLabel={amountsHidden ? 'Show amounts' : 'Hide amounts'}
-              >
-                <Ionicons
-                  name={amountsHidden ? 'eye-off-outline' : 'eye-outline'}
-                  size={18}
-                  color={colors.textSecondary}
-                />
-              </TouchableOpacity>
-            ) : null}
-          </View>
-          <TouchableOpacity
-            onPress={onNetWorthPress}
-            disabled={!onNetWorthPress}
-            activeOpacity={onNetWorthPress ? 0.75 : 1}
-            accessibilityRole={onNetWorthPress ? 'button' : undefined}
-            accessibilityLabel="View balance sheet"
+      <View style={styles.topBar}>
+        <Text style={styles.kicker}>This period</Text>
+        {onToggleAmountsHidden ? (
+          <ThemedPressable
+            style={styles.eyeBtn}
+            onPress={onToggleAmountsHidden}
+            hitSlop={4}
+            accessibilityRole="button"
+            accessibilityLabel={amountsHidden ? 'Show amounts' : 'Hide amounts'}
+            android_ripple={{ color: colors.overlay, borderless: true, radius: 22 }}
           >
-            <MoneyText
-              amount={stats.netWorth}
-              size="hero"
-              style={[styles.heroValue, { width: '100%' }]}
-              blurred={amountsHidden}
+            <Ionicons
+              name={amountsHidden ? 'eye-off-outline' : 'eye-outline'}
+              size={ICON.inline}
+              color={colors.textSecondary}
             />
-            <Text style={styles.heroSub}>Balance sheet</Text>
-          </TouchableOpacity>
-        </View>
+          </ThemedPressable>
+        ) : null}
       </View>
-      <View style={styles.chipRow}>
-        <TouchableOpacity
-          style={styles.chip}
-          onPress={onCashPress}
-          disabled={!onCashPress}
-          activeOpacity={onCashPress ? 0.75 : 1}
-          accessibilityRole={onCashPress ? 'button' : undefined}
-          accessibilityLabel="View banking"
-        >
-          <Text style={styles.chipLabel}>Cash & Bank</Text>
+
+      <View style={styles.profitBlock}>
+        <Text style={styles.profitLabel}>Net profit</Text>
+        <MoneyText
+          amount={stats.netProfit}
+          size="hero"
+          color={netProfitColor}
+          style={{ width: '100%', textAlign: 'left' }}
+          blurred={amountsHidden}
+          lines={1}
+        />
+        <Text style={styles.grossLine} numberOfLines={1}>
+          Gross{' '}
+          {amountsHidden ? (
+            <Text style={{ letterSpacing: 1.5, opacity: 0.45 }}>••••••</Text>
+          ) : (
+            formatCurrency(stats.grossProfit)
+          )}
+        </Text>
+      </View>
+
+      <ThemedPressable
+        style={styles.worthRow}
+        onPress={onNetWorthPress}
+        disabled={!onNetWorthPress}
+        haptic={onNetWorthPress ? 'light' : false}
+        accessibilityRole={onNetWorthPress ? 'button' : undefined}
+        accessibilityLabel="View balance sheet"
+      >
+        <View style={styles.worthLeft}>
+          <Text style={styles.worthLabel}>Net worth</Text>
           <MoneyText
-            amount={stats.totalLiquid}
-            size="md"
-            style={[styles.chipValue, { width: '100%', textAlign: 'left' }]}
+            amount={stats.netWorth}
+            size="lg"
+            style={{ width: '100%', textAlign: 'left' }}
             blurred={amountsHidden}
+            lines={1}
           />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.chip}
-          onPress={onReceivablePress}
-          disabled={!onReceivablePress}
-          activeOpacity={onReceivablePress ? 0.75 : 1}
-          accessibilityRole={onReceivablePress ? 'button' : undefined}
-          accessibilityLabel="View receivables"
-        >
-          <Text style={styles.chipLabel}>Receivable</Text>
-          <MoneyText
-            amount={stats.receivable}
-            size="md"
-            color={colors.danger}
-            style={[styles.chipValue, { width: '100%', textAlign: 'left' }]}
-            blurred={amountsHidden}
-          />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.chip}
-          onPress={onPayablePress}
-          disabled={!onPayablePress}
-          activeOpacity={onPayablePress ? 0.75 : 1}
-          accessibilityRole={onPayablePress ? 'button' : undefined}
-          accessibilityLabel="View payables"
-        >
-          <Text style={styles.chipLabel}>Payable</Text>
-          <MoneyText
-            amount={stats.payable}
-            size="md"
-            color={colors.warning}
-            style={[styles.chipValue, { width: '100%', textAlign: 'left' }]}
-            blurred={amountsHidden}
-          />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.chip}
-          onPress={onInventoryPress}
-          disabled={!onInventoryPress}
-          activeOpacity={onInventoryPress ? 0.75 : 1}
-          accessibilityRole={onInventoryPress ? 'button' : undefined}
-          accessibilityLabel="View inventory"
-        >
-          <Text style={styles.chipLabel}>Inventory</Text>
-          <MoneyText
-            amount={stats.inventoryValue}
-            size="md"
-            style={[styles.chipValue, { width: '100%', textAlign: 'left' }]}
-            blurred={amountsHidden}
-          />
-        </TouchableOpacity>
+        </View>
+        {onNetWorthPress ? (
+          <Ionicons name="chevron-forward" size={ICON.chevron} color={colors.textMuted} />
+        ) : null}
+      </ThemedPressable>
+
+      <View style={styles.tileGrid}>
+        <View style={styles.tileRow}>
+          {tiles.slice(0, 2).map((tile) => (
+            <ThemedPressable
+              key={tile.label}
+              style={styles.tile}
+              onPress={tile.onPress}
+              disabled={!tile.onPress}
+              haptic={tile.onPress ? 'light' : false}
+              accessibilityRole={tile.onPress ? 'button' : undefined}
+              accessibilityLabel={tile.a11y}
+            >
+              <View style={[styles.tileAccent, { backgroundColor: tile.color }]} />
+              <View style={styles.tileBody}>
+                <View style={styles.tileLabelRow}>
+                  <Ionicons name={tile.icon} size={14} color={tile.color} />
+                  <Text style={styles.tileLabel} numberOfLines={1}>
+                    {tile.label}
+                  </Text>
+                </View>
+                <MoneyText
+                  amount={tile.amount}
+                  size="md"
+                  color={colors.text}
+                  style={{ width: '100%', textAlign: 'left' }}
+                  blurred={amountsHidden}
+                  lines={1}
+                />
+              </View>
+            </ThemedPressable>
+          ))}
+        </View>
+        <View style={styles.tileRow}>
+          {tiles.slice(2, 4).map((tile) => (
+            <ThemedPressable
+              key={tile.label}
+              style={styles.tile}
+              onPress={tile.onPress}
+              disabled={!tile.onPress}
+              haptic={tile.onPress ? 'light' : false}
+              accessibilityRole={tile.onPress ? 'button' : undefined}
+              accessibilityLabel={tile.a11y}
+            >
+              <View style={[styles.tileAccent, { backgroundColor: tile.color }]} />
+              <View style={styles.tileBody}>
+                <View style={styles.tileLabelRow}>
+                  <Ionicons name={tile.icon} size={14} color={tile.color} />
+                  <Text style={styles.tileLabel} numberOfLines={1}>
+                    {tile.label}
+                  </Text>
+                </View>
+                <MoneyText
+                  amount={tile.amount}
+                  size="md"
+                  color={colors.text}
+                  style={{ width: '100%', textAlign: 'left' }}
+                  blurred={amountsHidden}
+                  lines={1}
+                />
+              </View>
+            </ThemedPressable>
+          ))}
+        </View>
       </View>
     </View>
   );
@@ -487,6 +622,8 @@ interface InputProps extends Omit<TextInputProps, 'style'> {
   value: string;
   onChangeText: (v: string) => void;
   helperText?: string;
+  /** Inline validation message — shows under the field in danger color. */
+  error?: string;
   /** Money field: decimal pad, 0.00 placeholder, tabular digits. */
   money?: boolean;
   /** Quantity field: decimal pad, tabular digits (placeholder defaults to 0). */
@@ -499,6 +636,7 @@ export function FormInput({
   onChangeText,
   multiline,
   helperText,
+  error,
   editable,
   money,
   qty,
@@ -510,6 +648,8 @@ export function FormInput({
   const styles = useMemo(() => createInputStyles(colors), [colors]);
   const isReadOnly = editable === false;
   const isNumeric = money || qty;
+  const showError = Boolean(error?.trim());
+  const supportText = showError ? error!.trim() : helperText;
 
   return (
     <View style={styles.field}>
@@ -520,6 +660,7 @@ export function FormInput({
           multiline && styles.multiline,
           isReadOnly && styles.inputDisabled,
           isNumeric && styles.moneyInput,
+          showError && styles.inputError,
         ]}
         value={value}
         onChangeText={onChangeText}
@@ -532,9 +673,12 @@ export function FormInput({
         }
         placeholderTextColor={colors.textMuted}
         accessibilityLabel={rest.accessibilityLabel ?? label}
+        accessibilityState={{ disabled: isReadOnly }}
         {...rest}
       />
-      {helperText ? <Text style={styles.helperText}>{helperText}</Text> : null}
+      {supportText ? (
+        <Text style={showError ? styles.errorText : styles.helperText}>{supportText}</Text>
+      ) : null}
     </View>
   );
 }
@@ -551,16 +695,25 @@ export function FormScreen({
   contentStyle?: ViewStyle;
 }) {
   const styles = useScreenStyles();
+  const insets = useSafeAreaInsets();
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior="padding"
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 56 : 0}
     >
       <ScrollView
         style={styles.container}
-        contentContainerStyle={[styles.content, contentStyle]}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: spacing.xxl + Math.max(insets.bottom, spacing.md) },
+          contentStyle,
+        ]}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        // Avoid double-inset with KeyboardAvoidingView padding on iOS.
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'android'}
+        showsVerticalScrollIndicator={false}
       >
         {children}
         <NumericKeyboardAccessory />
@@ -596,9 +749,9 @@ export function ErrorState({
         {message || 'Something went wrong while loading this screen.'}
       </Text>
       {onRetry ? (
-        <TouchableOpacity
+        <ThemedPressable
           onPress={onRetry}
-          activeOpacity={0.8}
+          accessibilityRole="button"
           accessibilityLabel="Retry"
           style={{
             paddingHorizontal: spacing.lg,
@@ -606,13 +759,22 @@ export function ErrorState({
             borderRadius: radius.full,
             backgroundColor: colors.primary,
             minHeight: 44,
+            minWidth: 140,
             justifyContent: 'center',
+            alignItems: 'center',
           }}
         >
-          <Text style={{ color: colors.onPrimary, fontWeight: '600', fontSize: 14 }}>
+          <Text
+            style={{
+              color: colors.onPrimary,
+              fontWeight: '600',
+              fontSize: 14,
+              textAlign: 'center',
+            }}
+          >
             Try Again
           </Text>
-        </TouchableOpacity>
+        </ThemedPressable>
       ) : null}
     </View>
   );
@@ -632,44 +794,62 @@ export function EmptyState({
   const { colors } = useTheme();
   const styles = useScreenStyles();
   return (
-    <View style={{ alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.xl }}>
+    <View
+      style={{
+        alignItems: 'center',
+        paddingHorizontal: spacing.lg,
+        paddingVertical: spacing.xl,
+        gap: spacing.sm,
+      }}
+    >
       <View
         style={{
           width: 56,
           height: 56,
           borderRadius: radius.full,
-          backgroundColor: colors.surfaceContainer,
+          backgroundColor: colors.surfaceContainerHigh,
           alignItems: 'center',
           justifyContent: 'center',
-          marginBottom: spacing.sm,
+          marginBottom: spacing.xs,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
         }}
       >
-        <Ionicons name="file-tray-outline" size={28} color={colors.textMuted} />
+        <Ionicons name="file-tray-outline" size={28} color={colors.textSecondary} />
       </View>
       <Text style={[styles.cardTitle, { textAlign: 'center' }]}>{title}</Text>
       {message ? (
-        <Text style={[styles.empty, { marginTop: spacing.sm }]}>{message}</Text>
+        <Text style={[styles.empty, { marginTop: 0 }]}>{message}</Text>
       ) : null}
       {actionLabel && onAction ? (
-        <TouchableOpacity
+        <ThemedPressable
           onPress={onAction}
-          activeOpacity={0.8}
           accessibilityRole="button"
           accessibilityLabel={actionLabel}
           style={{
-            marginTop: spacing.md,
+            marginTop: spacing.sm,
             paddingHorizontal: spacing.lg,
             paddingVertical: 10,
             borderRadius: radius.full,
             backgroundColor: colors.primary,
             minHeight: 44,
+            minWidth: 140,
             justifyContent: 'center',
+            alignItems: 'center',
+            alignSelf: 'center',
           }}
         >
-          <Text style={{ color: colors.onPrimary, fontWeight: '600', fontSize: 14 }}>
+          <Text
+            style={{
+              color: colors.onPrimary,
+              fontWeight: '600',
+              fontSize: 14,
+              textAlign: 'center',
+            }}
+          >
             {actionLabel}
           </Text>
-        </TouchableOpacity>
+        </ThemedPressable>
       ) : null}
     </View>
   );
@@ -681,10 +861,11 @@ function createInputStyles(colors: ThemeColors) {
     label: {
       ...typography.label,
       color: colors.textSecondary,
-      marginBottom: 4,
+      marginBottom: spacing.xs,
     },
     input: {
-      borderWidth: 0,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: 'transparent',
       borderRadius: radius.md,
       paddingHorizontal: spacing.md,
       paddingVertical: 11,
@@ -695,11 +876,20 @@ function createInputStyles(colors: ThemeColors) {
     },
     multiline: { minHeight: 88, textAlignVertical: 'top', paddingTop: 11 },
     inputDisabled: { backgroundColor: colors.surfaceContainerHigh, color: colors.textSecondary },
+    inputError: {
+      borderColor: colors.danger,
+      borderWidth: 1,
+    },
     moneyInput: { fontVariant: ['tabular-nums'] },
     helperText: {
       ...typography.caption,
       color: colors.textMuted,
-      marginTop: 4,
+      marginTop: spacing.xs,
+    },
+    errorText: {
+      ...typography.caption,
+      color: colors.danger,
+      marginTop: spacing.xs,
     },
   });
 }
@@ -715,10 +905,9 @@ export function FilterChip({ label, active, onPress }: FilterChipProps) {
   const styles = useMemo(() => createChipStyles(colors), [colors]);
 
   return (
-    <TouchableOpacity
+    <ThemedPressable
       style={[styles.chip, active && styles.chipActive]}
       onPress={onPress}
-      activeOpacity={0.7}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       accessibilityLabel={label}
@@ -731,22 +920,20 @@ export function FilterChip({ label, active, onPress }: FilterChipProps) {
       >
         {label}
       </Text>
-    </TouchableOpacity>
+    </ThemedPressable>
   );
 }
 
 export function FilterRow({ children }: { children: React.ReactNode }) {
-  const { colors } = useTheme();
   return (
     <View
       style={{
         flexDirection: 'row',
         paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs + 2,
-        gap: spacing.xs,
-        backgroundColor: colors.surface,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.borderLight,
+        paddingVertical: spacing.sm,
+        gap: spacing.sm,
+        flexWrap: 'wrap',
+        alignItems: 'center',
       }}
     >
       {children}
@@ -776,11 +963,12 @@ export function SearchField({
           marginBottom: spacing.xs + 2,
           marginTop: spacing.xs,
           paddingHorizontal: spacing.md,
-          paddingVertical: 7,
-          minHeight: 40,
+          paddingVertical: 10,
+          minHeight: 44,
           borderRadius: radius.full,
-          borderWidth: 0,
-          backgroundColor: colors.surfaceContainer,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
+          backgroundColor: colors.surfaceContainerHigh,
         },
         input: {
           flex: 1,
@@ -831,12 +1019,15 @@ function createChipStyles(colors: ThemeColors) {
       paddingHorizontal: spacing.xs,
       borderRadius: radius.full,
       backgroundColor: colors.chip,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
       alignItems: 'center',
       justifyContent: 'center',
-      minHeight: 36,
+      minHeight: 44,
     },
     chipActive: {
       backgroundColor: colors.chipActive,
+      borderColor: colors.chipActive,
     },
     chipText: {
       fontSize: 11,
@@ -846,6 +1037,128 @@ function createChipStyles(colors: ThemeColors) {
     },
     chipTextActive: { color: colors.chipTextActive, fontWeight: '700' },
   });
+}
+
+export function SegmentedControl<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createChipStyles(colors), [colors]);
+
+  return (
+    <View style={{ flexDirection: 'row', gap: spacing.xs }}>
+      {options.map((option) => {
+        const active = option.value === value;
+        return (
+          <ThemedPressable
+            key={option.value}
+            style={[styles.chip, active && styles.chipActive, { flex: 1, minHeight: 44 }]}
+            onPress={() => {
+              if (option.value !== value) onChange(option.value);
+            }}
+            activeOpacity={ACTIVE_OPACITY}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            accessibilityLabel={option.label}
+          >
+            <Text
+              style={[styles.chipText, active && styles.chipTextActive]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.85}
+            >
+              {option.label}
+            </Text>
+          </ThemedPressable>
+        );
+      })}
+    </View>
+  );
+}
+
+export function SummaryHero({
+  label,
+  amount,
+  hint,
+  secondary,
+}: {
+  label: string;
+  amount: number;
+  hint?: string;
+  secondary?: { label: string; amount: number; color?: string }[];
+}) {
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        hero: {
+          ...elevatedSurface(colors, isDark),
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.md,
+          marginBottom: spacing.md,
+          alignItems: 'center',
+        },
+        label: {
+          ...typography.section,
+          color: colors.textSecondary,
+          textTransform: 'uppercase',
+          marginBottom: spacing.xs,
+        },
+        hint: {
+          ...typography.caption,
+          color: colors.textSecondary,
+          marginTop: spacing.xs,
+          textAlign: 'center',
+        },
+        secondaryRow: {
+          flexDirection: 'row',
+          marginTop: spacing.md,
+          gap: spacing.md,
+          width: '100%',
+        },
+        secondaryItem: {
+          flex: 1,
+          minWidth: 0,
+          alignItems: 'center',
+        },
+        secondaryLabel: {
+          ...typography.caption,
+          color: colors.textSecondary,
+          marginBottom: 2,
+          textAlign: 'center',
+        },
+      }),
+    [colors, isDark]
+  );
+
+  return (
+    <View style={styles.hero}>
+      <Text style={styles.label}>{label}</Text>
+      <MoneyText amount={amount} size="hero" style={{ textAlign: 'center', width: '100%' }} />
+      {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+      {secondary && secondary.length > 0 ? (
+        <View style={styles.secondaryRow}>
+          {secondary.map((item) => (
+            <View key={item.label} style={styles.secondaryItem}>
+              <Text style={styles.secondaryLabel}>{item.label}</Text>
+              <MoneyText
+                amount={item.amount}
+                size="md"
+                color={item.color}
+                style={{ textAlign: 'center', width: '100%' }}
+              />
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
 interface CardProps {
@@ -877,7 +1190,14 @@ export function Card({ children, onPress, style }: CardProps) {
   return <View style={[base, style]}>{children}</View>;
 }
 
-export function SectionHeader({ title }: { title: string }) {
+export function SectionHeader({
+  title,
+  tight,
+}: {
+  title: string;
+  /** Skip top margin when the parent already spaces the block. */
+  tight?: boolean;
+}) {
   const { colors } = useTheme();
   return (
     <Text
@@ -886,7 +1206,8 @@ export function SectionHeader({ title }: { title: string }) {
         color: colors.textSecondary,
         textTransform: 'uppercase',
         marginBottom: spacing.xs,
-        marginTop: spacing.md,
+        marginTop: tight ? 0 : spacing.md,
+        letterSpacing: 0.5,
       }}
     >
       {title}
@@ -907,16 +1228,16 @@ export function ThemeOption({
   const styles = useMemo(() => createThemeOptionStyles(colors), [colors]);
 
   return (
-    <TouchableOpacity
+    <ThemedPressable
       style={[styles.option, selected && styles.optionActive]}
       onPress={onPress}
-      activeOpacity={0.7}
+      activeOpacity={ACTIVE_OPACITY}
       accessibilityRole="button"
       accessibilityState={{ selected }}
       accessibilityLabel={label}
     >
       <Text style={[styles.optionText, selected && styles.optionTextActive]}>{label}</Text>
-    </TouchableOpacity>
+    </ThemedPressable>
   );
 }
 
@@ -925,16 +1246,22 @@ function createThemeOptionStyles(colors: ThemeColors) {
     option: {
       flex: 1,
       paddingVertical: 10,
+      paddingHorizontal: spacing.xs,
       alignItems: 'center',
       borderRadius: radius.full,
       backgroundColor: colors.surfaceContainer,
-      minHeight: 40,
+      minHeight: 44,
       justifyContent: 'center',
     },
     optionActive: {
       backgroundColor: colors.primaryContainer,
     },
-    optionText: { fontSize: 13, fontWeight: '500', color: colors.text },
+    optionText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: colors.text,
+      textAlign: 'center',
+    },
     optionTextActive: { color: colors.onPrimaryContainer, fontWeight: '700' },
   });
 }
@@ -1025,13 +1352,14 @@ export function Fab({
   icon?: React.ComponentProps<typeof Ionicons>['name'];
 }) {
   const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const iconName = icon ?? fabIconForLabel(label);
   const styles = useMemo(
     () =>
       StyleSheet.create({
         fab: {
           position: 'absolute',
-          bottom: spacing.lg,
+          bottom: spacing.lg + insets.bottom,
           right: spacing.lg,
           backgroundColor: colors.primaryContainer,
           minHeight: 56,
@@ -1041,7 +1369,7 @@ export function Fab({
           alignItems: 'center',
           justifyContent: 'center',
           gap: 6,
-          ...fabShadow(isDark),
+          ...fabShadow(isDark, colors.shadow),
         },
         text: {
           color: colors.onPrimaryContainer,
@@ -1050,17 +1378,13 @@ export function Fab({
           maxWidth: 100,
         },
       }),
-    [colors, isDark]
+    [colors, isDark, insets.bottom]
   );
 
   return (
-    <TouchableOpacity
+    <ThemedPressable
       style={styles.fab}
-      onPress={() => {
-        void import('../utils/haptics').then((m) => m.hapticLight());
-        onPress();
-      }}
-      activeOpacity={0.85}
+      onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
     >
@@ -1068,7 +1392,7 @@ export function Fab({
       <Text style={styles.text} numberOfLines={1}>
         {label.replace(/^\+\s*/, '')}
       </Text>
-    </TouchableOpacity>
+    </ThemedPressable>
   );
 }
 
@@ -1088,7 +1412,7 @@ const FINANCE_SHORTCUTS: ShortcutItem[] = [
 const OPS_SHORTCUTS: ShortcutItem[] = [
   { label: 'New Sale', route: '/(drawer)/sales/new', icon: 'cart-outline' },
   { label: 'Purchase', route: '/(drawer)/purchases/new', icon: 'bag-handle-outline' },
-  { label: 'Payment', route: '/(drawer)/payments/new', icon: 'swap-horizontal-outline' },
+  { label: 'Payment', route: '/(drawer)/payments/new', icon: 'cash-outline' },
   { label: 'Expense', route: '/(drawer)/expense/new', icon: 'receipt-outline' },
 ];
 
@@ -1106,25 +1430,24 @@ function ShortcutRow({
   router: ReturnType<typeof useRouter>;
 }) {
   return (
-    <View style={{ marginBottom: spacing.sm }}>
+    <View style={styles.block}>
       <Text style={styles.heading}>{title}</Text>
       <View style={styles.row}>
         {items.map((item) => (
-          <TouchableOpacity
+          <ThemedPressable
             key={item.route}
             style={styles.item}
             onPress={() => router.push(item.route as never)}
-            activeOpacity={0.75}
             accessibilityLabel={item.label}
             accessibilityRole="button"
           >
             <View style={styles.iconWrap}>
-              <Ionicons name={item.icon} size={16} color={colors.onPrimaryContainer} />
+              <Ionicons name={item.icon} size={ICON.inline} color={colors.onPrimaryContainer} />
             </View>
             <Text style={styles.itemLabel} numberOfLines={1}>
               {item.label}
             </Text>
-          </TouchableOpacity>
+          </ThemedPressable>
         ))}
       </View>
     </View>
@@ -1137,17 +1460,17 @@ export function DashboardShortcuts() {
   const styles = useMemo(() => createShortcutStyles(colors, isDark), [colors, isDark]);
 
   return (
-    <View>
+    <View style={styles.wrap}>
       <ShortcutRow
-        title="Finance"
-        items={FINANCE_SHORTCUTS}
+        title="Trading"
+        items={OPS_SHORTCUTS}
         styles={styles}
         colors={colors}
         router={router}
       />
       <ShortcutRow
-        title="Operations"
-        items={OPS_SHORTCUTS}
+        title="Books"
+        items={FINANCE_SHORTCUTS}
         styles={styles}
         colors={colors}
         router={router}
@@ -1158,42 +1481,48 @@ export function DashboardShortcuts() {
 
 function createShortcutStyles(colors: ThemeColors, isDark: boolean) {
   return StyleSheet.create({
+    wrap: {
+      marginTop: spacing.sm,
+      marginBottom: spacing.sm,
+      gap: spacing.md,
+    },
+    block: {
+      gap: spacing.sm,
+    },
     heading: {
       ...typography.section,
       color: colors.textSecondary,
       textTransform: 'uppercase',
-      marginTop: spacing.sm,
-      marginBottom: spacing.xs,
+      letterSpacing: 0.5,
     },
     row: {
       flexDirection: 'row',
-      flexWrap: 'wrap',
       gap: spacing.sm,
     },
     item: {
-      flexGrow: 1,
-      flexBasis: '47%',
-      flexDirection: 'row',
+      flex: 1,
+      minWidth: 0,
       alignItems: 'center',
+      justifyContent: 'center',
       paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.sm,
+      paddingHorizontal: spacing.xs,
       ...cardSurface(colors, isDark),
-      minHeight: 44,
-      gap: spacing.sm,
+      minHeight: 72,
+      gap: spacing.xs,
     },
     iconWrap: {
-      width: 32,
-      height: 32,
+      width: 36,
+      height: 36,
       borderRadius: radius.full,
       backgroundColor: colors.primaryContainer,
       alignItems: 'center',
       justifyContent: 'center',
     },
     itemLabel: {
-      fontSize: 13,
-      fontWeight: '500',
+      ...typography.micro,
+      fontWeight: '600',
       color: colors.text,
-      flex: 1,
+      textAlign: 'center',
     },
   });
 }

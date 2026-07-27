@@ -6,7 +6,6 @@ import { getPurchaseById, getPurchaseItems } from './purchases';
 import { getPartyById } from './parties';
 import { formatCurrency } from '../utils/format';
 import { formatDisplayDate } from '../utils/date';
-import { stateName } from './gst';
 import { roundMoney } from '../utils/money';
 import { deferDeleteCacheFile } from '../utils/tempShareFiles';
 import { savePdfToDevice } from '../utils/pdfExport';
@@ -69,47 +68,26 @@ export async function buildPurchaseInvoiceHtml(purchaseId: number): Promise<{
     purchase.party_id ? getPartyById(purchase.party_id) : Promise.resolve(null),
   ]);
 
-  const gstOn = profile.gst_enabled;
-  const taxTotal =
-    (purchase.cgst_amount ?? 0) + (purchase.sgst_amount ?? 0) + (purchase.igst_amount ?? 0);
-  const showTax = gstOn && taxTotal > 0.009;
-  const docLabel = !gstOn ? 'Purchase Bill' : showTax ? 'Tax Invoice (Purchase)' : 'Purchase Bill';
+  const docLabel = 'Purchase Bill';
   const businessName = profile.business_name || 'Hisab';
   const due = roundMoney(Math.max(0, purchase.total_amount - purchase.paid_amount));
-  const taxInclusive = gstOn && profile.tax_inclusive;
-  const partyStateLabel =
-    gstOn && party?.state
-      ? stateName(party.state) || party.state
-      : gstOn && purchase.place_of_supply
-        ? stateName(purchase.place_of_supply) || purchase.place_of_supply
-        : '';
-  const placeOfSupplyLabel = purchase.place_of_supply
-    ? `${stateName(purchase.place_of_supply) || purchase.place_of_supply} (${purchase.place_of_supply})`
-    : partyStateLabel || '—';
   const words = amountInWordsInr(purchase.total_amount);
-  const reverseChargeLabel = (purchase.is_reverse_charge ?? 0) ? 'Yes' : 'No';
 
   const statusLabel = due > 0.009 ? 'Balance due' : 'Paid in full';
   const statusTone = due > 0.009 ? 'due' : 'paid';
 
   const itemRows = items
     .map((item, index) => {
-      const tax =
-        (item.cgst_amount ?? 0) + (item.sgst_amount ?? 0) + (item.igst_amount ?? 0);
-      const lineAmount = showTax ? (item.taxable_amount ?? item.total) + tax : item.total;
       const zebra = index % 2 === 1 ? ' class="zebra"' : '';
       return `<tr${zebra}>
         <td class="c mono">${index + 1}</td>
         <td>
           <div class="item-name">${escapeHtml(item.product_name ?? String(item.product_id))}</div>
-          ${gstOn && item.hsn_sac ? `<div class="hsn">HSN/SAC ${escapeHtml(item.hsn_sac)}</div>` : ''}
         </td>
         <td class="num mono">${item.qty}</td>
         <td class="num mono">${money(item.unit_cost)}</td>
-        ${gstOn ? `<td class="num mono">${item.gst_rate ?? 0}%</td>` : ''}
         <td class="num mono">${money(item.taxable_amount ?? item.total)}</td>
-        ${showTax ? `<td class="num mono">${money(tax)}</td>` : ''}
-        <td class="num mono strong">${money(lineAmount)}</td>
+        <td class="num mono strong">${money(item.total)}</td>
       </tr>`;
     })
     .join('');
@@ -323,12 +301,6 @@ export async function buildPurchaseInvoiceHtml(purchaseId: number): Promise<{
     <div class="brand-block">
       <div class="brand-name">${escapeHtml(businessName)}</div>
       ${profile.business_address ? `<div class="brand-meta">${escapeHtml(profile.business_address)}</div>` : ''}
-      ${gstOn && profile.business_gstin ? `<div class="brand-meta"><strong>GSTIN</strong> ${escapeHtml(profile.business_gstin)}</div>` : ''}
-      ${
-        gstOn && profile.business_state
-          ? `<div class="brand-meta"><strong>State</strong> ${escapeHtml(stateName(profile.business_state) || profile.business_state)} (${escapeHtml(profile.business_state)})</div>`
-          : ''
-      }
     </div>
     <div class="doc-badge">
       <div class="doc-type">${escapeHtml(docLabel)}</div>
@@ -343,18 +315,11 @@ export async function buildPurchaseInvoiceHtml(purchaseId: number): Promise<{
       <div class="card-label">Vendor</div>
       <div class="party-name">${escapeHtml(purchase.supplier_name)}</div>
       ${party?.address ? `<div class="card-line">${escapeHtml(party.address)}</div>` : ''}
-      ${gstOn && party?.gstin ? `<div class="card-line"><strong>GSTIN</strong> ${escapeHtml(party.gstin)}</div>` : ''}
-      ${partyStateLabel ? `<div class="card-line"><strong>State</strong> ${escapeHtml(partyStateLabel)}</div>` : ''}
       ${party?.phone ? `<div class="card-line"><strong>Phone</strong> ${escapeHtml(party.phone)}</div>` : ''}
     </div>
     <div class="card">
       <div class="card-label">Bill details</div>
       ${purchase.vendor_invoice_no ? `<div class="meta-kv"><span class="k">Vendor invoice</span><span class="v mono">${escapeHtml(purchase.vendor_invoice_no)}</span></div>` : ''}
-      ${gstOn ? `<div class="meta-kv"><span class="k">Place of supply</span><span class="v">${escapeHtml(placeOfSupplyLabel)}</span></div>` : ''}
-      ${gstOn ? `<div class="meta-kv"><span class="k">Reverse charge</span><span class="v">${reverseChargeLabel}</span></div>` : ''}
-      ${taxInclusive && showTax ? `<div class="meta-kv"><span class="k">Pricing</span><span class="v">Tax-inclusive</span></div>` : ''}
-      ${gstOn ? `<div class="meta-kv"><span class="k">Taxable</span><span class="v mono">${money(purchase.taxable_amount ?? purchase.subtotal)}</span></div>` : ''}
-      ${showTax ? `<div class="meta-kv"><span class="k">Tax</span><span class="v mono">${money(taxTotal)}</span></div>` : ''}
       <div class="meta-kv"><span class="k">Grand total</span><span class="v mono">${money(purchase.total_amount)}</span></div>
     </div>
   </div>
@@ -365,11 +330,9 @@ export async function buildPurchaseInvoiceHtml(purchaseId: number): Promise<{
         <th class="c" style="width:28px">#</th>
         <th>Particulars</th>
         <th class="num" style="width:48px">Qty</th>
-        <th class="num" style="width:72px">${taxInclusive ? 'Rate (incl.)' : 'Rate'}</th>
-        ${gstOn ? '<th class="num" style="width:46px">GST%</th>' : ''}
-        <th class="num" style="width:74px">${gstOn ? 'Taxable' : 'Amount'}</th>
-        ${showTax ? '<th class="num" style="width:66px">Tax</th>' : ''}
-        <th class="num" style="width:80px">${gstOn ? 'Amount' : 'Total'}</th>
+        <th class="num" style="width:72px">Rate</th>
+        <th class="num" style="width:74px">Amount</th>
+        <th class="num" style="width:80px">Total</th>
       </tr>
     </thead>
     <tbody>${itemRows}</tbody>
@@ -379,10 +342,6 @@ export async function buildPurchaseInvoiceHtml(purchaseId: number): Promise<{
     <div class="totals">
       <div class="row"><span>Subtotal</span><span class="mono">${money(purchase.subtotal)}</span></div>
       ${purchase.discount_amount > 0 ? `<div class="row"><span>Discount</span><span class="mono">− ${money(purchase.discount_amount)}</span></div>` : ''}
-      ${gstOn ? `<div class="row"><span>Taxable value</span><span class="mono">${money(purchase.taxable_amount ?? purchase.subtotal)}</span></div>` : ''}
-      ${showTax && (purchase.cgst_amount ?? 0) > 0 ? `<div class="row"><span>CGST</span><span class="mono">${money(purchase.cgst_amount)}</span></div>` : ''}
-      ${showTax && (purchase.sgst_amount ?? 0) > 0 ? `<div class="row"><span>SGST</span><span class="mono">${money(purchase.sgst_amount)}</span></div>` : ''}
-      ${showTax && (purchase.igst_amount ?? 0) > 0 ? `<div class="row"><span>IGST</span><span class="mono">${money(purchase.igst_amount)}</span></div>` : ''}
       <div class="row grand"><span>Grand Total</span><span class="mono">${money(purchase.total_amount)}</span></div>
       ${due > 0.009 ? `<div class="row due-row"><span>Balance due</span><span class="mono">${money(due)}</span></div>` : ''}
     </div>
@@ -401,7 +360,7 @@ export async function buildPurchaseInvoiceHtml(purchaseId: number): Promise<{
 </div>
 </body></html>`;
 
-  const fileName = `${showTax ? 'Tax-Invoice-Purchase' : 'Purchase-Bill'}-${purchase.invoice_no.replace(/[^\w-]/g, '_')}.pdf`;
+  const fileName = `Purchase-Bill-${purchase.invoice_no.replace(/[^\w-]/g, '_')}.pdf`;
   return { html, fileName, docLabel, purchase };
 }
 

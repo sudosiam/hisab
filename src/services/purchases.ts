@@ -9,8 +9,10 @@ import {
 } from '../db/database';
 import { resolvePurchaseInvoiceNo, syncNextInvoiceSettingAfterUse } from './invoiceNumbers';
 import { upsertParty } from './parties';
-import { assertGstPlaceOfSupply, computeGstDocument } from './gst';
-import { getBusinessState, isGstEnabled, isTaxInclusivePricing } from './appSettings';
+import {
+  computeUntaxedDocument,
+  type DocumentTotalsResult,
+} from './documentTotals';
 import { formatCurrency } from '../utils/format';
 import { addMoney, roundMoney, subMoney } from '../utils/money';
 import { resolvePeriodRange } from '../utils/period';
@@ -61,82 +63,19 @@ async function assertActivePaymentAccount(
   }
 }
 
-async function resolveVendorState(
-  db: Awaited<ReturnType<typeof getDatabase>>,
-  supplierName: string,
-  partyId?: number | null
-): Promise<string | null> {
-  const { resolveStateFromPartyFields } = await import('./gst');
-  if (partyId) {
-    const row = await db.getFirstAsync<{ state: string | null; gstin: string | null }>(
-      'SELECT state, gstin FROM parties WHERE id = ?',
-      [partyId]
-    );
-    const resolved = resolveStateFromPartyFields(row?.state, row?.gstin);
-    if (resolved) return resolved;
-  }
-  const byName = await db.getFirstAsync<{ state: string | null; gstin: string | null }>(
-    `SELECT state, gstin FROM parties WHERE name = ? COLLATE NOCASE AND type = 'vendor' LIMIT 1`,
-    [supplierName.trim()]
-  );
-  return resolveStateFromPartyFields(byName?.state, byName?.gstin);
-}
-
-async function buildPurchaseGst(
-  db: Awaited<ReturnType<typeof getDatabase>>,
-  params: {
-    supplier_name: string;
-    party_id?: number | null;
-    items: PurchaseItemInput[];
-    discount_amount?: number;
-    /** When set, overrides Settings tax-inclusive flag (needed for stock-safe rebuilds). */
-    tax_inclusive?: boolean;
-  }
-) {
-  const gstEnabled = await isGstEnabled();
-  const businessState = await getBusinessState();
-  const taxInclusive =
-    params.tax_inclusive !== undefined
-      ? params.tax_inclusive
-      : await isTaxInclusivePricing();
-  const partyState = await resolveVendorState(db, params.supplier_name, params.party_id);
-  return computeGstDocument({
+function buildPurchaseTotals(params: {
+  items: PurchaseItemInput[];
+  discount_amount?: number;
+}): DocumentTotalsResult {
+  return computeUntaxedDocument({
     lines: params.items.map((item) => ({
       qty: item.qty,
       unit_price: item.unit_cost,
-      gst_rate: item.gst_rate,
       hsn_sac: item.hsn_sac,
     })),
     discount_amount: params.discount_amount,
     service_charges: 0,
-    business_state: businessState,
-    party_state: partyState,
-    gst_enabled: gstEnabled,
-    tax_inclusive: taxInclusive,
   });
-}
-
-async function buildPurchaseGstChecked(
-  db: Awaited<ReturnType<typeof getDatabase>>,
-  params: {
-    supplier_name: string;
-    party_id?: number | null;
-    items: PurchaseItemInput[];
-    discount_amount?: number;
-    tax_inclusive?: boolean;
-  }
-) {
-  const gst = await buildPurchaseGst(db, params);
-  const businessState = await getBusinessState();
-  const partyState = await resolveVendorState(db, params.supplier_name, params.party_id);
-  const gstEnabled = await isGstEnabled();
-  assertGstPlaceOfSupply({
-    gst_enabled: gstEnabled,
-    tax_amount: gst.tax_amount,
-    business_state: businessState,
-    party_state: partyState,
-  });
-  return gst;
 }
 
 export async function getPurchases(
@@ -210,10 +149,10 @@ export async function createPurchase(params: {
   validatePurchaseItems(params.items);
 
   const db = await getDatabase();
-  const gst = await buildPurchaseGstChecked(db, params);
-  const subtotal = gst.subtotal;
-  const discount = gst.discount_amount;
-  const totalAmount = gst.total_amount;
+  const totals = buildPurchaseTotals(params);
+  const subtotal = totals.subtotal;
+  const discount = totals.discount_amount;
+  const totalAmount = totals.total_amount;
 
   let paidAmount = 0;
   for (const payment of params.payments) {
@@ -225,7 +164,6 @@ export async function createPurchase(params: {
   }
 
   const status = getPaymentStatus(totalAmount, paidAmount);
-  const isReverseCharge = !!params.is_reverse_charge;
   let purchaseId = 0;
 
   await db.withTransactionAsync(async () => {
@@ -246,13 +184,13 @@ export async function createPurchase(params: {
         params.date,
         subtotal,
         discount,
-        gst.taxable_amount,
-        gst.cgst_amount,
-        gst.sgst_amount,
-        gst.igst_amount,
-        gst.is_inter_state ? 1 : 0,
-        gst.place_of_supply,
-        isReverseCharge ? 1 : 0,
+        totals.taxable_amount,
+        0,
+        0,
+        0,
+        0,
+        null,
+        0,
         totalAmount,
         paidAmount,
         status,
@@ -263,8 +201,7 @@ export async function createPurchase(params: {
 
     for (let i = 0; i < params.items.length; i++) {
       const item = params.items[i];
-      const line = gst.lines[i];
-      // Inventory valued at taxable (ex-GST) amount after discount.
+      const line = totals.lines[i];
       const invTotal = line.taxable_amount;
       const invUnitCost = roundUnitCost(invTotal / item.qty);
       await db.runAsync(
@@ -279,11 +216,11 @@ export async function createPurchase(params: {
           invUnitCost,
           invTotal,
           line.hsn_sac,
-          line.gst_rate,
+          0,
           line.taxable_amount,
-          line.cgst_amount,
-          line.sgst_amount,
-          line.igst_amount,
+          0,
+          0,
+          0,
         ]
       );
       await updateWeightedAvgCost(db, item.product_id, item.qty, invUnitCost);
@@ -357,9 +294,11 @@ async function replacePurchaseItems(
 ): Promise<{
   subtotal: number;
   totalAmount: number;
-  gst: ReturnType<typeof computeGstDocument>;
+  totals: DocumentTotalsResult;
 }> {
   validatePurchaseItems(items);
+  void supplierName;
+  void partyId;
 
   const oldItems = await db.getAllAsync<{ product_id: number }>(
     'SELECT product_id FROM purchase_items WHERE purchase_id = ?',
@@ -389,16 +328,11 @@ async function replacePurchaseItems(
     }
   }
 
-  const gst = await buildPurchaseGstChecked(db, {
-    supplier_name: supplierName,
-    party_id: partyId,
-    items,
-    discount_amount: discount,
-  });
+  const totals = buildPurchaseTotals({ items, discount_amount: discount });
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    const line = gst.lines[i];
+    const line = totals.lines[i];
     const invTotal = line.taxable_amount;
     const invUnitCost = roundUnitCost(invTotal / item.qty);
     await db.runAsync(
@@ -413,11 +347,11 @@ async function replacePurchaseItems(
         invUnitCost,
         invTotal,
         line.hsn_sac,
-        line.gst_rate,
+        0,
         line.taxable_amount,
-        line.cgst_amount,
-        line.sgst_amount,
-        line.igst_amount,
+        0,
+        0,
+        0,
       ]
     );
     await updateWeightedAvgCost(db, item.product_id, item.qty, invUnitCost);
@@ -428,7 +362,7 @@ async function replacePurchaseItems(
     );
   }
 
-  return { subtotal: gst.subtotal, totalAmount: gst.total_amount, gst };
+  return { subtotal: totals.subtotal, totalAmount: totals.total_amount, totals };
 }
 
 export async function updatePurchase(
@@ -461,22 +395,11 @@ export async function updatePurchase(
   const supplierName = params.supplier_name.trim();
   const vendorInvoiceNo = params.vendor_invoice_no?.trim() || null;
   const invoiceChanged = invoiceNo !== purchase.invoice_no;
-  const isReverseCharge =
-    params.is_reverse_charge !== undefined
-      ? !!params.is_reverse_charge
-      : !!(purchase.is_reverse_charge ?? 0);
 
   await db.withTransactionAsync(async () => {
     let subtotal = purchase.subtotal;
     let totalAmount = purchase.total_amount;
-    let gstFields = {
-      taxable_amount: purchase.taxable_amount ?? purchase.subtotal,
-      cgst_amount: purchase.cgst_amount ?? 0,
-      sgst_amount: purchase.sgst_amount ?? 0,
-      igst_amount: purchase.igst_amount ?? 0,
-      is_inter_state: purchase.is_inter_state ?? 0,
-      place_of_supply: purchase.place_of_supply ?? null,
-    };
+    let taxableAmount = purchase.taxable_amount ?? purchase.subtotal;
 
     if (params.items !== undefined) {
       const replaced = await replacePurchaseItems(
@@ -490,50 +413,7 @@ export async function updatePurchase(
       );
       subtotal = replaced.subtotal;
       totalAmount = replaced.totalAmount;
-      gstFields = {
-        taxable_amount: replaced.gst.taxable_amount,
-        cgst_amount: replaced.gst.cgst_amount,
-        sgst_amount: replaced.gst.sgst_amount,
-        igst_amount: replaced.gst.igst_amount,
-        is_inter_state: replaced.gst.is_inter_state ? 1 : 0,
-        place_of_supply: replaced.gst.place_of_supply,
-      };
-    } else {
-      // Header-only edit: refresh CGST/SGST vs IGST from current vendor state without touching stock.
-      const existingItems = await getPurchaseItems(purchaseId);
-      const taxableBase = Math.max(0, subMoney(purchase.subtotal, discount));
-      const grossFactor = taxableBase > 0.009 ? purchase.subtotal / taxableBase : 1;
-      const rebuilt = await buildPurchaseGstChecked(db, {
-        supplier_name: supplierName,
-        party_id: purchase.party_id,
-        items: existingItems.map((item) => {
-          const taxable = item.taxable_amount ?? item.total;
-          const preDiscountEx = taxable * grossFactor;
-          return {
-            product_id: item.product_id,
-            qty: item.qty,
-            unit_cost: item.qty > 0 ? preDiscountEx / item.qty : item.unit_cost,
-            hsn_sac: item.hsn_sac,
-            gst_rate: item.gst_rate,
-          };
-        }),
-        discount_amount: discount,
-        // Stored line costs are always exclusive taxable amounts.
-        tax_inclusive: false,
-      });
-      if (Math.abs(rebuilt.total_amount - purchase.total_amount) > 0.05) {
-        throw new Error(
-          'Vendor/state change would alter the bill total. Edit line items and save to apply GST changes.'
-        );
-      }
-      gstFields = {
-        taxable_amount: rebuilt.taxable_amount,
-        cgst_amount: rebuilt.cgst_amount,
-        sgst_amount: rebuilt.sgst_amount,
-        igst_amount: rebuilt.igst_amount,
-        is_inter_state: rebuilt.is_inter_state ? 1 : 0,
-        place_of_supply: rebuilt.place_of_supply,
-      };
+      taxableAmount = replaced.totals.taxable_amount;
     }
 
     if (totalAmount + 0.01 < purchase.paid_amount) {
@@ -558,13 +438,13 @@ export async function updatePurchase(
         params.date,
         subtotal,
         discount,
-        gstFields.taxable_amount,
-        gstFields.cgst_amount,
-        gstFields.sgst_amount,
-        gstFields.igst_amount,
-        gstFields.is_inter_state,
-        gstFields.place_of_supply,
-        isReverseCharge ? 1 : 0,
+        taxableAmount,
+        0,
+        0,
+        0,
+        0,
+        null,
+        0,
         totalAmount,
         status,
         params.notes ?? null,

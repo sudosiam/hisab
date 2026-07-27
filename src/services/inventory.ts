@@ -301,12 +301,17 @@ export async function deleteProduct(id: number): Promise<void> {
   await db.withTransactionAsync(async () => {
     await hardDeleteProduct(db, id);
   });
+  // Opening/adjustment journals for this product need a full rebuild.
+  await syncGeneralLedgerAfterWrite();
 }
 
 export async function getInventoryValue(): Promise<number> {
   const db = await getDatabase();
+  // Match balance-sheet inventory: only positive on-hand counts as an asset.
+  // Negative stock (oversold) must not pull dashboard / net-worth components below zero.
   const row = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(current_qty * avg_cost), 0) as total FROM products WHERE ${ACTIVE_PRODUCT_SQL}`
+    `SELECT COALESCE(SUM(CASE WHEN current_qty > 0 THEN current_qty * avg_cost ELSE 0 END), 0) as total
+     FROM products WHERE ${ACTIVE_PRODUCT_SQL}`
   );
   return roundMoney(row?.total ?? 0);
 }

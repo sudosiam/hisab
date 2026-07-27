@@ -6,15 +6,19 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  Switch,
-} from 'react-native';
+  } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import {
+  EmptyState,
+  ErrorState,
   FormInput,
   FormScreen,
+  ICON,
   PrimaryButton,
   DatePickerField,
   SectionHeader,
+  SegmentedControl,
   useScreenStyles,
 } from '../../../src/components/ui';
 import { CustomerAutocomplete } from '../../../src/components/CustomerAutocomplete';
@@ -23,14 +27,12 @@ import { getProducts, getProductSellPrice } from '../../../src/services/inventor
 import { getSaleById, getSaleItems, updateSale } from '../../../src/services/sales';
 import { getPartyByName } from '../../../src/services/parties';
 import { getNextSaleDocumentNo } from '../../../src/services/invoiceNumbers';
-import { getBusinessState, getServiceChargeGstRate, isTaxInclusivePricing } from '../../../src/services/appSettings';
-import { computeGstDocument, isPlausibleHsnSac, resolveStateFromPartyFields } from '../../../src/services/gst';
-import { GstRateChips } from '../../../src/components/GstRateChips';
-import { useDatabase } from '../../../src/context/DatabaseContext';
-import { useGstEnabled } from '../../../src/context/GstContext';
+import { computeUntaxedDocument } from '../../../src/services/documentTotals';
+import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
 import { formatAmountInput, formatCurrency, formatQtyInput, parseAmountInput } from '../../../src/utils/format';
+import { MoneyText } from '../../../src/components/MoneyText';
 import { isValidISODate } from '../../../src/utils/date';
 import { roundMoney } from '../../../src/utils/money';
 import { saveWithDuplicateInvoiceWarning } from '../../../src/utils/duplicateInvoice';
@@ -44,7 +46,6 @@ interface LineItem {
   product_id: number;
   qty: string;
   unit_price: string;
-  gst_rate: string;
   hsn_sac: string;
 }
 
@@ -56,7 +57,6 @@ function createEmptyLineItem(): LineItem {
     product_id: 0,
     qty: '1',
     unit_price: '',
-    gst_rate: '',
     hsn_sac: '',
   };
 }
@@ -64,32 +64,13 @@ function createEmptyLineItem(): LineItem {
 export default function EditSaleScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { refresh } = useDatabase();
+  const { refresh } = useDatabaseActions();
   const styles = useScreenStyles();
+
   const { colors, isDark } = useTheme();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        typeRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
-        typeChip: {
-          flex: 1,
-          paddingVertical: 10,
-          borderRadius: radius.md,
-          borderWidth: 1,
-          borderColor: colors.border,
-          alignItems: 'center',
-          backgroundColor: colors.surface,
-        },
-        typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-        typeChipText: { fontWeight: '600', color: colors.text },
-        typeChipTextActive: { color: colors.onPrimary },
-        rcmRow: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: spacing.sm,
-        },
-        rcmLabel: { fontSize: 13, fontWeight: '600', color: colors.text, flex: 1 },
         itemCard: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.sm + 2,
@@ -99,15 +80,9 @@ export default function EditSaleScreen() {
         itemRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs },
         qtyField: { flex: 0.85 },
         priceField: { flex: 1.1 },
-        gstField: { flex: 0.75 },
-        removeBtn: { padding: spacing.sm, marginBottom: spacing.md },
-        removeText: { color: colors.danger, fontSize: 16 },
-        hsnToggle: { marginTop: 2, marginBottom: spacing.xs },
-        hsnToggleText: { fontSize: 12, color: colors.primary, fontWeight: '600' },
-        hsnWarning: { fontSize: 12, color: colors.textMuted, marginTop: -4, marginBottom: spacing.xs },
+        removeBtn: { padding: spacing.sm, marginBottom: spacing.md, alignItems: 'center', justifyContent: 'center' },
         discountRow: { flexDirection: 'row', gap: spacing.sm },
         discountField: { flex: 1 },
-        svcGstField: { flex: 0.75 },
         totals: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
@@ -129,7 +104,6 @@ export default function EditSaleScreen() {
           color: colors.primary,
           fontVariant: ['tabular-nums'],
         },
-        hint: { color: colors.warning },
         paidHint: { fontSize: 12, color: colors.textSecondary, marginBottom: spacing.sm },
         addItemBtn: {
           marginTop: spacing.xs,
@@ -161,9 +135,6 @@ export default function EditSaleScreen() {
   const [date, setDate] = useState('');
   const [discount, setDiscount] = useState('0');
   const [serviceCharges, setServiceCharges] = useState('');
-  const [serviceChargeGstRate, setServiceChargeGstRate] = useState('');
-  const legacyUntaxedServiceChargesRef = useRef(false);
-  const initialServiceChargesRef = useRef(0);
   const [notes, setNotes] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [items, setItems] = useState<LineItem[]>([]);
@@ -173,12 +144,6 @@ export default function EditSaleScreen() {
   const savedSnapshotRef = useRef<string | null>(null);
   const productsRef = useRef<Product[]>([]);
   productsRef.current = products;
-  const [businessState, setBusinessState] = useState('');
-  const gstEnabled = useGstEnabled();
-  const [taxInclusive, setTaxInclusive] = useState(false);
-  const [partyState, setPartyState] = useState<string | null>(null);
-  const [isReverseCharge, setIsReverseCharge] = useState(false);
-  const [showHsnByLine, setShowHsnByLine] = useState<Record<string, boolean>>({});
 
   const saleId = React.useMemo(() => {
     const raw = Array.isArray(id) ? id[0] : id;
@@ -207,16 +172,7 @@ export default function EditSaleScreen() {
         setDate(s.date);
         setDiscount(formatAmountInput(s.discount_amount ?? 0));
         setServiceCharges(s.service_charges > 0 ? formatAmountInput(s.service_charges) : '');
-        initialServiceChargesRef.current = s.service_charges;
-        legacyUntaxedServiceChargesRef.current =
-          s.service_charges > 0 && s.service_charges_gst_rate == null;
-        if (s.service_charges_gst_rate != null) {
-          setServiceChargeGstRate(formatAmountInput(s.service_charges_gst_rate));
-        } else {
-          setServiceChargeGstRate('');
-        }
         setNotes(s.notes ?? '');
-        setIsReverseCharge(!!(s.is_reverse_charge ?? 0));
         setProducts(productList);
         productsRef.current = productList;
         setItems(
@@ -226,8 +182,6 @@ export default function EditSaleScreen() {
                 product_id: item.product_id,
                 qty: formatQtyInput(item.qty),
                 unit_price: formatAmountInput(item.unit_price),
-                gst_rate:
-                  (item.gst_rate ?? 0) > 0 ? formatAmountInput(item.gst_rate ?? 0) : '',
                 hsn_sac: item.hsn_sac ?? '',
               }))
             : productList.length > 0
@@ -242,18 +196,13 @@ export default function EditSaleScreen() {
           date: s.date,
           discount: formatAmountInput(s.discount_amount ?? 0),
           serviceCharges: s.service_charges > 0 ? formatAmountInput(s.service_charges) : '',
-          serviceChargeGstRate:
-            s.service_charges_gst_rate != null ? formatAmountInput(s.service_charges_gst_rate) : '',
           notes: s.notes ?? '',
-          isReverseCharge: !!(s.is_reverse_charge ?? 0),
           items:
             saleItems.length > 0
               ? saleItems.map((item) => ({
                   product_id: item.product_id,
                   qty: formatQtyInput(item.qty),
                   unit_price: formatAmountInput(item.unit_price),
-                  gst_rate:
-                    (item.gst_rate ?? 0) > 0 ? formatAmountInput(item.gst_rate ?? 0) : '',
                   hsn_sac: item.hsn_sac ?? '',
                 }))
               : [],
@@ -262,7 +211,6 @@ export default function EditSaleScreen() {
           .then((party) => {
             const phone = party?.phone ?? '';
             if (phone) setPartyPhone(phone);
-            setPartyState(resolveStateFromPartyFields(party?.state, party?.gstin));
             // Align dirty-check baseline with async-loaded phone so load isn't marked dirty.
             if (savedSnapshotRef.current) {
               try {
@@ -310,99 +258,27 @@ export default function EditSaleScreen() {
     }, [load, saleId, reloadProducts])
   );
 
-  React.useEffect(() => {
-    let cancelled = false;
-    Promise.all([getBusinessState(), isTaxInclusivePricing()])
-      .then(([state, inclusive]) => {
-        if (!cancelled) {
-          setBusinessState(state);
-          setTaxInclusive(inclusive);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  React.useEffect(() => {
-    if (!gstEnabled) {
-      setIsReverseCharge(false);
-      if (invoiceType === 'bos') setInvoiceType('invoice');
-    }
-  }, [gstEnabled, invoiceType]);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    const name = partyName.trim();
-    if (!name) {
-      setPartyState(null);
-      return;
-    }
-    getPartyByName(name, 'customer')
-      .then((party) => {
-        if (!cancelled) setPartyState(resolveStateFromPartyFields(party?.state, party?.gstin));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [partyName]);
-
   const discountAmount = roundMoney(Math.max(0, parseAmountInput(discount) || 0));
   const serviceChargesAmount = roundMoney(Math.max(0, parseAmountInput(serviceCharges) || 0));
 
-  React.useEffect(() => {
-    if (serviceChargesAmount <= 0) return;
-    if (legacyUntaxedServiceChargesRef.current) return;
-    if (initialServiceChargesRef.current === 0 && !serviceChargeGstRate.trim()) {
-      getServiceChargeGstRate()
-        .then((r) => setServiceChargeGstRate(String(r)))
-        .catch(() => {});
-    }
-  }, [serviceChargesAmount, serviceChargeGstRate]);
-
-  const parsedServiceChargeGstRate = useMemo(() => {
-    if (serviceChargesAmount <= 0) return null;
-    const trimmed = serviceChargeGstRate.trim();
-    if (!trimmed) return null;
-    const n = parseAmountInput(trimmed);
-    return Number.isFinite(n) ? n : null;
-  }, [serviceChargesAmount, serviceChargeGstRate]);
-
-  const gstDoc = useMemo(() => {
+  const docTotals = useMemo(() => {
     try {
-      return computeGstDocument({
+      return computeUntaxedDocument({
         lines: items.map((item) => ({
           qty: parseAmountInput(item.qty) || 0,
           unit_price: parseAmountInput(item.unit_price) || 0,
-          gst_rate: parseAmountInput(item.gst_rate) || 0,
           hsn_sac: item.hsn_sac.trim() || null,
         })),
         discount_amount: discountAmount,
         service_charges: serviceChargesAmount,
-        service_charges_gst_rate: parsedServiceChargeGstRate,
-        business_state: businessState || null,
-        party_state: partyState,
-        gst_enabled: gstEnabled,
-        tax_inclusive: taxInclusive,
       });
     } catch {
       return null;
     }
-  }, [
-    items,
-    discountAmount,
-    serviceChargesAmount,
-    parsedServiceChargeGstRate,
-    businessState,
-    partyState,
-    gstEnabled,
-    taxInclusive,
-  ]);
+  }, [items, discountAmount, serviceChargesAmount]);
 
-  const subtotal = gstDoc?.subtotal ?? 0;
-  const total = gstDoc?.total_amount ?? 0;
+  const subtotal = docTotals?.subtotal ?? 0;
+  const total = docTotals?.total_amount ?? 0;
 
   const formSnapshot = useMemo(
     () =>
@@ -414,30 +290,15 @@ export default function EditSaleScreen() {
         date,
         discount,
         serviceCharges,
-        serviceChargeGstRate,
         notes,
-        isReverseCharge,
         items: items.map((item) => ({
           product_id: item.product_id,
           qty: item.qty,
           unit_price: item.unit_price,
-          gst_rate: item.gst_rate,
           hsn_sac: item.hsn_sac,
         })),
       }),
-    [
-      partyName,
-      partyPhone,
-      invoiceNo,
-      invoiceType,
-      date,
-      discount,
-      serviceCharges,
-      serviceChargeGstRate,
-      notes,
-      isReverseCharge,
-      items,
-    ]
+    [partyName, partyPhone, invoiceNo, invoiceType, date, discount, serviceCharges, notes, items]
   );
   const isDirty =
     savedSnapshotRef.current !== null && formSnapshot !== savedSnapshotRef.current;
@@ -449,7 +310,7 @@ export default function EditSaleScreen() {
 
   const updateItem = (
     index: number,
-    field: 'product_id' | 'qty' | 'unit_price' | 'gst_rate' | 'hsn_sac',
+    field: 'product_id' | 'qty' | 'unit_price' | 'hsn_sac',
     value: string | number
   ) => {
     const updated = [...items];
@@ -458,8 +319,6 @@ export default function EditSaleScreen() {
       const product = productsRef.current.find((p) => p.id === value);
       if (product) {
         updated[index].unit_price = formatAmountInput(getProductSellPrice(product));
-        updated[index].gst_rate =
-          (product.gst_rate ?? 0) > 0 ? formatAmountInput(product.gst_rate ?? 0) : '';
         updated[index].hsn_sac = product.hsn_sac ?? '';
       }
     }
@@ -538,16 +397,11 @@ export default function EditSaleScreen() {
             invoice_type: invoiceType,
             date,
             discount_amount: discountAmount,
-            service_charges: serviceChargesAmount,
-            service_charges_gst_rate: parsedServiceChargeGstRate,
-            is_reverse_charge: isReverseCharge,
-            notes: notes.trim() || undefined,
+            service_charges: serviceChargesAmount,notes: notes.trim() || undefined,
             items: items.map((item) => ({
               product_id: item.product_id,
               qty: parseAmountInput(item.qty) || 0,
-              unit_price: parseAmountInput(item.unit_price) || 0,
-              gst_rate: parseAmountInput(item.gst_rate) || 0,
-              hsn_sac: item.hsn_sac.trim() || null,
+              unit_price: parseAmountInput(item.unit_price) || 0,hsn_sac: item.hsn_sac.trim() || null,
             })),
           });
           refresh();
@@ -571,14 +425,18 @@ export default function EditSaleScreen() {
     );
   }
 
-  if (error || !sale) {
+  if (error) {
+    return <ErrorState message={error} onRetry={() => { void load(); }} />;
+  }
+
+  if (!sale) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.cardTitle}>{error ?? 'Sale not found'}</Text>
-        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.back()}>
-          <Text style={styles.link}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
+      <EmptyState
+        title="Not found"
+        message="This record is missing or was deleted."
+        actionLabel="Go Back"
+        onAction={() => router.back()}
+      />
     );
   }
 
@@ -596,54 +454,21 @@ export default function EditSaleScreen() {
         onChangeText={setPartyPhone}
         keyboardType="phone-pad"
       />
-      {gstEnabled ? (
-        <View style={localStyles.typeRow}>
-          {([
-            { value: 'invoice', label: 'Tax Invoice' },
-            { value: 'bos', label: 'Bill of Supply' },
-          ] as { value: SaleInvoiceType; label: string }[]).map((option) => (
-            <TouchableOpacity
-              key={option.value}
-              style={[
-                localStyles.typeChip,
-                invoiceType === option.value && localStyles.typeChipActive,
-              ]}
-              onPress={() => {
-                if (option.value === invoiceType) return;
-                setInvoiceType(option.value);
-                getNextSaleDocumentNo(option.value)
-                  .then(setInvoiceNo)
-                  .catch(() => {});
-              }}
-            >
-              <Text
-                style={[
-                  localStyles.typeChipText,
-                  invoiceType === option.value && localStyles.typeChipTextActive,
-                ]}
-              >
-                {option.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      ) : null}
-      {gstEnabled ? (
-        <View style={localStyles.rcmRow}>
-          <Text style={localStyles.rcmLabel}>Reverse charge (RCM)</Text>
-          <Switch
-            value={isReverseCharge}
-            onValueChange={setIsReverseCharge}
-            trackColor={{ false: colors.border, true: colors.primary }}
-            thumbColor={colors.surface}
-            accessibilityLabel="Reverse charge"
-          />
-        </View>
-      ) : null}
+      <SegmentedControl
+        options={[
+          { value: 'invoice', label: 'Invoice' },
+          { value: 'bos', label: 'Bill of Supply' },
+        ]}
+        value={invoiceType}
+        onChange={(next) => {
+          setInvoiceType(next);
+          getNextSaleDocumentNo(next)
+            .then(setInvoiceNo)
+            .catch(() => {});
+        }}
+      />
       <FormInput
-        label={
-          !gstEnabled ? 'Invoice Number' : invoiceType === 'bos' ? 'BOS Number' : 'Invoice Number'
-        }
+        label={invoiceType === 'bos' ? 'BOS Number' : 'Invoice Number'}
         value={invoiceNo}
         onChangeText={setInvoiceNo}
         autoCapitalize="characters"
@@ -654,89 +479,46 @@ export default function EditSaleScreen() {
       <View style={styles.section}>
         <SectionHeader title="Line Items" />
 
-        {items.map((item, index) => {
-          const showHsn = showHsnByLine[item.key] || !!item.hsn_sac.trim();
-          return (
-            <View key={item.key} style={localStyles.itemCard}>
-              <ProductPicker
-                products={products}
-                value={item.product_id}
-                onChange={(productId) => updateItem(index, 'product_id', productId)}
-                onCategoryDeleted={reloadProducts}
-                onProductCreated={async () => {
-                  await reloadProducts();
-                }}
-              />
-              <View style={localStyles.itemRow}>
-                <View style={localStyles.qtyField}>
-                  <FormInput
-                    label="Qty"
-                    value={item.qty}
-                    onChangeText={(v) => updateItem(index, 'qty', v)}
-                    qty
-                  />
-                </View>
-                <View style={localStyles.priceField}>
-                  <FormInput
-                    label="Rate"
-                    value={item.unit_price}
-                    onChangeText={(v) => updateItem(index, 'unit_price', v)}
-                    money
-                  />
-                </View>
-                {gstEnabled ? (
-                  <View style={localStyles.gstField}>
-                    <FormInput
-                      label="GST%"
-                      value={item.gst_rate}
-                      onChangeText={(v) => updateItem(index, 'gst_rate', v)}
-                      money
-                      placeholder="0"
-                    />
-                    <GstRateChips
-                      value={item.gst_rate}
-                      onChange={(v) => updateItem(index, 'gst_rate', v)}
-                    />
-                  </View>
-                ) : null}
-                <TouchableOpacity
-                  onPress={() => removeItem(index)}
-                  style={localStyles.removeBtn}
-                  hitSlop={10}
-                  accessibilityRole="button"
-                  accessibilityLabel="Remove line item"
-                >
-                  <Text style={localStyles.removeText}>✕</Text>
-                </TouchableOpacity>
+        {items.map((item, index) => (
+          <View key={item.key} style={localStyles.itemCard}>
+            <ProductPicker
+              products={products}
+              value={item.product_id}
+              onChange={(productId) => updateItem(index, 'product_id', productId)}
+              onCategoryDeleted={reloadProducts}
+              onProductCreated={async () => {
+                await reloadProducts();
+              }}
+            />
+            <View style={localStyles.itemRow}>
+              <View style={localStyles.qtyField}>
+                <FormInput
+                  label="Qty"
+                  value={item.qty}
+                  onChangeText={(v) => updateItem(index, 'qty', v)}
+                  qty
+                />
               </View>
-              {gstEnabled ? (
-                !showHsn ? (
-                  <TouchableOpacity
-                    style={localStyles.hsnToggle}
-                    onPress={() => setShowHsnByLine((prev) => ({ ...prev, [item.key]: true }))}
-                  >
-                    <Text style={localStyles.hsnToggleText}>+ HSN/SAC</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <>
-                    <FormInput
-                      label="HSN/SAC"
-                      value={item.hsn_sac}
-                      onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
-                      placeholder="Optional"
-                      keyboardType="number-pad"
-                    />
-                    {item.hsn_sac.trim() && !isPlausibleHsnSac(item.hsn_sac) ? (
-                      <Text style={localStyles.hsnWarning}>
-                        Usual HSN is 4, 6, or 8 digits
-                      </Text>
-                    ) : null}
-                  </>
-                )
-              ) : null}
+              <View style={localStyles.priceField}>
+                <FormInput
+                  label="Rate"
+                  value={item.unit_price}
+                  onChangeText={(v) => updateItem(index, 'unit_price', v)}
+                  money
+                />
+              </View>
+              <TouchableOpacity
+                onPress={() => removeItem(index)}
+                style={localStyles.removeBtn}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Remove line item"
+              >
+                <Ionicons name="close" size={ICON.inline} color={colors.danger} />
+              </TouchableOpacity>
             </View>
-          );
-        })}
+          </View>
+        ))}
 
         <TouchableOpacity
           style={localStyles.addItemBtn}
@@ -749,14 +531,9 @@ export default function EditSaleScreen() {
         </TouchableOpacity>
 
         <View style={localStyles.totals}>
-          {gstEnabled ? (
-            <Text style={[localStyles.totalLabel, localStyles.hint, { marginBottom: spacing.xs }]}>
-              {taxInclusive ? 'Prices are tax-inclusive' : 'Prices are tax-exclusive'}
-            </Text>
-          ) : null}
           <View style={localStyles.totalRow}>
             <Text style={localStyles.totalLabel}>Subtotal</Text>
-            <Text style={localStyles.totalValue}>{formatCurrency(subtotal)}</Text>
+            <MoneyText amount={subtotal} size="md" />
           </View>
           <FormInput
             label="Total Discount (₹)"
@@ -773,73 +550,10 @@ export default function EditSaleScreen() {
                 money
               />
             </View>
-            {gstEnabled && serviceChargesAmount > 0 ? (
-              <View style={localStyles.svcGstField}>
-                <FormInput
-                  label="Svc GST%"
-                  value={serviceChargeGstRate}
-                  onChangeText={setServiceChargeGstRate}
-                  money
-                  placeholder="0"
-                />
-              </View>
-            ) : null}
           </View>
-          {gstEnabled && gstDoc && gstDoc.tax_amount > 0.009 ? (
-            <>
-              <View style={localStyles.totalRow}>
-                <Text style={localStyles.totalLabel}>Taxable</Text>
-                <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.taxable_amount)}</Text>
-              </View>
-              {gstDoc.is_inter_state ? (
-                <View style={localStyles.totalRow}>
-                  <Text style={localStyles.totalLabel}>IGST</Text>
-                  <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.igst_amount)}</Text>
-                </View>
-              ) : (
-                <>
-                  <View style={localStyles.totalRow}>
-                    <Text style={localStyles.totalLabel}>CGST</Text>
-                    <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.cgst_amount)}</Text>
-                  </View>
-                  <View style={localStyles.totalRow}>
-                    <Text style={localStyles.totalLabel}>SGST</Text>
-                    <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.sgst_amount)}</Text>
-                  </View>
-                </>
-              )}
-              {gstDoc.service_charges_cgst > 0.009 ||
-              gstDoc.service_charges_sgst > 0.009 ||
-              gstDoc.service_charges_igst > 0.009 ? (
-                gstDoc.is_inter_state ? (
-                  <View style={localStyles.totalRow}>
-                    <Text style={localStyles.totalLabel}>Service IGST</Text>
-                    <Text style={localStyles.totalValue}>
-                      {formatCurrency(gstDoc.service_charges_igst)}
-                    </Text>
-                  </View>
-                ) : (
-                  <>
-                    <View style={localStyles.totalRow}>
-                      <Text style={localStyles.totalLabel}>Service CGST</Text>
-                      <Text style={localStyles.totalValue}>
-                        {formatCurrency(gstDoc.service_charges_cgst)}
-                      </Text>
-                    </View>
-                    <View style={localStyles.totalRow}>
-                      <Text style={localStyles.totalLabel}>Service SGST</Text>
-                      <Text style={localStyles.totalValue}>
-                        {formatCurrency(gstDoc.service_charges_sgst)}
-                      </Text>
-                    </View>
-                  </>
-                )
-              ) : null}
-            </>
-          ) : null}
           <View style={[localStyles.totalRow, { marginTop: spacing.sm }]}>
             <Text style={localStyles.totalLabel}>Grand Total</Text>
-            <Text style={localStyles.grandTotal}>{formatCurrency(total)}</Text>
+            <MoneyText amount={total} size="lg" color={colors.primary} />
           </View>
         </View>
       </View>

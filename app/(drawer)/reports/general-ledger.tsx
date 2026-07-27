@@ -1,14 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  RefreshControl,
-  ActivityIndicator,
-} from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { View, Text, StyleSheet, RefreshControl } from 'react-native';
 import { DatePickerField, ErrorState, useScreenStyles } from '../../../src/components/ui';
+import { ListSkeleton } from '../../../src/components/Skeleton';
 import { LedgerTable } from '../../../src/components/LedgerTable';
 import { getGeneralLedgerReport } from '../../../src/services/ledger';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -16,8 +9,9 @@ import { useTheme } from '../../../src/context/ThemeContext';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { shareGeneralLedgerPdf } from '../../../src/services/reportPdf';
 import { spacing } from '../../../src/constants/theme';
-import { formatSqliteError } from '../../../src/db/database';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { getCurrentMonthKey, getMonthRange, isValidISODate, todayISO } from '../../../src/utils/date';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 
 export default function GeneralLedgerReportScreen() {
   const styles = useScreenStyles();
@@ -28,10 +22,8 @@ export default function GeneralLedgerReportScreen() {
   const [fromDate, setFromDate] = useState(monthRange.start);
   const [toDate, setToDate] = useState(todayISO());
   const [rows, setRows] = useState<Awaited<ReturnType<typeof getGeneralLedgerReport>>>([]);
-  const [error, setError] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [booting, setBooting] = useState(true);
 
   const localStyles = useMemo(
     () =>
@@ -49,29 +41,18 @@ export default function GeneralLedgerReportScreen() {
     if (!isValidISODate(fromDate) || !isValidISODate(toDate)) {
       setRows([]);
       setHint('Choose valid from and to dates.');
-      setError(null);
-      setBooting(false);
       return;
     }
     if (fromDate > toDate) {
       setRows([]);
       setHint('From date must be on or before the to date.');
-      setError(null);
-      setBooting(false);
       return;
     }
     setHint(null);
-    try {
-      setRows(await getGeneralLedgerReport(fromDate, toDate));
-      setError(null);
-    } catch (e) {
-      setError(formatSqliteError(e));
-    } finally {
-      setBooting(false);
-    }
+    setRows(await getGeneralLedgerReport(fromDate, toDate));
   }, [fromDate, toDate, refreshKey]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const { booting, error, retry } = useFocusRefresh(load, [fromDate, toDate, refreshKey]);
 
   const ledgerRows = useMemo(
     () =>
@@ -102,56 +83,56 @@ export default function GeneralLedgerReportScreen() {
     onExport: exportPdf,
   });
 
-  if (error) {
-    return <ErrorState message={error} onRetry={load} />;
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } catch (e) {
+      alertRefreshFailed(e);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
+
+  if (error && rows.length === 0) {
+    return <ErrorState message={error} onRetry={retry} />;
   }
 
-  if (booting) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+  if (booting && rows.length === 0) {
+    return <ListSkeleton />;
   }
 
   return (
-    <ScrollView
+    <LedgerTable
       style={styles.container}
       contentContainerStyle={styles.content}
+      rows={hint ? [] : ledgerRows}
+      showBalance
+      emptyText={hint ?? 'No general ledger entries in this date range.'}
       refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => {
-            setRefreshing(true);
-            load().finally(() => setRefreshing(false));
-          }}
-          tintColor={colors.primary}
-        />
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
       }
-    >
-      <View style={localStyles.header}>
-        <View style={localStyles.dateRow}>
-          <View style={localStyles.dateField}>
-            <DatePickerField label="From" value={fromDate} onChange={setFromDate} />
+      ListHeaderComponent={
+        <>
+          <View style={localStyles.header}>
+            <View style={localStyles.dateRow}>
+              <View style={localStyles.dateField}>
+                <DatePickerField label="From" value={fromDate} onChange={setFromDate} />
+              </View>
+              <View style={localStyles.dateField}>
+                <DatePickerField label="To" value={toDate} onChange={setToDate} />
+              </View>
+            </View>
           </View>
-          <View style={localStyles.dateField}>
-            <DatePickerField label="To" value={toDate} onChange={setToDate} />
-          </View>
-        </View>
-      </View>
 
-      {hint ? <Text style={localStyles.hint}>{hint}</Text> : null}
-
-      <Text style={localStyles.hint}>
-        Balance is the running total per account (debit − credit), including
-        opening activity before the from date.
-      </Text>
-
-      <LedgerTable
-        rows={ledgerRows}
-        showBalance
-        emptyText="No general ledger entries in this date range."
-      />
-    </ScrollView>
+          {!hint ? (
+            <Text style={localStyles.hint}>
+              Balance is the running total per account (debit − credit), including
+              opening activity before the from date.
+            </Text>
+          ) : null}
+        </>
+      }
+    />
   );
 }

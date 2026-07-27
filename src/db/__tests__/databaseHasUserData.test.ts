@@ -24,4 +24,12 @@ describe('hasUserDataFromCounts', () => {
   it('returns true when any business table has rows', () => {
     expect(hasUserDataFromCounts({ ...empty, parties: 1 })).toBe(true);
   });
+
+  it('returns true when only adjustment notes exist', () => {
+    expect(hasUserDataFromCounts({ ...empty, adjustmentNotes: 1 })).toBe(true);
+  });
+
+  it('returns true when only payment vouchers exist', () => {
+    expect(hasUserDataFromCounts({ ...empty, paymentVouchers: 1 })).toBe(true);
+  });
 });

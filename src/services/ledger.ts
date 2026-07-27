@@ -178,7 +178,7 @@ export async function hasGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<bool
   return (row?.count ?? 0) > 0;
 }
 
-const LEDGER_CODE_VERSION = '8';
+const LEDGER_CODE_VERSION = '9';
 let rebuildInFlight: Promise<void> | null = null;
 /** Set when a rebuild is requested while another is already running. */
 let rebuildQueued = false;
@@ -188,6 +188,8 @@ let pendingFullRebuild = false;
 /** Scoped document ids waiting for targeted re-post (key = `${kind}:${id}`). */
 const pendingScopeKeys = new Set<string>();
 let lastLedgerRefreshError: string | null = null;
+/** Shared promise for an in-flight flush so concurrent awaiters coalesce. */
+let flushInFlight: Promise<void> | null = null;
 
 /** Document-scoped ledger refresh (avoids full wipe on common writes). */
 export type LedgerRefreshScope =
@@ -213,6 +215,7 @@ export function resetLedgerRefreshSchedulerForTests(): void {
   pendingScopeKeys.clear();
   rebuildQueued = false;
   lastLedgerRefreshError = null;
+  flushInFlight = null;
 }
 
 function parseScopeKey(key: string): LedgerRefreshScope | null {
@@ -330,32 +333,83 @@ export function scheduleGeneralLedgerRefresh(scope?: LedgerRefreshScope): void {
 }
 
 async function flushPendingLedgerRefresh(): Promise<void> {
-  const useFull = pendingFullRebuild || pendingScopeKeys.size === 0;
-  const keys = [...pendingScopeKeys];
-  pendingFullRebuild = false;
-  pendingScopeKeys.clear();
+  // Drain until empty so work scheduled during an in-flight flush is not dropped.
+  for (;;) {
+    if (flushInFlight) {
+      await flushInFlight;
+    }
 
-  if (useFull) {
-    await rebuildGeneralLedger();
-    lastLedgerRefreshError = null;
-    return;
+    if (!pendingFullRebuild && pendingScopeKeys.size === 0) {
+      return;
+    }
+
+    const run = (async () => {
+      const useFull = pendingFullRebuild || pendingScopeKeys.size === 0;
+      const keys = [...pendingScopeKeys];
+      pendingFullRebuild = false;
+      pendingScopeKeys.clear();
+
+      if (useFull) {
+        await rebuildGeneralLedger();
+        lastLedgerRefreshError = null;
+        return;
+      }
+
+      const scopes = keys
+        .map(parseScopeKey)
+        .filter((s): s is Exclude<LedgerRefreshScope, { type: 'full' }> => !!s && s.type !== 'full');
+      if (scopes.length === 0) {
+        await rebuildGeneralLedger();
+        lastLedgerRefreshError = null;
+        return;
+      }
+
+      await refreshGeneralLedgerScoped(scopes);
+      lastLedgerRefreshError = null;
+    })();
+
+    flushInFlight = run;
+    try {
+      await run;
+    } finally {
+      if (flushInFlight === run) {
+        flushInFlight = null;
+      }
+    }
   }
+}
 
-  const scopes = keys
-    .map(parseScopeKey)
-    .filter((s): s is Exclude<LedgerRefreshScope, { type: 'full' }> => !!s && s.type !== 'full');
-  if (scopes.length === 0) {
-    await rebuildGeneralLedger();
-    return;
+/**
+ * Cancel debounce and apply any pending ledger refresh now.
+ * Call before reading the general ledger so UI/reports never race the timer.
+ * Loops until pending work and in-flight flushes are fully drained.
+ */
+export async function awaitPendingLedgerRefresh(): Promise<void> {
+  for (;;) {
+    if (ledgerRefreshTimer) {
+      clearTimeout(ledgerRefreshTimer);
+      ledgerRefreshTimer = null;
+    }
+    if (rebuildInFlight) {
+      await rebuildInFlight;
+    }
+    if (!(pendingFullRebuild || pendingScopeKeys.size > 0 || flushInFlight)) {
+      return;
+    }
+    try {
+      await flushPendingLedgerRefresh();
+    } catch (err) {
+      lastLedgerRefreshError = err instanceof Error ? err.message : String(err);
+      console.warn('[ledger] refresh failed', err);
+      throw err;
+    }
   }
-
-  await refreshGeneralLedgerScoped(scopes);
-  lastLedgerRefreshError = null;
 }
 
 /** Refresh ledger after a business write without running full integrity repair. */
 export async function refreshGeneralLedgerAfterWrite(): Promise<void> {
   scheduleGeneralLedgerRefresh({ type: 'full' });
+  await awaitPendingLedgerRefresh();
 }
 
 /** Rebuild once after app updates when ledger posting rules change. Safe to call after UI is ready. */
@@ -497,13 +551,6 @@ async function performGeneralLedgerRebuild(
   const equityAccount = accounts.get('equity');
   const fixedAssetsAccount = accounts.get('fixed_assets');
   const loansAccount = accounts.get('loans');
-  const outputCgst = accounts.get('output_cgst');
-  const outputSgst = accounts.get('output_sgst');
-  const outputIgst = accounts.get('output_igst');
-  const inputCgst = accounts.get('input_cgst');
-  const inputSgst = accounts.get('input_sgst');
-  const inputIgst = accounts.get('input_igst');
-
   if (
     !salesAccount ||
     !cogsAccount ||
@@ -513,13 +560,7 @@ async function performGeneralLedgerRebuild(
     !otherIncomeAccount ||
     !equityAccount ||
     !fixedAssetsAccount ||
-    !loansAccount ||
-    !outputCgst ||
-    !outputSgst ||
-    !outputIgst ||
-    !inputCgst ||
-    !inputSgst ||
-    !inputIgst
+    !loansAccount
   ) {
     return;
   }
@@ -559,16 +600,8 @@ async function performGeneralLedgerRebuild(
     party_id: number | null;
     date: string;
     total_amount: number;
-    taxable_amount: number | null;
-    cgst_amount: number | null;
-    sgst_amount: number | null;
-    igst_amount: number | null;
-    service_charges: number | null;
-    is_reverse_charge: number | null;
   }>(
-    `SELECT s.id, s.invoice_no, s.invoice_type, s.party_name, s.party_id, s.date, s.total_amount,
-            s.taxable_amount, s.cgst_amount, s.sgst_amount, s.igst_amount, s.service_charges,
-            s.is_reverse_charge
+    `SELECT s.id, s.invoice_no, s.invoice_type, s.party_name, s.party_id, s.date, s.total_amount
      FROM sales s
      WHERE EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id)
        AND s.total_amount > 0
@@ -579,35 +612,17 @@ async function performGeneralLedgerRebuild(
   for (const sale of sales) {
     const partyId = await resolvePartyId(database, sale.party_name, 'customer', sale.party_id);
     const amount = roundMoney(sale.total_amount);
-    const cgst = roundMoney(sale.cgst_amount ?? 0);
-    const sgst = roundMoney(sale.sgst_amount ?? 0);
-    const igst = roundMoney(sale.igst_amount ?? 0);
-    const taxTotal = roundMoney(cgst + sgst + igst);
-    const isReverseCharge = !!(sale.is_reverse_charge ?? 0);
-    // RCM sale: buyer pays GST; we post AR + full sales revenue, no output tax liability.
-    const salesCredit = isReverseCharge ? amount : roundMoney(amount - taxTotal);
-    const docLabel = sale.invoice_type === 'bos' ? 'Bill of Supply' : 'Tax Invoice';
-    const lines: JournalLineInput[] = [
-      { ledgerAccountId: arAccount, partyId, debit: amount, credit: 0 },
-      { ledgerAccountId: salesAccount, debit: 0, credit: salesCredit },
-    ];
-    if (!isReverseCharge) {
-      if (cgst > 0.009) {
-        lines.push({ ledgerAccountId: outputCgst, debit: 0, credit: cgst });
-      }
-      if (sgst > 0.009) {
-        lines.push({ ledgerAccountId: outputSgst, debit: 0, credit: sgst });
-      }
-      if (igst > 0.009) {
-        lines.push({ ledgerAccountId: outputIgst, debit: 0, credit: igst });
-      }
-    }
+    // GST removed — post full invoice total to revenue (legacy tax columns ignored).
+    const docLabel = sale.invoice_type === 'bos' ? 'Bill of Supply' : 'Invoice';
     await postJournalEntry(database, {
       date: sale.date,
       description: `${docLabel} ${sale.invoice_no}`,
       referenceType: 'sale',
       referenceId: sale.id,
-      lines,
+      lines: [
+        { ledgerAccountId: arAccount, partyId, debit: amount, credit: 0 },
+        { ledgerAccountId: salesAccount, debit: 0, credit: amount },
+      ],
     });
   }
 
@@ -690,14 +705,8 @@ async function performGeneralLedgerRebuild(
     party_id: number | null;
     date: string;
     total_amount: number;
-    taxable_amount: number | null;
-    cgst_amount: number | null;
-    sgst_amount: number | null;
-    igst_amount: number | null;
-    is_reverse_charge: number | null;
   }>(
-    `SELECT p.id, p.invoice_no, p.supplier_name, p.party_id, p.date, p.total_amount,
-            p.taxable_amount, p.cgst_amount, p.sgst_amount, p.igst_amount, p.is_reverse_charge
+    `SELECT p.id, p.invoice_no, p.supplier_name, p.party_id, p.date, p.total_amount
      FROM purchases p
      WHERE EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = p.id)
        AND p.total_amount > 0
@@ -708,44 +717,16 @@ async function performGeneralLedgerRebuild(
   for (const purchase of purchases) {
     const partyId = await resolvePartyId(database, purchase.supplier_name, 'vendor', purchase.party_id);
     const amount = roundMoney(purchase.total_amount);
-    const cgst = roundMoney(purchase.cgst_amount ?? 0);
-    const sgst = roundMoney(purchase.sgst_amount ?? 0);
-    const igst = roundMoney(purchase.igst_amount ?? 0);
-    const taxTotal = roundMoney(cgst + sgst + igst);
-    const isReverseCharge = !!(purchase.is_reverse_charge ?? 0);
-    const inventoryDebit = roundMoney(amount - taxTotal);
-    const lines: JournalLineInput[] = [
-      { ledgerAccountId: inventoryAccount, debit: inventoryDebit, credit: 0 },
-    ];
-    if (cgst > 0.009) {
-      lines.push({ ledgerAccountId: inputCgst, debit: cgst, credit: 0 });
-    }
-    if (sgst > 0.009) {
-      lines.push({ ledgerAccountId: inputSgst, debit: sgst, credit: 0 });
-    }
-    if (igst > 0.009) {
-      lines.push({ ledgerAccountId: inputIgst, debit: igst, credit: 0 });
-    }
-    // RCM: Input ITC + Output liability — self-assess GST on reverse-charge purchases.
-    if (isReverseCharge && taxTotal > 0.009) {
-      if (cgst > 0.009) {
-        lines.push({ ledgerAccountId: outputCgst, debit: 0, credit: cgst });
-      }
-      if (sgst > 0.009) {
-        lines.push({ ledgerAccountId: outputSgst, debit: 0, credit: sgst });
-      }
-      if (igst > 0.009) {
-        lines.push({ ledgerAccountId: outputIgst, debit: 0, credit: igst });
-      }
-    }
-    const apCredit = isReverseCharge && taxTotal > 0.009 ? inventoryDebit : amount;
-    lines.push({ ledgerAccountId: apAccount, partyId, debit: 0, credit: apCredit });
+    // GST removed — inventory absorbs full bill total (legacy tax columns ignored).
     await postJournalEntry(database, {
       date: purchase.date,
       description: `Bill ${purchase.invoice_no}`,
       referenceType: 'purchase',
       referenceId: purchase.id,
-      lines,
+      lines: [
+        { ledgerAccountId: inventoryAccount, debit: amount, credit: 0 },
+        { ledgerAccountId: apAccount, partyId, debit: 0, credit: amount },
+      ],
     });
   }
 
@@ -758,16 +739,10 @@ async function performGeneralLedgerRebuild(
     party_name: string;
     party_id: number | null;
     date: string;
-    taxable_amount: number;
-    cgst_amount: number;
-    sgst_amount: number;
-    igst_amount: number;
-    is_reverse_charge: number;
     total_amount: number;
   }>(
     `SELECT n.id, n.note_no, n.note_kind, n.direction, n.party_name, n.party_id, n.date,
-            n.taxable_amount, n.cgst_amount, n.sgst_amount, n.igst_amount,
-            n.is_reverse_charge, n.total_amount
+            n.total_amount
      FROM adjustment_notes n
      WHERE n.total_amount > 0
        AND EXISTS (SELECT 1 FROM adjustment_note_items ani WHERE ani.note_id = n.id)
@@ -782,65 +757,24 @@ async function performGeneralLedgerRebuild(
     const controlAccount = isSale ? arAccount : apAccount;
     const revenueOrInventoryAccount = isSale ? salesAccount : inventoryAccount;
     const amount = roundMoney(note.total_amount);
-    const taxable = roundMoney(note.taxable_amount);
-    const cgst = roundMoney(note.cgst_amount ?? 0);
-    const sgst = roundMoney(note.sgst_amount ?? 0);
-    const igst = roundMoney(note.igst_amount ?? 0);
-    const isReverseCharge = !!(note.is_reverse_charge ?? 0);
     const isCreditNote = note.note_kind === 'credit';
-    const taxTotal = roundMoney(cgst + sgst + igst);
-    const apOrArAmount =
-      !isSale && isReverseCharge && taxTotal > 0.009 ? taxable : amount;
+    // GST removed — notes post full total only (legacy tax columns ignored).
     const lines: JournalLineInput[] = [];
 
     if (isSale) {
       if (isCreditNote) {
-        // Reverse of sale: reduce AR, sales, and output tax (if applicable).
-        lines.push({ ledgerAccountId: revenueOrInventoryAccount, debit: isReverseCharge ? amount : taxable, credit: 0 });
-        if (!isReverseCharge) {
-          if (cgst > 0.009) lines.push({ ledgerAccountId: outputCgst, debit: cgst, credit: 0 });
-          if (sgst > 0.009) lines.push({ ledgerAccountId: outputSgst, debit: sgst, credit: 0 });
-          if (igst > 0.009) lines.push({ ledgerAccountId: outputIgst, debit: igst, credit: 0 });
-        }
+        lines.push({ ledgerAccountId: revenueOrInventoryAccount, debit: amount, credit: 0 });
         lines.push({ ledgerAccountId: controlAccount, partyId, debit: 0, credit: amount });
       } else {
-        // Debit note on sale: same as sale posting.
         lines.push({ ledgerAccountId: controlAccount, partyId, debit: amount, credit: 0 });
-        lines.push({
-          ledgerAccountId: revenueOrInventoryAccount,
-          debit: 0,
-          credit: isReverseCharge ? amount : taxable,
-        });
-        if (!isReverseCharge) {
-          if (cgst > 0.009) lines.push({ ledgerAccountId: outputCgst, debit: 0, credit: cgst });
-          if (sgst > 0.009) lines.push({ ledgerAccountId: outputSgst, debit: 0, credit: sgst });
-          if (igst > 0.009) lines.push({ ledgerAccountId: outputIgst, debit: 0, credit: igst });
-        }
+        lines.push({ ledgerAccountId: revenueOrInventoryAccount, debit: 0, credit: amount });
       }
     } else if (isCreditNote) {
-      // Vendor credit note: reduce AP, input ITC, and inventory.
-      lines.push({ ledgerAccountId: controlAccount, partyId, debit: apOrArAmount, credit: 0 });
-      if (cgst > 0.009) lines.push({ ledgerAccountId: inputCgst, debit: 0, credit: cgst });
-      if (sgst > 0.009) lines.push({ ledgerAccountId: inputSgst, debit: 0, credit: sgst });
-      if (igst > 0.009) lines.push({ ledgerAccountId: inputIgst, debit: 0, credit: igst });
-      lines.push({ ledgerAccountId: revenueOrInventoryAccount, debit: 0, credit: taxable });
-      if (isReverseCharge) {
-        if (cgst > 0.009) lines.push({ ledgerAccountId: outputCgst, debit: cgst, credit: 0 });
-        if (sgst > 0.009) lines.push({ ledgerAccountId: outputSgst, debit: sgst, credit: 0 });
-        if (igst > 0.009) lines.push({ ledgerAccountId: outputIgst, debit: igst, credit: 0 });
-      }
+      lines.push({ ledgerAccountId: controlAccount, partyId, debit: amount, credit: 0 });
+      lines.push({ ledgerAccountId: revenueOrInventoryAccount, debit: 0, credit: amount });
     } else {
-      // Vendor debit note: same as purchase posting.
-      lines.push({ ledgerAccountId: revenueOrInventoryAccount, debit: taxable, credit: 0 });
-      if (cgst > 0.009) lines.push({ ledgerAccountId: inputCgst, debit: cgst, credit: 0 });
-      if (sgst > 0.009) lines.push({ ledgerAccountId: inputSgst, debit: sgst, credit: 0 });
-      if (igst > 0.009) lines.push({ ledgerAccountId: inputIgst, debit: igst, credit: 0 });
-      if (isReverseCharge) {
-        if (cgst > 0.009) lines.push({ ledgerAccountId: outputCgst, debit: 0, credit: cgst });
-        if (sgst > 0.009) lines.push({ ledgerAccountId: outputSgst, debit: 0, credit: sgst });
-        if (igst > 0.009) lines.push({ ledgerAccountId: outputIgst, debit: 0, credit: igst });
-      }
-      lines.push({ ledgerAccountId: controlAccount, partyId, debit: 0, credit: apOrArAmount });
+      lines.push({ ledgerAccountId: revenueOrInventoryAccount, debit: amount, credit: 0 });
+      lines.push({ ledgerAccountId: controlAccount, partyId, debit: 0, credit: amount });
     }
 
     const description = isCreditNote ? `Credit Note ${note.note_no}` : `Debit Note ${note.note_no}`;
@@ -1243,6 +1177,8 @@ function buildRunningBalance(
 }
 
 export async function getPartyStatementFromLedger(partyId: number): Promise<PartyStatementLine[]> {
+  await ensureLedgerUpToDate();
+  await awaitPendingLedgerRefresh();
   const db = await getDatabase();
   const party = await db.getFirstAsync<{ id: number; type: PartyType; name: string }>(
     `SELECT id, type, name FROM parties WHERE id = ?`,
@@ -1373,6 +1309,8 @@ export async function getGeneralLedgerReport(
   startDate: string,
   endDate: string
 ): Promise<GeneralLedgerLine[]> {
+  await ensureLedgerUpToDate();
+  await awaitPendingLedgerRefresh();
   const db = await getDatabase();
 
   const openings = await db.getAllAsync<{ account_name: string; opening: number }>(
@@ -1434,6 +1372,8 @@ export async function getTrialBalanceFromLedger(): Promise<{
   totalDebit: number;
   totalCredit: number;
 }> {
+  await ensureLedgerUpToDate();
+  await awaitPendingLedgerRefresh();
   const db = await getDatabase();
   const rows = await db.getAllAsync<{ account: string; net: number }>(
     `SELECT la.name as account,
@@ -1461,6 +1401,8 @@ export async function getTrialBalanceFromLedger(): Promise<{
 export async function getCashAccountStatementFromLedger(
   cashAccountId: number
 ): Promise<PartyStatementLine[]> {
+  await ensureLedgerUpToDate();
+  await awaitPendingLedgerRefresh();
   const db = await getDatabase();
   const ledgerAccount = await db.getFirstAsync<{ id: number }>(
     `SELECT id FROM ledger_accounts WHERE cash_account_id = ?`,
@@ -1509,6 +1451,8 @@ export async function verifyLedgerBalance(): Promise<{
   difference: number;
   entryCount: number;
 }> {
+  await ensureLedgerUpToDate();
+  await awaitPendingLedgerRefresh();
   const db = await getDatabase();
   const row = await db.getFirstAsync<{ total_debit: number; total_credit: number; entry_count: number }>(
     `SELECT COALESCE(SUM(jl.debit), 0) as total_debit,
@@ -1533,6 +1477,8 @@ export async function getDayBookFromLedger(
   startDate: string,
   endDate: string
 ): Promise<PartyStatementLine[]> {
+  await ensureLedgerUpToDate();
+  await awaitPendingLedgerRefresh();
   const db = await getDatabase();
   const entries = await db.getAllAsync<{
     id: number;

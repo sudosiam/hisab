@@ -539,55 +539,14 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
   };
 }
 
+/**
+ * GST removed from the product — never surface Input/Output Tax on the balance sheet.
+ * (Do not read legacy invoice tax columns or leftover GST journal lines.)
+ */
 async function getGstBalancesForSheet(
-  db: Awaited<ReturnType<typeof getDatabase>>
+  _db: Awaited<ReturnType<typeof getDatabase>>
 ): Promise<{ inputTaxCredit: number; outputTax: number }> {
-  try {
-    const { hasGeneralLedger } = await import('./ledger');
-    if (await hasGeneralLedger(db)) {
-      const rows = await db.getAllAsync<{ system_key: string; net: number }>(
-        `SELECT la.system_key as system_key,
-                COALESCE(SUM(jl.debit), 0) - COALESCE(SUM(jl.credit), 0) as net
-         FROM ledger_accounts la
-         LEFT JOIN journal_lines jl ON jl.ledger_account_id = la.id
-         WHERE la.system_key IN (
-           'input_cgst', 'input_sgst', 'input_igst',
-           'output_cgst', 'output_sgst', 'output_igst'
-         )
-         GROUP BY la.system_key`
-      );
-
-      let inputTaxCredit = 0;
-      let outputTax = 0;
-      for (const row of rows) {
-        const net = roundMoney(row.net);
-        if (row.system_key.startsWith('input_')) {
-          inputTaxCredit = addMoney(inputTaxCredit, Math.max(0, net));
-        } else {
-          outputTax = addMoney(outputTax, Math.max(0, -net));
-        }
-      }
-      return { inputTaxCredit, outputTax };
-    }
-  } catch {
-    // Fall through to invoice tax totals.
-  }
-
-  const purchaseTax = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(COALESCE(cgst_amount, 0) + COALESCE(sgst_amount, 0) + COALESCE(igst_amount, 0)), 0) as total
-     FROM purchases
-     WHERE EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = purchases.id)`
-  );
-  const salesTax = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(COALESCE(cgst_amount, 0) + COALESCE(sgst_amount, 0) + COALESCE(igst_amount, 0)), 0) as total
-     FROM sales
-     WHERE EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = sales.id)`
-  );
-
-  return {
-    inputTaxCredit: roundMoney(purchaseTax?.total ?? 0),
-    outputTax: roundMoney(salesTax?.total ?? 0),
-  };
+  return { inputTaxCredit: 0, outputTax: 0 };
 }
 
 export async function getFixedAssets(): Promise<FixedAsset[]> {

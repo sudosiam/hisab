@@ -8,15 +8,17 @@ import {
 import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { ListItem } from '../../../src/components/ListItem';
-import { MoneyTotalRow } from '../../../src/components/MoneyText';
 import { ListSkeleton } from '../../../src/components/Skeleton';
 import {
+  EmptyState,
   ErrorState,
   Fab,
   FilterChip,
   FilterRow,
   SearchField,
+  SummaryHero,
   useScreenStyles,
+  useFabListPadding,
 } from '../../../src/components/ui';
 import {
   getOrphanInvoicePayments,
@@ -24,14 +26,14 @@ import {
   type PaymentVoucherListItem,
 } from '../../../src/services/paymentVouchers';
 import { formatDisplayDate, getPeriodTotalLabel } from '../../../src/utils/date';
-import { formatCurrency } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
-import { FLATLIST_PERF } from '../../../src/constants/listPerf';
+import { FLATLIST_PERF, listCardGetItemLayout } from '../../../src/constants/listPerf';
 import { spacing } from '../../../src/constants/theme';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 
 type Filter = 'all' | 'receipt' | 'payment' | 'advance';
 
@@ -72,6 +74,7 @@ export default function PaymentsListScreen() {
   const { refreshKey } = useDatabase();
   const { colors } = useTheme();
   const styles = useScreenStyles();
+  const fabListPadding = useFabListPadding();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [items, setItems] = useState<HistoryRow[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
@@ -186,20 +189,14 @@ export default function PaymentsListScreen() {
     <View style={styles.container}>
       <View style={{ paddingHorizontal: spacing.md, paddingTop: spacing.sm }}>
         <MonthPicker monthKey={monthKey} onChange={setMonthKey} allowAllTime />
-        <MoneyTotalRow
+        <SummaryHero
           label={search.trim() ? 'Filtered Total' : getPeriodTotalLabel(monthKey)}
           amount={periodTotal}
+          secondary={[
+            { label: 'In', amount: inTotal, color: colors.success },
+            { label: 'Out', amount: outTotal, color: colors.danger },
+          ]}
         />
-        <Text
-          style={{
-            fontSize: 11,
-            color: colors.textMuted,
-            marginTop: 2,
-            fontVariant: ['tabular-nums'],
-          }}
-        >
-          In {formatCurrency(inTotal)} · Out {formatCurrency(outTotal)}
-        </Text>
       </View>
 
       <FilterRow>
@@ -232,7 +229,7 @@ export default function PaymentsListScreen() {
         <FlatList
           data={filtered}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: fabListPadding }]}
           renderItem={renderItem}
           refreshControl={
             <RefreshControl
@@ -240,20 +237,29 @@ export default function PaymentsListScreen() {
               onRefresh={() => {
                 setRefreshing(true);
                 load()
-                  .catch(() => {})
+                  .catch((e) => alertRefreshFailed(e))
                   .finally(() => setRefreshing(false));
               }}
               colors={[colors.primary]}
               tintColor={colors.primary}
             />
           }
+          getItemLayout={listCardGetItemLayout}
           {...FLATLIST_PERF}
           ListEmptyComponent={
-            <Text style={styles.empty}>
-              {search.trim() || filter !== 'all'
-                ? 'No payments match your filters.'
-                : 'No receipts or payments in this period. Tap the period label for FY or All time.'}
-            </Text>
+            search.trim() || filter !== 'all' ? (
+              <EmptyState
+                title="No matches"
+                message="Try a different filter or search."
+              />
+            ) : (
+              <EmptyState
+                title="No payments yet"
+                message="No receipts or payments in this period."
+                actionLabel="New Payment"
+                onAction={() => router.push('/(drawer)/payments/new' as never)}
+              />
+            )
           }
         />
       )}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
+import { alertRefreshFailed } from '../utils/uiFeedback';
 
 export interface FocusRefreshState {
   /** True only until the first load settles (show full-screen spinner). */
@@ -12,7 +13,7 @@ export interface FocusRefreshState {
 
 /**
  * Reload on focus without blanking the screen when data was already shown.
- * Load failures surface through `error` instead of an unhandled rejection.
+ * First-load failures surface via `error`; later refresh failures alert.
  */
 export function useFocusRefresh(loader: () => Promise<void>, deps: unknown[]): FocusRefreshState {
   const [booting, setBooting] = useState(true);
@@ -40,10 +41,10 @@ export function useFocusRefresh(loader: () => Promise<void>, deps: unknown[]): F
       })
       .catch((e) => {
         if (!isActive()) return;
-        // Keep showing existing data on refresh failures; only surface a
-        // blocking error when there is nothing on screen yet.
         if (!hasShownData.current) {
           setError(e instanceof Error ? e.message : 'Failed to load');
+        } else {
+          alertRefreshFailed(e);
         }
       })
       .finally(() => {

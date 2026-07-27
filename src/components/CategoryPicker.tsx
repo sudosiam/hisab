@@ -112,7 +112,6 @@ export function CategoryPicker({
 
   const displayValue = !value ? (allowAll ? allLabel : placeholder) : value;
   const showPlaceholderStyle = !value && !allowAll;
-  const showDeleteHint = allowDelete && categories.length > 0;
 
   return (
     <View style={[styles.wrap, open && styles.wrapOpen]}>
@@ -156,8 +155,6 @@ export function CategoryPicker({
               </TouchableOpacity>
             </View>
           ) : null}
-
-          {showDeleteHint ? <Text style={styles.hint}>Long press a category to delete</Text> : null}
 
           <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
             {allowAll ? (
@@ -234,12 +231,6 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
     },
-    hint: {
-      fontSize: 12,
-      color: colors.textMuted,
-      marginBottom: spacing.sm,
-      paddingHorizontal: spacing.xs,
-    },
     addRow: {
       flexDirection: 'row',
       gap: spacing.sm,
@@ -262,9 +253,17 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       paddingHorizontal: spacing.md,
       paddingVertical: 10,
       borderRadius: radius.md,
+      minHeight: 44,
+      justifyContent: 'center',
+      alignItems: 'center',
     },
     addBtnDisabled: { opacity: 0.6 },
-    addBtnText: { color: colors.onPrimary, fontWeight: '700', fontSize: 14 },
+    addBtnText: {
+      color: colors.onPrimary,
+      fontWeight: '700',
+      fontSize: 14,
+      textAlign: 'center',
+    },
     empty: { textAlign: 'center', color: colors.textMuted, paddingVertical: spacing.md },
     option: {
       flexDirection: 'row',

@@ -3,6 +3,7 @@ import { format, parse, parseISO, subDays } from 'date-fns';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import { Platform } from 'react-native';
 import {
   checkpointDatabase,
   closeDatabase,
@@ -31,6 +32,11 @@ const LAST_ERROR_KEY = '@hisab_backup_last_error';
 const BACKUP_PREFIX = 'hisab-backup-';
 
 export const RETENTION_DAYS = 30;
+
+/** SAF folder backups require Android Storage Access Framework. */
+export function isDeviceFolderBackupSupported(): boolean {
+  return Platform.OS === 'android';
+}
 
 // --- Preferences -----------------------------------------------------------
 
@@ -121,6 +127,13 @@ export async function dismissBackupPauseForFreshStart(): Promise<void> {
     AUTO_BACKUP_RESUME_KEY,
     CLOUD_BACKUP_RESUME_KEY,
   ]);
+  // Keep empty local DB — do not auto-pull cloud on next boot.
+  try {
+    const cloud = await import('./cloudBackup');
+    await cloud.skipCloudReconcileAfterFreshStart();
+  } catch {
+    // ignore
+  }
   const { syncBackupBackgroundTask } = await import('./backupBackgroundTask');
   await syncBackupBackgroundTask().catch(() => {});
 }
@@ -393,15 +406,28 @@ async function writeDatabaseFromBase64(base64: string): Promise<void> {
 // --- Folder selection ------------------------------------------------------
 
 export async function pickBackupFolder(): Promise<string | null> {
+  if (!isDeviceFolderBackupSupported()) {
+    throw new Error('Folder backup is only available on Android. Use Export or Cloud backup.');
+  }
   const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
   if (!permissions.granted) return null;
   await setBackupFolderUri(permissions.directoryUri);
   return permissions.directoryUri;
 }
 
-/** Verify the saved folder is still accessible; used when Settings loads. */
+/** Verify the saved folder is still readable; clears stored URI if access expired. */
 export async function ensureBackupFolderReady(folderUri: string): Promise<void> {
+  if (!isDeviceFolderBackupSupported()) {
+    throw new Error('Folder backup is only available on Android.');
+  }
   if (!isSafUri(folderUri)) {
+    await AsyncStorage.removeItem(BACKUP_FOLDER_KEY);
+    throw new Error('Backup folder access expired. Re-select the folder in Settings.');
+  }
+  try {
+    await FileSystem.StorageAccessFramework.readDirectoryAsync(folderUri);
+  } catch {
+    await AsyncStorage.removeItem(BACKUP_FOLDER_KEY);
     throw new Error('Backup folder access expired. Re-select the folder in Settings.');
   }
 }
@@ -459,9 +485,20 @@ async function writeBackupToFolder(
 
 /** Manual "Back up now": write today's backup to the chosen folder. */
 export async function backupDatabase(): Promise<{ success: boolean; message: string }> {
+  if (!isDeviceFolderBackupSupported()) {
+    return { success: false, message: 'Folder backup is only available on Android. Use Export or Cloud.' };
+  }
   const folderUri = await getBackupFolderUri();
   if (!folderUri) {
-    return { success: false, message: 'No backup folder selected. Go to Settings.' };
+    return { success: false, message: 'No backup folder selected. Set it in Settings first.' };
+  }
+
+  try {
+    await ensureBackupFolderReady(folderUri);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Backup folder unavailable.';
+    await recordBackupError(message);
+    return { success: false, message };
   }
 
   const guard = await getBackupSafetyGuard();
@@ -480,9 +517,18 @@ export async function backupDatabase(): Promise<{ success: boolean; message: str
 
 /** Run a backup if auto-backup is on and a folder is configured. */
 export async function runAutoBackup(): Promise<{ ran: boolean; message?: string }> {
+  if (!isDeviceFolderBackupSupported()) return { ran: false };
   const enabled = await isAutoBackupEnabled();
   const folderUri = await getBackupFolderUri();
   if (!enabled || !folderUri) return { ran: false };
+
+  try {
+    await ensureBackupFolderReady(folderUri);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Backup folder unavailable.';
+    await recordBackupError(message);
+    return { ran: false, message };
+  }
 
   const guard = await getBackupSafetyGuard();
   if (guard.blocked) return { ran: false, message: guard.message };
@@ -513,7 +559,22 @@ export async function backupOnBackground(): Promise<void> {
   const enabled = await isAutoBackupEnabled();
   const folderUri = await getBackupFolderUri();
   if (!enabled || !folderUri) return;
+  if (!isDeviceFolderBackupSupported()) return;
   await runAutoBackup();
+}
+
+/**
+ * Launch / OS-task entry: run any due local + cloud daily backups.
+ * Cloud helper is imported dynamically to avoid cycles.
+ */
+export async function runDueBackups(): Promise<void> {
+  await runDailyBackupIfDue().catch(() => {});
+  try {
+    const cloud = await import('./cloudBackup');
+    await cloud.runCloudDailyBackupIfDue().catch(() => {});
+  } catch {
+    // Cloud module optional on misconfigured builds.
+  }
 }
 
 // --- Export (share a copy) -------------------------------------------------
@@ -556,7 +617,8 @@ export async function exportDatabase(): Promise<{ success: boolean; message: str
 export async function pickBackupFile(): Promise<PickedBackupFile | null> {
   const result = await DocumentPicker.getDocumentAsync({
     type: ['application/x-sqlite3', 'application/octet-stream', '*/*'],
-    copyToCacheDirectory: false,
+    // Copy into app cache — some Android providers block reading raw content:// URIs.
+    copyToCacheDirectory: true,
   });
   if (result.canceled || !result.assets?.[0]) return null;
   return { uri: result.assets[0].uri, name: result.assets[0].name };

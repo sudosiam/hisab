@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
-import { Alert, Switch, TouchableOpacity, Text, View } from 'react-native';
+import React, { useMemo, useRef, useState } from 'react';
+import { Alert, Text, View } from 'react-native';
+import { ThemedSwitch } from '../../../src/components/ThemedSwitch';
 import { useRouter, useFocusEffect } from 'expo-router';
 import {
   FormInput,
@@ -7,6 +8,7 @@ import {
   PrimaryButton,
   DatePickerField,
   SectionHeader,
+  SegmentedControl,
   useScreenStyles,
 } from '../../../src/components/ui';
 import { AccountPicker } from '../../../src/components/AccountPicker';
@@ -16,15 +18,20 @@ import { DraftBanner } from '../../../src/components/DraftBanner';
 import { createExpense, getPaymentAccounts } from '../../../src/services/banking';
 import { DRAFT_KEYS, loadDraft, type ExpenseFormDraft } from '../../../src/services/formDrafts';
 import { useFormDraft } from '../../../src/hooks/useFormDraft';
+import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
 import { parsePositiveAmount } from '../../../src/utils/format';
-import { spacing, radius } from '../../../src/constants/theme';
+import { spacing } from '../../../src/constants/theme';
 import type { Account } from '../../../src/types';
 
-const RECURRENCE_OPTIONS = ['Monthly', 'Weekly', 'Yearly'];
+const RECURRENCE_OPTIONS: { value: 'Monthly' | 'Weekly' | 'Yearly'; label: string }[] = [
+  { value: 'Monthly', label: 'Monthly' },
+  { value: 'Weekly', label: 'Weekly' },
+  { value: 'Yearly', label: 'Yearly' },
+];
 
 function isExpenseDraftEmpty(d: ExpenseFormDraft): boolean {
   return (
@@ -49,6 +56,7 @@ export default function NewExpenseScreen() {
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrence, setRecurrence] = useState('Monthly');
   const [loading, setLoading] = useState(false);
+  const leaveBypassRef = useRef(false);
 
   const draftPayload = useMemo<ExpenseFormDraft>(
     () => ({
@@ -68,6 +76,11 @@ export default function NewExpenseScreen() {
     draftPayload,
     { isEmpty: isExpenseDraftEmpty }
   );
+
+  useUnsavedChangesGuard(!isExpenseDraftEmpty(draftPayload) || hasDraft, {
+    bypassRef: leaveBypassRef,
+    message: 'You have an unsaved expense draft that will be lost.',
+  });
 
   const resetForm = (defaultAccountId: number) => {
     setCategory('');
@@ -185,6 +198,7 @@ export default function NewExpenseScreen() {
         is_recurring: isRecurring,
         recurrence: isRecurring ? recurrence : undefined,
       });
+      leaveBypassRef.current = true;
       await clearDraftOnSave();
       refresh();
       router.replace(`/(drawer)/expense/${id}` as never);
@@ -212,35 +226,19 @@ export default function NewExpenseScreen() {
 
       <View style={[styles.row, { marginVertical: spacing.sm }]}>
         <Text style={styles.label}>Recurring Expense</Text>
-        <Switch
+        <ThemedSwitch
           value={isRecurring}
           onValueChange={setIsRecurring}
-          trackColor={{ false: colors.border, true: colors.primary }}
           accessibilityLabel="Recurring expense"
         />
       </View>
       {isRecurring ? (
-        <View style={{ flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.md }}>
-          {RECURRENCE_OPTIONS.map((r) => (
-            <TouchableOpacity
-              key={r}
-              style={{
-                paddingHorizontal: spacing.md,
-                paddingVertical: 8,
-                borderRadius: radius.full,
-                borderWidth: 1,
-                borderColor: recurrence === r ? colors.primary : colors.border,
-                backgroundColor: recurrence === r ? colors.primary : colors.surface,
-              }}
-              onPress={() => setRecurrence(r)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: recurrence === r }}
-            >
-              <Text style={{ color: recurrence === r ? colors.onPrimary : colors.text, fontWeight: '600', fontSize: 12 }}>
-                {r}
-              </Text>
-            </TouchableOpacity>
-          ))}
+        <View style={{ marginBottom: spacing.md }}>
+          <SegmentedControl
+            options={RECURRENCE_OPTIONS}
+            value={recurrence as 'Monthly' | 'Weekly' | 'Yearly'}
+            onChange={setRecurrence}
+          />
         </View>
       ) : null}
 

@@ -4,14 +4,14 @@ import {
   Text,
   FlatList,
   StyleSheet,
-  ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { ListItem } from '../../../src/components/ListItem';
 import { MoneyText, MoneyTotalRow } from '../../../src/components/MoneyText';
-import { ErrorState, Fab, SearchField, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import { ListSkeleton } from '../../../src/components/Skeleton';
+import { ErrorState, EmptyState, Fab, SearchField, SectionHeader, useScreenStyles, useFabListPadding } from '../../../src/components/ui';
 import { getExpenses } from '../../../src/services/banking';
 import { matchesSearch } from '../../../src/utils/search';
 import { formatDisplayDate, getPeriodTotalLabel } from '../../../src/utils/date';
@@ -21,7 +21,8 @@ import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import { FLATLIST_PERF } from '../../../src/constants/listPerf';
+import { FLATLIST_PERF, listCardGetItemLayout } from '../../../src/constants/listPerf';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 import type { Expense } from '../../../src/types';
 
 export default function ExpenseListScreen() {
@@ -29,6 +30,7 @@ export default function ExpenseListScreen() {
   const { refreshKey } = useDatabase();
   const { colors, isDark } = useTheme();
   const styles = useScreenStyles();
+  const fabListPadding = useFabListPadding();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
@@ -158,7 +160,6 @@ export default function ExpenseListScreen() {
       ) : null}
 
       <SectionHeader title="Expenses" />
-      {booting ? <ActivityIndicator color={colors.primary} /> : null}
     </View>
   );
 
@@ -168,25 +169,38 @@ export default function ExpenseListScreen() {
         data={booting && expenses.length === 0 ? [] : filteredExpenses}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
-        contentContainerStyle={[styles.list, { paddingTop: spacing.sm }]}
+        contentContainerStyle={[styles.list, { paddingTop: spacing.sm, paddingBottom: fabListPadding }]}
         ListHeaderComponent={header}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
-              load().finally(() => setRefreshing(false));
+              load()
+                .catch((e) => alertRefreshFailed(e))
+                .finally(() => setRefreshing(false));
             }}
             colors={[colors.primary]}
             tintColor={colors.primary}
           />
         }
+        getItemLayout={listCardGetItemLayout}
         {...FLATLIST_PERF}
         ListEmptyComponent={
-          booting ? null : (
-            <Text style={styles.empty}>
-              {search.trim() ? 'No expenses match your search.' : 'No expenses this month'}
-            </Text>
+          booting && expenses.length === 0 ? (
+            <ListSkeleton />
+          ) : search.trim() ? (
+            <EmptyState
+              title="No matches"
+              message="Try a different search."
+            />
+          ) : (
+            <EmptyState
+              title="No expenses yet"
+              message="Record expenses for this period."
+              actionLabel="Add Expense"
+              onAction={() => router.push('/(drawer)/expense/new' as never)}
+            />
           )
         }
       />

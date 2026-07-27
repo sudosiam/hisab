@@ -4,21 +4,24 @@ import {
   Text,
   ScrollView,
   StyleSheet,
-  ActivityIndicator,
   Alert,
-  Switch,
   TouchableOpacity,
 } from 'react-native';
+import { ThemedSwitch } from '../../../src/components/ThemedSwitch';
 import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
 import {
+  EmptyState,
+  ErrorState,
   FormInput,
   FormScreen,
   PrimaryButton,
   DatePickerField,
   SectionHeader,
+  SegmentedControl,
   useScreenStyles,
 } from '../../../src/components/ui';
 import { StatCard } from '../../../src/components/StatCard';
+import { DetailSkeleton } from '../../../src/components/Skeleton';
 import { AccountPicker } from '../../../src/components/AccountPicker';
 import { CategoryPicker } from '../../../src/components/CategoryPicker';
 import { expenseCategorySource } from '../../../src/components/categorySources';
@@ -30,20 +33,24 @@ import {
 } from '../../../src/services/banking';
 import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { parseRouteId } from '../../../src/utils/route';
-import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
 import { formatSqliteError } from '../../../src/db/database';
 import { isValidISODate, formatDisplayDate } from '../../../src/utils/date';
-import { spacing, radius } from '../../../src/constants/theme';
+import { spacing } from '../../../src/constants/theme';
 import type { Account, Expense } from '../../../src/types';
 
-const RECURRENCE_OPTIONS = ['Monthly', 'Weekly', 'Yearly'];
+const RECURRENCE_OPTIONS: { value: 'Monthly' | 'Weekly' | 'Yearly'; label: string }[] = [
+  { value: 'Monthly', label: 'Monthly' },
+  { value: 'Weekly', label: 'Weekly' },
+  { value: 'Yearly', label: 'Yearly' },
+];
 
 export default function ExpenseDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { refresh } = useDatabase();
+  const { refresh } = useDatabaseActions();
   const styles = useScreenStyles();
   const { colors } = useTheme();
   const localStyles = useMemo(
@@ -64,13 +71,6 @@ export default function ExpenseDetailScreen() {
           minHeight: 44,
           justifyContent: 'center',
         },
-        kpiRow: {
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: spacing.sm,
-          marginVertical: spacing.md,
-          width: '100%',
-        },
         kpiFull: { width: '100%', maxWidth: '100%', flexBasis: '100%', flexGrow: 1 },
         kpiHalf: { flexGrow: 1, flexBasis: '47%', minWidth: 0, maxWidth: '100%' },
         deleteWrap: {
@@ -79,20 +79,9 @@ export default function ExpenseDetailScreen() {
           marginTop: spacing.sm,
           alignSelf: 'stretch',
         },
-        chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.sm },
-        chip: {
-          paddingHorizontal: spacing.md,
-          paddingVertical: 8,
-          borderRadius: radius.full,
-          borderWidth: 1,
-          borderColor: colors.border,
-          backgroundColor: colors.surface,
-        },
-        chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-        chipText: { fontSize: 12, color: colors.text, fontWeight: '600' },
-        chipTextActive: { color: colors.onPrimary },
+        chipRow: { marginBottom: spacing.sm },
       }),
-    [colors]
+    []
   );
 
   const [expense, setExpense] = useState<Expense | null>(null);
@@ -239,21 +228,21 @@ export default function ExpenseDetailScreen() {
   };
 
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <DetailSkeleton />;
   }
 
-  if (error || !expense) {
+  if (error) {
+    return <ErrorState message={error} onRetry={() => { void load(); }} />;
+  }
+
+  if (!expense) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.cardTitle}>{error ?? 'Expense not found'}</Text>
-        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.back()}>
-          <Text style={styles.link}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
+      <EmptyState
+        title="Not found"
+        message="This record is missing or was deleted."
+        actionLabel="Go Back"
+        onAction={() => router.back()}
+      />
     );
   }
 
@@ -269,26 +258,19 @@ export default function ExpenseDetailScreen() {
 
         <View style={[styles.row, { marginVertical: spacing.sm }]}>
           <Text style={styles.label}>Recurring</Text>
-          <Switch
+          <ThemedSwitch
             value={isRecurring}
             onValueChange={setIsRecurring}
-            trackColor={{ false: colors.border, true: colors.primary }}
             accessibilityLabel="Recurring expense"
           />
         </View>
         {isRecurring ? (
           <View style={localStyles.chipRow}>
-            {RECURRENCE_OPTIONS.map((r) => (
-              <TouchableOpacity
-                key={r}
-                style={[localStyles.chip, recurrence === r && localStyles.chipActive]}
-                onPress={() => setRecurrence(r)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: recurrence === r }}
-              >
-                <Text style={recurrence === r ? localStyles.chipTextActive : localStyles.chipText}>{r}</Text>
-              </TouchableOpacity>
-            ))}
+            <SegmentedControl
+              options={RECURRENCE_OPTIONS}
+              value={recurrence as 'Monthly' | 'Weekly' | 'Yearly'}
+              onChange={setRecurrence}
+            />
           </View>
         ) : null}
 
@@ -322,7 +304,7 @@ export default function ExpenseDetailScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={localStyles.kpiRow}>
+      <View style={styles.detailKpiRow}>
         <StatCard
           label="Amount"
           value={expense.amount}

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Alert, StyleSheet } from 'react-native';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -6,7 +6,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 import { DatabaseProvider } from '../src/context/DatabaseContext';
 import { FinancialYearProvider } from '../src/context/FinancialYearContext';
-import { GstProvider } from '../src/context/GstContext';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { StatusBar } from 'expo-status-bar';
@@ -19,18 +18,24 @@ function ThemedStatusBar() {
 
 function PendingUpdatePrompt() {
   const { isUpdatePending } = Updates.useUpdates();
+  const promptedRef = useRef(false);
 
   useEffect(() => {
-    if (!isAppUpdatesEnabled() || !isUpdatePending) return;
-    Alert.alert('Update ready', 'A new version was downloaded. Restart now to apply it?', [
-      { text: 'Later', style: 'cancel' },
-      {
-        text: 'Restart',
-        onPress: () => {
-          void reloadToApplyUpdate();
+    if (!isAppUpdatesEnabled() || !isUpdatePending || promptedRef.current) return;
+    promptedRef.current = true;
+    Alert.alert(
+      'Update downloaded',
+      'Restart Hisab now to apply the latest fixes and improvements.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        {
+          text: 'Restart now',
+          onPress: () => {
+            void reloadToApplyUpdate();
+          },
         },
-      },
-    ]);
+      ]
+    );
   }, [isUpdatePending]);
 
   return null;
@@ -45,6 +50,18 @@ function ThemedRoot({ children }: { children: React.ReactNode }) {
   );
 }
 
+function ThemedStack() {
+  const { colors } = useTheme();
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: colors.background },
+      }}
+    />
+  );
+}
+
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
@@ -52,13 +69,11 @@ export default function RootLayout() {
         <ThemedRoot>
           <ErrorBoundary>
             <DatabaseProvider>
-              <GstProvider>
-                <FinancialYearProvider>
-                  <ThemedStatusBar />
-                  <PendingUpdatePrompt />
-                  <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }} />
-                </FinancialYearProvider>
-              </GstProvider>
+              <FinancialYearProvider>
+                <ThemedStatusBar />
+                <PendingUpdatePrompt />
+                <ThemedStack />
+              </FinancialYearProvider>
             </DatabaseProvider>
           </ErrorBoundary>
         </ThemedRoot>

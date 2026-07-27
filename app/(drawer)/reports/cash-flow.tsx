@@ -4,12 +4,10 @@ import {
   Text,
   ScrollView,
   StyleSheet,
-  ActivityIndicator,
   RefreshControl,
   ViewStyle,
   TextStyle,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getCashFlowReport } from '../../../src/services/reports';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -17,11 +15,14 @@ import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { formatCurrency, formatSignedCurrency } from '../../../src/utils/format';
 import { MoneyText, moneyRowStyles } from '../../../src/components/MoneyText';
 import { ErrorState, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import { ListSkeleton } from '../../../src/components/Skeleton';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { shareCashFlowPdf } from '../../../src/services/reportPdf';
 import { radius, spacing, typography } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 
 export default function CashFlowReportScreen() {
   const { refreshKey } = useDatabase();
@@ -67,7 +68,6 @@ export default function CashFlowReportScreen() {
   );
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [data, setData] = useState<Awaited<ReturnType<typeof getCashFlowReport>> | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [periodLoading, setPeriodLoading] = useState(false);
 
@@ -76,15 +76,12 @@ export default function CashFlowReportScreen() {
     setPeriodLoading(true);
     try {
       setData(await getCashFlowReport(monthKey));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load cash flow');
     } finally {
       setPeriodLoading(false);
     }
   }, [monthKey, refreshKey]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const { booting, error, retry } = useFocusRefresh(load, [monthKey, refreshKey]);
 
   const exportPdf = useCallback(async () => {
     if (!data) return { success: false, message: 'Report not loaded yet.' };
@@ -94,15 +91,15 @@ export default function CashFlowReportScreen() {
   useReportPdfHeader({ disabled: !data || !!error, onExport: exportPdf });
 
   if (error && !data) {
-    return <ErrorState message={error} onRetry={load} />;
+    return <ErrorState message={error} onRetry={retry} />;
+  }
+
+  if (booting && !data) {
+    return <ListSkeleton />;
   }
 
   if (!data) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <ListSkeleton />;
   }
 
   return (
@@ -114,7 +111,9 @@ export default function CashFlowReportScreen() {
           refreshing={refreshing}
           onRefresh={() => {
             setRefreshing(true);
-            load().finally(() => setRefreshing(false));
+            load()
+              .catch((e) => alertRefreshFailed(e))
+              .finally(() => setRefreshing(false));
           }}
           colors={[colors.primary]}
           tintColor={colors.primary}
@@ -122,9 +121,6 @@ export default function CashFlowReportScreen() {
       }
     >
       <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
-      {periodLoading ? (
-        <ActivityIndicator style={{ marginBottom: spacing.sm }} color={colors.primary} />
-      ) : null}
 
       <View style={[localStyles.hero, periodLoading && { opacity: 0.5 }]}>
         <Text style={localStyles.heroLabel}>Net Cash Change</Text>

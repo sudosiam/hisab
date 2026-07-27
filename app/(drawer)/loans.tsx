@@ -1,33 +1,47 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Alert, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Alert, FlatList } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   DatePickerField,
+  EmptyState,
   ErrorState,
   FormInput,
-  FormScreen,
   PrimaryButton,
   SearchField,
   SectionHeader,
+  SummaryHero,
+  ThemedPressable,
   useScreenStyles,
 } from '../../src/components/ui';
-import { MoneyText } from '../../src/components/MoneyText';
+import { ListItem } from '../../src/components/ListItem';
+import { ListSkeleton } from '../../src/components/Skeleton';
 import { addLoan, deleteLoan, getLoans, updateLoan } from '../../src/services/loans';
 import { formatAmountInput, formatCurrency, parseAmountInput, parsePositiveAmount } from '../../src/utils/format';
 import { matchesSearch } from '../../src/utils/search';
 import { isValidISODate } from '../../src/utils/date';
-import { useDatabase } from '../../src/context/DatabaseContext';
+import { useDatabaseActions } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
 import { useUnsavedChangesGuard } from '../../src/hooks/useUnsavedChangesGuard';
 import { formatSqliteError } from '../../src/db/database';
-import { spacing, typography } from '../../src/constants/theme';
+import { spacing } from '../../src/constants/theme';
+import { FLATLIST_PERF, listCardGetItemLayout } from '../../src/constants/listPerf';
 import { cardSurface } from '../../src/constants/shadows';
 import type { Loan } from '../../src/types';
 
+type FieldErrors = {
+  lenderName?: string;
+  principalAmount?: string;
+  outstandingAmount?: string;
+  interestRate?: string;
+  startDate?: string;
+};
+
 export default function LoansScreen() {
   const styles = useScreenStyles();
+  const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
-  const { refresh } = useDatabase();
+  const { refresh } = useDatabaseActions();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -40,6 +54,7 @@ export default function LoansScreen() {
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const savedFormSnapshotRef = useRef<string | null>(null);
 
   const formSnapshot = useMemo(
@@ -72,37 +87,26 @@ export default function LoansScreen() {
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        hero: {
-          ...cardSurface(colors, isDark),
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.md,
-          marginBottom: spacing.lg,
-          alignItems: 'center',
-        },
-        heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
-        heroValueWrap: { width: '100%', marginTop: spacing.sm, paddingHorizontal: spacing.sm },
-        loanCard: {
-          ...cardSurface(colors, isDark),
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm,
-          marginBottom: spacing.xs + 2,
-          minHeight: 52,
-          overflow: 'visible',
-        },
-        lenderName: { fontSize: 14, fontWeight: '600', color: colors.text },
-        amountCol: { flexShrink: 1, minWidth: 88, maxWidth: '48%', alignItems: 'flex-end' },
-        rowMeta: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
-        actions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
-        actionTap: {
-          paddingVertical: spacing.sm,
-          paddingHorizontal: spacing.sm,
-          minHeight: 40,
-          justifyContent: 'center',
-        },
         form: {
           ...cardSurface(colors, isDark),
           padding: spacing.md,
           marginBottom: spacing.lg,
+          gap: spacing.xs,
+        },
+        actionTap: {
+          paddingHorizontal: spacing.sm,
+          paddingVertical: spacing.sm,
+          minHeight: 44,
+          minWidth: 64,
+          justifyContent: 'center',
+          alignItems: 'flex-end',
+        },
+        headerRow: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: spacing.sm,
+          marginBottom: spacing.xs,
         },
       }),
     [colors, isDark]
@@ -145,6 +149,7 @@ export default function LoansScreen() {
     setNotes('');
     setEditingId(null);
     setShowForm(false);
+    setFieldErrors({});
     savedFormSnapshotRef.current = null;
   };
 
@@ -196,20 +201,16 @@ export default function LoansScreen() {
   const handleSave = async () => {
     if (saving) return;
 
+    const nextErrors: FieldErrors = {};
     const principal = parsePositiveAmount(principalAmount);
-    if (!lenderName.trim() || principal === null) {
-      Alert.alert('Error', 'Enter lender name and principal amount greater than zero');
-      return;
-    }
+    if (!lenderName.trim()) nextErrors.lenderName = 'Enter lender name';
+    if (principal === null) nextErrors.principalAmount = 'Enter an amount greater than zero';
 
     const outstanding = parseAmountInput(outstandingAmount || '0');
     if (!Number.isFinite(outstanding) || outstanding < 0) {
-      Alert.alert('Error', 'Outstanding amount cannot be negative');
-      return;
-    }
-    if (outstanding > principal) {
-      Alert.alert('Error', 'Outstanding amount cannot exceed the principal');
-      return;
+      nextErrors.outstandingAmount = 'Cannot be negative';
+    } else if (principal !== null && outstanding > principal) {
+      nextErrors.outstandingAmount = 'Cannot exceed principal';
     }
 
     const rate =
@@ -217,19 +218,20 @@ export default function LoansScreen() {
         ? undefined
         : parseAmountInput(interestRate);
     if (rate !== undefined && (!Number.isFinite(rate) || rate < 0)) {
-      Alert.alert('Error', 'Interest rate must be a valid positive number');
-      return;
+      nextErrors.interestRate = 'Must be a valid positive number';
     }
     if (startDate.trim() && !isValidISODate(startDate.trim())) {
-      Alert.alert('Error', 'Start date must be in YYYY-MM-DD format');
-      return;
+      nextErrors.startDate = 'Use YYYY-MM-DD format';
     }
+
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
 
     setSaving(true);
     try {
       const payload = {
         lender_name: lenderName.trim(),
-        principal_amount: principal,
+        principal_amount: principal!,
         outstanding_amount: outstanding,
         interest_rate: rate,
         start_date: startDate.trim() || undefined,
@@ -250,7 +252,7 @@ export default function LoansScreen() {
     }
   };
 
-  const handleDelete = (loan: Loan) => {
+  const handleDelete = useCallback((loan: Loan) => {
     Alert.alert('Delete Loan', `Remove loan from ${loan.lender_name}?\nThis removes ${formatCurrency(loan.outstanding_amount)} from balance sheet liabilities.`, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -267,39 +269,46 @@ export default function LoansScreen() {
         },
       },
     ]);
-  };
+  }, [load, refresh]);
 
-  if (booting && loans.length === 0) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
+  const renderLoanItem = useCallback(
+    ({ item: loan }: { item: Loan }) => (
+      <ListItem
+        title={loan.lender_name}
+        subtitle={`Principal ${formatCurrency(loan.principal_amount)}${loan.interest_rate !== null ? ` · ${loan.interest_rate}%` : ''}${loan.start_date ? ` · ${loan.start_date}` : ''}`}
+        meta={loan.notes ?? undefined}
+        amount={loan.outstanding_amount}
+        amountColor={colors.danger}
+        onPress={() => startEdit(loan)}
+        trailing={
+          <ThemedPressable
+            style={localStyles.actionTap}
+            onPress={() => handleDelete(loan)}
+            haptic="warning"
+            accessibilityRole="button"
+            accessibilityLabel={`Delete loan from ${loan.lender_name}`}
+            hitSlop={6}
+          >
+            <Text style={{ color: colors.danger, fontWeight: '700', fontSize: 12 }}>Delete</Text>
+          </ThemedPressable>
+        }
+        accessibilityLabel={`Edit loan from ${loan.lender_name}`}
+      />
+    ),
+    [colors.danger, handleDelete, localStyles.actionTap]
+  );
 
-  if (error || loadError) {
-    return <ErrorState message={error ?? loadError ?? undefined} onRetry={retry} />;
-  }
+  const listHeader = (
+    <>
+      <SummaryHero
+        label="Total Outstanding Loans"
+        amount={totalOutstanding}
+        hint={`${loans.length} loan${loans.length === 1 ? '' : 's'}`}
+      />
 
-  return (
-    <FormScreen>
-      <View style={localStyles.hero}>
-        <Text style={localStyles.heroLabel}>Total Outstanding Loans</Text>
-        <View style={localStyles.heroValueWrap}>
-          <MoneyText
-            amount={totalOutstanding}
-            size="hero"
-            style={{ width: '100%', textAlign: 'center' }}
-          />
-        </View>
-        <Text style={{ color: colors.textSecondary, marginTop: spacing.sm, fontSize: 13 }}>
-          {loans.length} loan{loans.length === 1 ? '' : 's'}
-        </Text>
-      </View>
-
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+      <View style={localStyles.headerRow}>
         <SectionHeader title="Loans" />
-        <TouchableOpacity
+        <ThemedPressable
           onPress={() => {
             if (showForm) {
               resetForm();
@@ -309,9 +318,11 @@ export default function LoansScreen() {
           }}
           accessibilityRole="button"
           accessibilityLabel={showForm ? 'Cancel loan form' : 'Add loan'}
+          hitSlop={8}
+          style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.sm }}
         >
           <Text style={styles.link}>{showForm ? 'Cancel' : '+ Add Loan'}</Text>
-        </TouchableOpacity>
+        </ThemedPressable>
       </View>
 
       <SearchField
@@ -326,27 +337,56 @@ export default function LoansScreen() {
           <FormInput
             label="Lender Name"
             value={lenderName}
-            onChangeText={setLenderName}
+            onChangeText={(v) => {
+              setLenderName(v);
+              if (fieldErrors.lenderName) setFieldErrors((e) => ({ ...e, lenderName: undefined }));
+            }}
             placeholder="Bank name, friend, NBFC..."
+            error={fieldErrors.lenderName}
           />
-          <FormInput label="Principal Amount (₹)" value={principalAmount} onChangeText={setPrincipalAmount} money />
+          <FormInput
+            label="Principal Amount (₹)"
+            value={principalAmount}
+            onChangeText={(v) => {
+              setPrincipalAmount(v);
+              if (fieldErrors.principalAmount) {
+                setFieldErrors((e) => ({ ...e, principalAmount: undefined }));
+              }
+            }}
+            money
+            error={fieldErrors.principalAmount}
+          />
           <FormInput
             label="Outstanding Amount (₹)"
             value={outstandingAmount}
-            onChangeText={setOutstandingAmount}
+            onChangeText={(v) => {
+              setOutstandingAmount(v);
+              if (fieldErrors.outstandingAmount) {
+                setFieldErrors((e) => ({ ...e, outstandingAmount: undefined }));
+              }
+            }}
             money
+            error={fieldErrors.outstandingAmount}
           />
           <FormInput
             label="Interest Rate (%)"
             value={interestRate}
-            onChangeText={setInterestRate}
+            onChangeText={(v) => {
+              setInterestRate(v);
+              if (fieldErrors.interestRate) setFieldErrors((e) => ({ ...e, interestRate: undefined }));
+            }}
             qty
             placeholder="Optional"
+            error={fieldErrors.interestRate}
           />
           <DatePickerField
             label="Start Date"
             value={startDate}
-            onChange={setStartDate}
+            onChange={(v) => {
+              setStartDate(v);
+              if (fieldErrors.startDate) setFieldErrors((e) => ({ ...e, startDate: undefined }));
+            }}
+            error={fieldErrors.startDate}
           />
           <FormInput
             label="Notes"
@@ -358,69 +398,49 @@ export default function LoansScreen() {
           <PrimaryButton title={editingId ? 'Save Changes' : 'Add Loan'} onPress={handleSave} loading={saving} />
         </View>
       ) : null}
+    </>
+  );
 
-      {filteredLoans.length === 0 ? (
-        <Text style={styles.empty}>
-          {search.trim()
-            ? 'No loans match your search.'
-            : 'No loans yet. Add one from the button above.'}
-        </Text>
-      ) : (
-        filteredLoans.map((loan) => (
-          <TouchableOpacity
-            key={loan.id}
-            style={localStyles.loanCard}
-            onPress={() => startEdit(loan)}
-            activeOpacity={0.75}
-            accessibilityRole="button"
-            accessibilityLabel={`Edit loan from ${loan.lender_name}`}
-          >
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={localStyles.lenderName} numberOfLines={2}>
-                  {loan.lender_name}
-                </Text>
-                <Text style={localStyles.rowMeta} numberOfLines={2}>
-                  Principal {formatCurrency(loan.principal_amount)}
-                  {loan.interest_rate !== null ? ` · ${loan.interest_rate}%` : ''}
-                  {loan.start_date ? ` · ${loan.start_date}` : ''}
-                </Text>
-                {loan.notes ? (
-                  <Text style={localStyles.rowMeta} numberOfLines={2}>
-                    {loan.notes}
-                  </Text>
-                ) : null}
-              </View>
-              <View style={localStyles.amountCol}>
-                <MoneyText
-                  amount={loan.outstanding_amount}
-                  size="md"
-                  color={colors.danger}
-                  style={{ width: '100%' }}
-                />
-              </View>
-            </View>
-            <View style={localStyles.actions}>
-              <TouchableOpacity
-                style={localStyles.actionTap}
-                onPress={() => startEdit(loan)}
-                accessibilityRole="button"
-                accessibilityLabel={`Edit loan from ${loan.lender_name}`}
-              >
-                <Text style={styles.link}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={localStyles.actionTap}
-                onPress={() => handleDelete(loan)}
-                accessibilityRole="button"
-                accessibilityLabel={`Delete loan from ${loan.lender_name}`}
-              >
-                <Text style={{ color: colors.danger, fontWeight: '700' }}>Delete</Text>
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        ))
-      )}
-    </FormScreen>
+  if (booting && loans.length === 0) {
+    return (
+      <View style={styles.container}>
+        <ListSkeleton />
+      </View>
+    );
+  }
+
+  if (error || loadError) {
+    return <ErrorState message={error ?? loadError ?? undefined} onRetry={retry} />;
+  }
+
+  return (
+    <FlatList
+      style={styles.container}
+      contentContainerStyle={[
+        styles.content,
+        { paddingBottom: spacing.xxl + Math.max(insets.bottom, spacing.md) },
+      ]}
+      data={filteredLoans}
+      keyExtractor={(item) => String(item.id)}
+      renderItem={renderLoanItem}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      showsVerticalScrollIndicator={false}
+      getItemLayout={listCardGetItemLayout}
+      {...FLATLIST_PERF}
+      ListHeaderComponent={listHeader}
+      ListEmptyComponent={
+        <EmptyState
+          title={search.trim() ? 'No matching loans' : 'No loans yet'}
+          message={
+            search.trim()
+              ? 'Try a different search.'
+              : 'Track lender balances for your balance sheet.'
+          }
+          actionLabel={search.trim() ? undefined : 'Add Loan'}
+          onAction={search.trim() ? undefined : startAdd}
+        />
+      }
+    />
   );
 }

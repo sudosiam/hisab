@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, Text, StyleSheet, View, ActivityIndicator } from 'react-native';
+import { Alert, Text, StyleSheet, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
   ErrorState,
@@ -7,12 +7,13 @@ import {
   FormScreen,
   PrimaryButton,
   SectionHeader,
-  useScreenStyles,
 } from '../../src/components/ui';
 import { getInvestmentInfo, setOwnerInvestment } from '../../src/services/investments';
 import { formatSqliteError } from '../../src/db/database';
-import { formatAmountInput, formatCurrency, parseAmountInput } from '../../src/utils/format';
-import { useDatabase } from '../../src/context/DatabaseContext';
+import { formatAmountInput, parseAmountInput } from '../../src/utils/format';
+import { MoneyText } from '../../src/components/MoneyText';
+import { DetailSkeleton } from '../../src/components/Skeleton';
+import { useDatabaseActions } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useUnsavedChangesGuard } from '../../src/hooks/useUnsavedChangesGuard';
 import { spacing, typography } from '../../src/constants/theme';
@@ -20,8 +21,7 @@ import { cardSurface } from '../../src/constants/shadows';
 import type { InvestmentInfo } from '../../src/services/investments';
 
 export default function InvestmentsScreen() {
-  const { refresh } = useDatabase();
-  const styles = useScreenStyles();
+  const { refresh } = useDatabaseActions();
   const { colors, isDark } = useTheme();
   const localStyles = useMemo(
     () =>
@@ -40,12 +40,6 @@ export default function InvestmentsScreen() {
           color: colors.textSecondary,
           marginTop: spacing.sm,
           textAlign: 'center',
-        },
-        note: {
-          fontSize: 13,
-          color: colors.textSecondary,
-          marginBottom: spacing.md,
-          lineHeight: 20,
         },
       }),
     [colors, isDark]
@@ -114,30 +108,26 @@ export default function InvestmentsScreen() {
     return <ErrorState message={error} onRetry={load} />;
   }
 
-  if (loading || !info) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+  if (loading && !info) {
+    return <DetailSkeleton />;
+  }
+
+  if (!info) {
+    return <ErrorState message={error ?? 'Failed to load investment info'} onRetry={load} />;
   }
 
   return (
     <FormScreen>
       <View style={localStyles.hero}>
         <Text style={localStyles.heroLabel}>You invested</Text>
-        <Text style={localStyles.heroValue}>
-          {info.isSet ? formatCurrency(info.amount) : '—'}
-        </Text>
-        <Text style={localStyles.heroHint}>
-          {info.isSet ? 'Used on Growth for ahead/behind and return' : 'Set your amount below'}
-        </Text>
+        <MoneyText
+          amount={info.amount}
+          text={info.isSet ? undefined : '—'}
+          size="hero"
+          style={[localStyles.heroValue, { width: '100%', textAlign: 'center' }]}
+        />
+        {!info.isSet ? <Text style={localStyles.heroHint}>Not set</Text> : null}
       </View>
-
-      <Text style={localStyles.note}>
-        Enter the total money you put into this business. Growth uses only this amount for
-        ahead/behind and return on money in.
-      </Text>
 
       <SectionHeader title="Set investment" />
       <FormInput

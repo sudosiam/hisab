@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ActivityIndicator,
   Alert,
   TouchableOpacity,
 } from 'react-native';
@@ -21,9 +20,13 @@ import { formatSqliteError } from '../../../src/db/database';
 import { getPaymentAccounts } from '../../../src/services/banking';
 import { StatusBadge } from '../../../src/components/StatusBadge';
 import { StatCard } from '../../../src/components/StatCard';
+import { MoneyText } from '../../../src/components/MoneyText';
+import { DetailSkeleton } from '../../../src/components/Skeleton';
 import { AccountPicker } from '../../../src/components/AccountPicker';
-import { OverflowMenu } from '../../../src/components/OverflowMenu';
+import { DetailHeaderActions } from '../../../src/components/DetailHeaderActions';
 import {
+  EmptyState,
+  ErrorState,
   FormInput,
   FormScreen,
   PrimaryButton,
@@ -34,8 +37,7 @@ import {
 import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
 import { roundMoney } from '../../../src/utils/money';
 import { parseRouteId } from '../../../src/utils/route';
-import { useDatabase } from '../../../src/context/DatabaseContext';
-import { useGstEnabled } from '../../../src/context/GstContext';
+import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { todayISO, isValidISODate, formatDisplayDate } from '../../../src/utils/date';
 import { stackDetailBeforeRemove } from '../../../src/navigation/screenOptions';
@@ -43,11 +45,10 @@ import { spacing } from '../../../src/constants/theme';
 import type { Account, Purchase, PurchaseItem, PurchasePayment } from '../../../src/types';
 
 export default function PurchaseDetailScreen() {
-  const gstEnabled = useGstEnabled();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
-  const { refresh } = useDatabase();
+  const { refresh } = useDatabaseActions();
   const styles = useScreenStyles();
   const { colors } = useTheme();
 
@@ -64,12 +65,6 @@ export default function PurchaseDetailScreen() {
         invoice: { fontSize: 20, fontWeight: '700', color: colors.text },
         party: { color: colors.textSecondary, marginTop: 4 },
         date: { fontSize: 13, color: colors.textSecondary },
-        kpiRow: {
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: spacing.sm,
-          marginVertical: spacing.md,
-        },
         itemRow: {
           flexDirection: 'row',
           justifyContent: 'space-between',
@@ -264,11 +259,11 @@ export default function PurchaseDetailScreen() {
     navigation.setOptions({
       headerRight: purchase
         ? () => (
-            <OverflowMenu
-              actions={[
+            <DetailHeaderActions
+              onShare={handleSharePdf}
+              overflowActions={[
                 { label: 'Preview / Print', onPress: handlePreviewPdf },
                 { label: 'Download PDF', onPress: handleDownloadPdf },
-                { label: 'Share PDF', onPress: handleSharePdf },
                 {
                   label: 'Issue credit note',
                   onPress: () =>
@@ -296,21 +291,21 @@ export default function PurchaseDetailScreen() {
   }, [navigation, purchase, router, handleDelete, handlePreviewPdf, handleDownloadPdf, handleSharePdf]);
 
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <DetailSkeleton />;
   }
 
-  if (error || !purchase) {
+  if (error) {
+    return <ErrorState message={error} onRetry={() => { void load(); }} />;
+  }
+
+  if (!purchase) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.cardTitle}>{error ?? 'Purchase not found'}</Text>
-        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.dismissTo('/(drawer)/purchases')}>
-          <Text style={styles.link}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
+      <EmptyState
+        title="Not found"
+        message="This record is missing or was deleted."
+        actionLabel="Go Back"
+        onAction={() => router.dismissTo('/(drawer)/purchases')}
+      />
     );
   }
 
@@ -345,18 +340,9 @@ export default function PurchaseDetailScreen() {
         </Text>
       ) : null}
 
-      {gstEnabled &&
-      (purchase.cgst_amount ?? 0) + (purchase.sgst_amount ?? 0) + (purchase.igst_amount ?? 0) >
-        0.009 ? (
-        <Text style={localStyles.date}>
-          Taxable {formatCurrency(purchase.taxable_amount ?? 0)}
-          {(purchase.igst_amount ?? 0) > 0.009
-            ? ` · IGST ${formatCurrency(purchase.igst_amount)}`
-            : ` · CGST ${formatCurrency(purchase.cgst_amount ?? 0)} · SGST ${formatCurrency(purchase.sgst_amount ?? 0)}`}
-        </Text>
-      ) : null}
+      
 
-      <View style={localStyles.kpiRow}>
+      <View style={styles.detailKpiRow}>
         <StatCard label="Total" value={purchase.total_amount} color={colors.primary} />
         <StatCard
           label="Due"
@@ -372,88 +358,22 @@ export default function PurchaseDetailScreen() {
         />
       </View>
 
-      {gstEnabled ? (
-        <>
-          <SectionHeader title="GST / ITC" />
-          {(() => {
-            const inputTax =
-              (purchase.cgst_amount ?? 0) +
-              (purchase.sgst_amount ?? 0) +
-              (purchase.igst_amount ?? 0);
-            const withGst = items.filter(
-              (item) =>
-                (item.gst_rate ?? 0) > 0.009 ||
-                (item.cgst_amount ?? 0) + (item.sgst_amount ?? 0) + (item.igst_amount ?? 0) > 0.009
-            );
-            const withoutGst = items.length - withGst.length;
-            return (
-              <View style={{ marginBottom: spacing.sm }}>
-                <View style={localStyles.kpiRow}>
-                  <StatCard
-                    label="ITC got"
-                    value={inputTax}
-                    color={inputTax > 0 ? colors.success : colors.textSecondary}
-                    subtitle={
-                      (purchase.igst_amount ?? 0) > 0.009
-                        ? 'IGST'
-                        : inputTax > 0
-                          ? 'CGST + SGST'
-                          : 'No input tax'
-                    }
-                  />
-                  <StatCard
-                    label="Taxable"
-                    value={purchase.taxable_amount ?? itemsCost}
-                    color={colors.primary}
-                  />
-                  <StatCard
-                    label="Lines"
-                    displayValue={`${withGst.length}/${items.length}`}
-                    color={withoutGst > 0 ? colors.warning : colors.success}
-                    subtitle={withoutGst > 0 ? `${withoutGst} without GST` : 'All lines have GST'}
-                  />
-                </View>
-              </View>
-            );
-          })()}
-        </>
-      ) : null}
+      
 
       <SectionHeader title="Items" />
-      {items.map((item) => {
-        const lineTax =
-          (item.cgst_amount ?? 0) + (item.sgst_amount ?? 0) + (item.igst_amount ?? 0);
-        const hasGst = (item.gst_rate ?? 0) > 0.009 || lineTax > 0.009;
-        return (
+      {items.map((item) => (
           <View key={item.id} style={localStyles.itemRow}>
             <View style={{ flex: 1 }}>
               <Text style={localStyles.itemName}>{item.product_name}</Text>
               <Text style={localStyles.itemMeta}>
                 {item.qty} × {formatCurrency(item.unit_cost)}
-                {gstEnabled && item.hsn_sac ? ` · HSN ${item.hsn_sac}` : ''}
-                {gstEnabled
-                  ? hasGst
-                    ? ` · GST ${item.gst_rate ?? 0}% · ITC ${formatCurrency(lineTax)}`
-                    : ' · No GST'
-                  : ''}
               </Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
-              <Text style={localStyles.itemTotal}>{formatCurrency(item.total)}</Text>
-              {gstEnabled ? (
-                <Text
-                  style={[
-                    localStyles.itemMeta,
-                    { color: hasGst ? colors.success : colors.warning, fontWeight: '600' },
-                  ]}
-                >
-                  {hasGst ? 'Got GST' : 'Missing GST'}
-                </Text>
-              ) : null}
+              <MoneyText amount={item.total} size="md" style={localStyles.itemTotal} />
             </View>
           </View>
-        );
-      })}
+      ))}
 
       <SectionHeader title="Payments" />
       {payments.length === 0 ? (

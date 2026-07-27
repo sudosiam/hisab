@@ -14,6 +14,7 @@ import { useTheme } from '../context/ThemeContext';
 import { spacing, radius } from '../constants/theme';
 import { elevatedSurface } from '../constants/shadows';
 import { claimDropdownOpen, releaseDropdownOpen } from '../utils/dropdownOpen';
+import { configureExpandAnimation } from '../utils/layoutAnimation';
 
 export interface InlineDropdownOption<T extends string | number = string> {
   key: string;
@@ -72,6 +73,10 @@ export function InlineDropdown<T extends string | number = string>({
     }
     return () => releaseDropdownOpen(close);
   }, [open, close]);
+
+  useEffect(() => {
+    configureExpandAnimation();
+  }, [open]);
 
   return (
     <View style={[styles.wrap, style, open && styles.wrapOpen]}>

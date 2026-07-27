@@ -1,59 +1,97 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { ScreenTitle, ThemeOption, useScreenStyles } from '../../../src/components/ui';
+import { ScreenTitle, SectionHeader, ThemeOption, useScreenStyles } from '../../../src/components/ui';
+import { ThemedSwitch } from '../../../src/components/ThemedSwitch';
+import { NavListRow } from '../../../src/components/ListItem';
 import { useTheme } from '../../../src/context/ThemeContext';
 import type { ThemeMode } from '../../../src/constants/theme';
+import { spacing } from '../../../src/constants/theme';
 import { APP_VERSION } from '../../../src/constants/appVersion';
-import { SettingsNavCard, useSettingsStyles } from '../../../src/components/settings/settingsUi';
+import { useSettingsStyles } from '../../../src/components/settings/settingsUi';
 import { checkDownloadAndReload } from '../../../src/services/appUpdates';
 import { isHapticsEnabled, setHapticsEnabled } from '../../../src/services/appSettings';
 import { setHapticsEnabledCache } from '../../../src/utils/haptics';
-const SETTINGS_ITEMS = [
+import { cardSurface } from '../../../src/constants/shadows';
+
+type SettingsItem = {
+  title: string;
+  route: string;
+  icon: React.ComponentProps<typeof import('@expo/vector-icons').Ionicons>['name'];
+};
+
+const BUSINESS_ITEMS: SettingsItem[] = [
   {
     title: 'Business Profile',
     route: '/(drawer)/settings/business',
-    desc: 'Name, address, GST on/off, UPI, WhatsApp',
-    icon: 'storefront-outline' as const,
+    icon: 'storefront-outline',
   },
   {
     title: 'Financial Year',
     route: '/(drawer)/settings/financial-year',
-    desc: 'Current year and start month',
-    icon: 'calendar-outline' as const,
+    icon: 'calendar-outline',
   },
   {
     title: 'Invoicing',
     route: '/(drawer)/settings/invoicing',
-    desc: 'Next sale and purchase numbers',
-    icon: 'document-text-outline' as const,
+    icon: 'document-text-outline',
   },
+];
+
+const DATA_ITEMS: SettingsItem[] = [
   {
     title: 'Backup',
     route: '/(drawer)/settings/backup',
-    desc: 'Local folder and cloud backup',
-    icon: 'cloud-upload-outline' as const,
+    icon: 'cloud-upload-outline',
   },
   {
     title: 'Tally XML',
     route: '/(drawer)/settings/tally',
-    desc: 'Import and export vouchers for Tally',
-    icon: 'swap-horizontal-outline' as const,
+    icon: 'swap-horizontal-outline',
   },
   {
     title: 'Data',
     route: '/(drawer)/settings/data',
-    desc: 'Reset database',
-    icon: 'trash-outline' as const,
+    icon: 'trash-outline',
   },
 ];
+
+function SettingsSection({
+  items,
+  onPress,
+}: {
+  items: SettingsItem[];
+  onPress: (route: string) => void;
+}) {
+  const { colors, isDark } = useTheme();
+  return (
+    <View
+      style={{
+        ...cardSurface(colors, isDark),
+        paddingHorizontal: 0,
+        paddingVertical: 0,
+        overflow: 'hidden',
+        marginBottom: spacing.sm,
+      }}
+    >
+      {items.map((item, index) => (
+        <NavListRow
+          key={item.route}
+          title={item.title}
+          icon={item.icon}
+          onPress={() => onPress(item.route)}
+          isLast={index === items.length - 1}
+        />
+      ))}
+    </View>
+  );
+}
 
 export default function SettingsIndexScreen() {
   const router = useRouter();
   const styles = useScreenStyles();
   const localStyles = useSettingsStyles();
-  const { colors, themeMode, setThemeMode } = useTheme();
+  const { themeMode, setThemeMode } = useTheme();
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [hapticsOn, setHapticsOn] = useState(true);
 
@@ -88,7 +126,7 @@ export default function SettingsIndexScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <ScreenTitle title="Settings" subtitle="Appearance, business, backup, and data." />
+      <ScreenTitle title="Settings" />
 
       <View style={localStyles.sectionCard}>
         <Text style={[localStyles.rowLabel, { marginBottom: 8 }]}>Appearance</Text>
@@ -106,30 +144,21 @@ export default function SettingsIndexScreen() {
             gap: 12,
           }}
         >
-          <View style={{ flex: 1 }}>
-            <Text style={localStyles.rowLabel}>Haptic feedback</Text>
-            <Text style={localStyles.rowMeta}>Light vibration on saves and FABs</Text>
-          </View>
-          <Switch
+          <Text style={[localStyles.rowLabel, { flex: 1 }]}>Haptic feedback</Text>
+          <ThemedSwitch
             value={hapticsOn}
             onValueChange={toggleHaptics}
-            trackColor={{ false: colors.border, true: colors.primary }}
-            thumbColor={colors.surface}
           />
         </View>
       </View>
 
-      {SETTINGS_ITEMS.map((item) => (
-        <SettingsNavCard
-          key={item.route}
-          title={item.title}
-          desc={item.desc}
-          icon={<Ionicons name={item.icon} size={18} color={colors.onPrimaryContainer} />}
-          chevronColor={colors.textMuted}
-          onPress={() => router.push(item.route as never)}
-        />
-      ))}
+      <SectionHeader title="Business" />
+      <SettingsSection items={BUSINESS_ITEMS} onPress={(route) => router.push(route as never)} />
 
+      <SectionHeader title="Backup & Data" />
+      <SettingsSection items={DATA_ITEMS} onPress={(route) => router.push(route as never)} />
+
+      <SectionHeader title="About" />
       <View style={localStyles.sectionCard}>
         <View style={localStyles.aboutRow}>
           <Text style={localStyles.aboutLabel}>Version</Text>

@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { View, Text, StyleSheet, RefreshControl } from 'react-native';
 import { ErrorState, useScreenStyles } from '../../../src/components/ui';
+import { ListSkeleton } from '../../../src/components/Skeleton';
 import { LedgerTable } from '../../../src/components/LedgerTable';
 import { getTrialBalanceReport } from '../../../src/services/reports';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -9,17 +9,16 @@ import { useTheme } from '../../../src/context/ThemeContext';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { shareTrialBalancePdf } from '../../../src/services/reportPdf';
 import { spacing, typography } from '../../../src/constants/theme';
-import { formatSqliteError } from '../../../src/db/database';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { formatCurrency } from '../../../src/utils/format';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 
 export default function TrialBalanceReportScreen() {
   const styles = useScreenStyles();
   const { refreshKey } = useDatabase();
   const { colors } = useTheme();
   const [data, setData] = useState<Awaited<ReturnType<typeof getTrialBalanceReport>> | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [booting, setBooting] = useState(true);
 
   const localStyles = useMemo(
     () =>
@@ -35,22 +34,20 @@ export default function TrialBalanceReportScreen() {
 
   const load = useCallback(async () => {
     void refreshKey;
-    try {
-      setData(await getTrialBalanceReport());
-      setError(null);
-    } catch (e) {
-      setError(formatSqliteError(e));
-    } finally {
-      setBooting(false);
-    }
+    setData(await getTrialBalanceReport());
   }, [refreshKey]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const { booting, error, retry } = useFocusRefresh(load, [refreshKey]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
-    setRefreshing(false);
+    try {
+      await load();
+    } catch (e) {
+      alertRefreshFailed(e);
+    } finally {
+      setRefreshing(false);
+    }
   }, [load]);
 
   const ledgerRows = useMemo(
@@ -74,59 +71,56 @@ export default function TrialBalanceReportScreen() {
   useReportPdfHeader({ disabled: !data || !!error, onExport: exportPdf });
 
   if (error && !data) {
-    return <ErrorState message={error} onRetry={load} />;
+    return <ErrorState message={error} onRetry={retry} />;
   }
 
   if (booting && !data) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <ListSkeleton />;
   }
 
   const balanced = data ? Math.abs(data.totalDebit - data.totalCredit) < 0.02 : false;
 
   return (
-    <ScrollView
+    <LedgerTable
       style={styles.container}
       contentContainerStyle={styles.content}
+      rows={ledgerRows}
+      showDate={false}
+      showBalance={false}
+      emptyText="No ledger balances yet."
+      footerRows={
+        data
+          ? [
+              {
+                label: 'Total',
+                debit: data.totalDebit,
+                credit: data.totalCredit,
+              },
+            ]
+          : undefined
+      }
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
       }
-    >
-      <View style={localStyles.hero}>
-        <Text style={localStyles.heroLabel}>Trial Balance</Text>
-        <Text style={localStyles.heroHint}>
-          Double-entry snapshot — total debits must equal total credits.
-        </Text>
-      </View>
-
-      {data ? (
-        <LedgerTable
-          rows={ledgerRows}
-          showDate={false}
-          showBalance={false}
-          emptyText="No ledger balances yet."
-          footerRows={[
-            {
-              label: 'Total',
-              debit: data.totalDebit,
-              credit: data.totalCredit,
-            },
-          ]}
-        />
-      ) : null}
-
-      {data ? (
-        <View style={localStyles.balanced}>
-          <Text style={localStyles.balancedText}>
-            {balanced
-              ? 'Books are balanced — total debits equal total credits.'
-              : `Difference: ${formatCurrency(Math.abs(data.totalDebit - data.totalCredit))}`}
+      ListHeaderComponent={
+        <View style={localStyles.hero}>
+          <Text style={localStyles.heroLabel}>Trial Balance</Text>
+          <Text style={localStyles.heroHint}>
+            Double-entry snapshot — total debits must equal total credits.
           </Text>
         </View>
-      ) : null}
-    </ScrollView>
+      }
+      ListFooterComponent={
+        data ? (
+          <View style={localStyles.balanced}>
+            <Text style={localStyles.balancedText}>
+              {balanced
+                ? 'Books are balanced — total debits equal total credits.'
+                : `Difference: ${formatCurrency(Math.abs(data.totalDebit - data.totalCredit))}`}
+            </Text>
+          </View>
+        ) : null
+      }
+    />
   );
 }

@@ -2,7 +2,7 @@ import { format } from 'date-fns';
 import { formatIndianMoney } from '../utils/format';
 import { isValidISODate, parseISODate } from '../utils/date';
 import { roundMoney } from '../utils/money';
-import { getBusinessName, isGstEnabled } from './appSettings';
+import { getBusinessName } from './appSettings';
 import type { PartyStatementLine, PartyType } from '../types';
 
 export interface PartyStatementPdfInput {
@@ -14,8 +14,6 @@ export interface PartyStatementPdfInput {
   openingBalance: number;
   closingBalance: number;
   lines: PartyStatementLine[];
-  /** When false, hide BOS / Bill of Supply labels. Defaults from settings at export time. */
-  gstEnabled?: boolean;
 }
 
 function escapeHtml(text: string): string {
@@ -52,8 +50,7 @@ function tallyBalanceDrCr(partyType: PartyType, amount: number): string {
 
 function parseVoucher(
   partyType: PartyType,
-  line: PartyStatementLine,
-  gstEnabled: boolean
+  line: PartyStatementLine
 ): {
   vchType: string;
   vchNo: string;
@@ -63,13 +60,11 @@ function parseVoucher(
     if (line.reference_type === 'sale') {
       const match = line.description.match(/^(?:Invoice|Bill of Supply)\s+(.+)$/i);
       const vchNo = match?.[1]?.trim() ?? String(line.reference_id);
-      const isBos = gstEnabled && /^Bill of Supply\b/i.test(line.description);
+      const isBos = /^Bill of Supply\b/i.test(line.description);
       return {
         vchType: isBos ? 'BOS' : 'Sales',
         vchNo,
-        particulars: gstEnabled
-          ? line.description
-          : line.description.replace(/^Bill of Supply\b/i, 'Invoice'),
+        particulars: line.description,
       };
     }
     if (line.reference_type === 'payment') {
@@ -110,7 +105,6 @@ function ledgerGroupLabel(partyType: PartyType, partyName: string): string {
 }
 
 export async function buildPartyStatementHtml(input: PartyStatementPdfInput): Promise<string> {
-  const gstEnabled = input.gstEnabled ?? (await isGstEnabled());
   const totalDebit = roundMoney(input.lines.reduce((sum, line) => sum + line.debit, 0));
   const totalCredit = roundMoney(input.lines.reduce((sum, line) => sum + line.credit, 0));
   const generatedAt = format(new Date(), 'd-MMM-yyyy h:mm a');
@@ -120,7 +114,7 @@ export async function buildPartyStatementHtml(input: PartyStatementPdfInput): Pr
 
   const rows = input.lines
     .map((line) => {
-      const vch = parseVoucher(input.partyType, line, gstEnabled);
+      const vch = parseVoucher(input.partyType, line);
       return `
       <tr>
         <td class="c">${escapeHtml(tallyDate(line.date))}</td>

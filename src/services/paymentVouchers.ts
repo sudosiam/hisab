@@ -289,6 +289,8 @@ export async function createPaymentVoucher(
 
   const db = await getDatabase();
   let voucherId = 0;
+  const linkedSaleIds = new Set<number>();
+  const linkedPurchaseIds = new Set<number>();
 
   await db.withTransactionAsync(async () => {
     const result = await db.runAsync(
@@ -331,6 +333,33 @@ export async function createPaymentVoucher(
 
     let allocatedToInvoices = 0;
 
+    const insertAllocation = async (row: {
+      bill_name: string;
+      bill_type: PaymentBillType;
+      amount: number;
+      sale_id: number | null;
+      purchase_id: number | null;
+      sale_payment_id: number | null;
+      purchase_payment_id: number | null;
+    }) => {
+      await db.runAsync(
+        `INSERT INTO payment_voucher_allocations (
+           voucher_id, bill_name, bill_type, amount,
+           sale_id, purchase_id, sale_payment_id, purchase_payment_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          voucherId,
+          row.bill_name,
+          row.bill_type,
+          row.amount,
+          row.sale_id,
+          row.purchase_id,
+          row.sale_payment_id,
+          row.purchase_payment_id,
+        ]
+      );
+    };
+
     for (const alloc of allocations) {
       const allocAmount = roundMoney(Math.abs(alloc.amount));
       if (!(allocAmount > 0.009)) continue;
@@ -340,6 +369,7 @@ export async function createPaymentVoucher(
       let purchaseId: number | null = null;
       let salePaymentId: number | null = null;
       let purchasePaymentId: number | null = null;
+      let appliedToInvoice = 0;
 
       if (billType === 'agst_ref') {
         if (params.voucher_type === 'receipt') {
@@ -347,7 +377,8 @@ export async function createPaymentVoucher(
           if (sale) {
             saleId = sale.id;
             const due = roundMoney(Math.max(0, sale.total_amount - sale.paid_amount));
-            const payAmount = roundMoney(Math.min(allocAmount, due > 0 ? due : allocAmount));
+            // Never pay more than due — leftover stays on-account / advance.
+            const payAmount = roundMoney(Math.min(allocAmount, due));
             if (payAmount > 0.009) {
               const payResult = await db.runAsync(
                 `INSERT INTO sale_payments (sale_id, account_id, amount, date, notes)
@@ -357,7 +388,7 @@ export async function createPaymentVoucher(
                   accountId,
                   payAmount,
                   params.date,
-                  `Tally Receipt ${voucherNo}`,
+                  `Receipt ${voucherNo}`,
                 ]
               );
               salePaymentId = payResult.lastInsertRowId;
@@ -382,6 +413,12 @@ export async function createPaymentVoucher(
                 sale.id,
               ]);
               allocatedToInvoices = roundMoney(allocatedToInvoices + payAmount);
+              appliedToInvoice = payAmount;
+              linkedSaleIds.add(sale.id);
+            } else {
+              // Invoice already settled — keep the full amount as on-account.
+              billType = 'on_account';
+              saleId = null;
             }
           } else {
             billType = 'on_account';
@@ -391,7 +428,7 @@ export async function createPaymentVoucher(
           if (purchase) {
             purchaseId = purchase.id;
             const due = roundMoney(Math.max(0, purchase.total_amount - purchase.paid_amount));
-            const payAmount = roundMoney(Math.min(allocAmount, due > 0 ? due : allocAmount));
+            const payAmount = roundMoney(Math.min(allocAmount, due));
             if (payAmount > 0.009) {
               const payResult = await db.runAsync(
                 `INSERT INTO purchase_payments (purchase_id, account_id, amount, date, notes)
@@ -401,7 +438,7 @@ export async function createPaymentVoucher(
                   accountId,
                   payAmount,
                   params.date,
-                  `Tally Payment ${voucherNo}`,
+                  `Payment ${voucherNo}`,
                 ]
               );
               purchasePaymentId = payResult.lastInsertRowId;
@@ -426,6 +463,11 @@ export async function createPaymentVoucher(
                 purchase.id,
               ]);
               allocatedToInvoices = roundMoney(allocatedToInvoices + payAmount);
+              appliedToInvoice = payAmount;
+              linkedPurchaseIds.add(purchase.id);
+            } else {
+              billType = 'on_account';
+              purchaseId = null;
             }
           } else {
             billType = 'on_account';
@@ -433,22 +475,40 @@ export async function createPaymentVoucher(
         }
       }
 
-      await db.runAsync(
-        `INSERT INTO payment_voucher_allocations (
-           voucher_id, bill_name, bill_type, amount,
-           sale_id, purchase_id, sale_payment_id, purchase_payment_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          voucherId,
-          alloc.bill_name.trim() || 'On Account',
-          billType,
-          allocAmount,
-          saleId,
-          purchaseId,
-          salePaymentId,
-          purchasePaymentId,
-        ]
-      );
+      const billName = alloc.bill_name.trim() || 'On Account';
+      if (billType === 'agst_ref' && appliedToInvoice > 0.009) {
+        await insertAllocation({
+          bill_name: billName,
+          bill_type: 'agst_ref',
+          amount: appliedToInvoice,
+          sale_id: saleId,
+          purchase_id: purchaseId,
+          sale_payment_id: salePaymentId,
+          purchase_payment_id: purchasePaymentId,
+        });
+        const leftover = roundMoney(allocAmount - appliedToInvoice);
+        if (leftover > 0.009) {
+          await insertAllocation({
+            bill_name: 'On Account',
+            bill_type: 'on_account',
+            amount: leftover,
+            sale_id: null,
+            purchase_id: null,
+            sale_payment_id: null,
+            purchase_payment_id: null,
+          });
+        }
+      } else {
+        await insertAllocation({
+          bill_name: billType === 'on_account' ? billName || 'On Account' : billName,
+          bill_type: billType,
+          amount: allocAmount,
+          sale_id: null,
+          purchase_id: null,
+          sale_payment_id: null,
+          purchase_payment_id: null,
+        });
+      }
     }
 
     const unallocated = roundMoney(Math.max(0, amount - allocatedToInvoices));
@@ -468,6 +528,12 @@ export async function createPaymentVoucher(
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
     scheduleGeneralLedgerRefresh({ type: 'payment_voucher', id: voucherId });
+    for (const saleId of linkedSaleIds) {
+      scheduleGeneralLedgerRefresh({ type: 'sale', id: saleId });
+    }
+    for (const purchaseId of linkedPurchaseIds) {
+      scheduleGeneralLedgerRefresh({ type: 'purchase', id: purchaseId });
+    }
   } catch {
     // best-effort
   }
@@ -731,6 +797,7 @@ export async function applyPartyAdvanceToSale(
   const accountId =
     opens.find((o) => o.account_id)?.account_id ??
     (await ensureCashBankAccount('Cash'));
+  const touchedVoucherIds = new Set<number>();
 
   await db.withTransactionAsync(async () => {
     for (const open of opens) {
@@ -744,6 +811,7 @@ export async function applyPartyAdvanceToSale(
         [saleId, accountId, slice, date, 'Advance applied']
       );
       const salePaymentId = payResult.lastInsertRowId;
+      touchedVoucherIds.add(open.voucher_id);
 
       if (slice + 0.009 >= open.amount) {
         await db.runAsync(
@@ -786,6 +854,11 @@ export async function applyPartyAdvanceToSale(
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
+    // Refresh vouchers first conceptually (coalesced): drop stale on-account journals,
+    // then re-post sale payments so cash/AR stay single-counted.
+    for (const voucherId of touchedVoucherIds) {
+      scheduleGeneralLedgerRefresh({ type: 'payment_voucher', id: voucherId });
+    }
     scheduleGeneralLedgerRefresh({ type: 'sale', id: saleId });
   } catch {
     // best-effort
@@ -830,6 +903,7 @@ export async function applyPartyAdvanceToPurchase(
   const accountId =
     opens.find((o) => o.account_id)?.account_id ??
     (await ensureCashBankAccount('Cash'));
+  const touchedVoucherIds = new Set<number>();
 
   await db.withTransactionAsync(async () => {
     for (const open of opens) {
@@ -843,6 +917,7 @@ export async function applyPartyAdvanceToPurchase(
         [purchaseId, accountId, slice, date, 'Advance applied']
       );
       const purchasePaymentId = payResult.lastInsertRowId;
+      touchedVoucherIds.add(open.voucher_id);
 
       if (slice + 0.009 >= open.amount) {
         await db.runAsync(
@@ -884,6 +959,9 @@ export async function applyPartyAdvanceToPurchase(
 
   try {
     const { scheduleGeneralLedgerRefresh } = await import('./ledger');
+    for (const voucherId of touchedVoucherIds) {
+      scheduleGeneralLedgerRefresh({ type: 'payment_voucher', id: voucherId });
+    }
     scheduleGeneralLedgerRefresh({ type: 'purchase', id: purchaseId });
   } catch {
     // best-effort

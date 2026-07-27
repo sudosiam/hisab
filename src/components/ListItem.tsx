@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { memo, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,9 @@ import type { ThemeColors } from '../constants/theme';
 import { spacing, radius, typography } from '../constants/theme';
 import { cardSurface } from '../constants/shadows';
 import { MoneyText, moneyRowStyles } from './MoneyText';
+import { ThemedPressable } from './ThemedPressable';
+
+const ROW_ACTIVE_OPACITY = 0.75;
 
 /** Shared compact list-row chrome for mobile density. */
 export function useListItemStyles() {
@@ -25,9 +28,9 @@ export function createListItemStyles(colors: ThemeColors, isDark: boolean) {
     card: {
       ...cardSurface(colors, isDark),
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      marginBottom: spacing.xs + 2,
-      minHeight: 52,
+      paddingVertical: spacing.sm + 2,
+      marginBottom: spacing.sm,
+      minHeight: 56,
       justifyContent: 'center',
       // Never clip children — rows grow with wrapped amounts.
       overflow: 'visible',
@@ -35,12 +38,18 @@ export function createListItemStyles(colors: ThemeColors, isDark: boolean) {
     top: {
       ...moneyRowStyles.row,
       alignItems: 'flex-start',
+      gap: spacing.sm,
     },
-    left: moneyRowStyles.left,
+    left: {
+      ...moneyRowStyles.left,
+      minWidth: 0,
+      paddingRight: spacing.xs,
+    },
     right: {
-      width: 118,
+      maxWidth: '42%',
+      minWidth: 88,
       flexGrow: 0,
-      flexShrink: 0,
+      flexShrink: 1,
       alignItems: 'flex-end',
       gap: 4,
     },
@@ -55,6 +64,7 @@ export function createListItemStyles(colors: ThemeColors, isDark: boolean) {
       marginTop: 2,
     },
     meta: {
+      ...typography.caption,
       fontSize: 11,
       lineHeight: 15,
       color: colors.textMuted,
@@ -63,13 +73,17 @@ export function createListItemStyles(colors: ThemeColors, isDark: boolean) {
     pill: {
       alignSelf: 'flex-start',
       paddingHorizontal: 6,
-      paddingVertical: 1,
+      paddingVertical: 2,
       borderRadius: radius.full,
       backgroundColor: colors.primaryContainer,
-      marginTop: 3,
+      marginTop: 4,
     },
     pillWarn: { backgroundColor: colors.warning + '22' },
-    pillMuted: { backgroundColor: colors.chip },
+    pillMuted: {
+      backgroundColor: colors.surfaceContainerHigh,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
     pillText: {
       fontSize: 10,
       fontWeight: '700',
@@ -84,7 +98,7 @@ export function createListItemStyles(colors: ThemeColors, isDark: boolean) {
       alignItems: 'center',
       flexWrap: 'wrap',
       gap: 4,
-      marginTop: 3,
+      marginTop: 4,
     },
     dueLabel: {
       fontSize: 11,
@@ -104,7 +118,7 @@ interface ListCardProps {
 }
 
 /** Full-row pressable card — tap anywhere to navigate. */
-export function ListCard({
+export const ListCard = memo(function ListCard({
   children,
   onPress,
   style,
@@ -130,20 +144,20 @@ export function ListCard({
 
   if (onPress) {
     return (
-      <TouchableOpacity
+      <ThemedPressable
         style={[styles.card, style]}
         onPress={onPress}
-        activeOpacity={0.7}
+        activeOpacity={ROW_ACTIVE_OPACITY}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
       >
         {body}
-      </TouchableOpacity>
+      </ThemedPressable>
     );
   }
 
   return <View style={[styles.card, style]}>{body}</View>;
-}
+});
 
 interface ListItemProps {
   title: string;
@@ -171,7 +185,7 @@ interface ListItemProps {
 /**
  * Compact entity row. Titles may ellipsis; amounts always shrink/wrap — never clip.
  */
-export function ListItem({
+export const ListItem = memo(function ListItem({
   title,
   subtitle,
   meta,
@@ -271,7 +285,7 @@ export function ListItem({
       {content}
     </ListCard>
   );
-}
+});
 
 interface NavListRowProps {
   title: string;
@@ -282,7 +296,13 @@ interface NavListRowProps {
 }
 
 /** Compact hub navigation row (reports, settings sections). */
-export function NavListRow({ title, description, onPress, icon, isLast }: NavListRowProps) {
+export const NavListRow = memo(function NavListRow({
+  title,
+  description,
+  onPress,
+  icon,
+  isLast,
+}: NavListRowProps) {
   const { colors } = useTheme();
   const styles = useMemo(
     () =>
@@ -319,7 +339,7 @@ export function NavListRow({ title, description, onPress, icon, isLast }: NavLis
     <TouchableOpacity
       style={styles.row}
       onPress={onPress}
-      activeOpacity={0.7}
+      activeOpacity={ROW_ACTIVE_OPACITY}
       accessibilityRole="button"
       accessibilityLabel={title}
     >
@@ -346,4 +366,5 @@ export function NavListRow({ title, description, onPress, icon, isLast }: NavLis
       />
     </TouchableOpacity>
   );
-}
+});
+

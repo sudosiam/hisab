@@ -107,7 +107,7 @@ export function GrowthChart({ data, variant, height = 140 }: Props) {
                     cx={point.x}
                     cy={point.y}
                     r={4}
-                    fill={colors.surface}
+                    fill={colors.surfaceElevated}
                     stroke={colors.primary}
                     strokeWidth={2}
                   />

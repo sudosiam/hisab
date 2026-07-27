@@ -2,14 +2,14 @@ import React, { useState } from 'react';
 import { ScrollView, View, Text, Alert, TouchableOpacity, Modal, Pressable } from 'react-native';
 import { FormInput, PrimaryButton, useScreenStyles } from '../../../src/components/ui';
 import { resetDatabase } from '../../../src/db/database';
-import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { clearAllDrafts } from '../../../src/services/formDrafts';
 import { useSettingsStyles } from '../../../src/components/settings/settingsUi';
 
 const RESET_CONFIRM_TEXT = 'RESET';
 
 export default function DataSettingsScreen() {
-  const { refresh } = useDatabase();
+  const { refresh } = useDatabaseActions();
   const styles = useScreenStyles();
   const localStyles = useSettingsStyles();
 
@@ -51,10 +51,6 @@ export default function DataSettingsScreen() {
     <>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <View style={localStyles.sectionCard}>
-          <Text style={[localStyles.rowMeta, { marginBottom: 12 }]}>
-            Reset deletes all local books on this device. Make a backup first if you might need the
-            data later.
-          </Text>
           <TouchableOpacity style={localStyles.dangerBtn} onPress={openResetModal} activeOpacity={0.7}>
             <Text style={localStyles.dangerText}>Reset database</Text>
           </TouchableOpacity>
@@ -66,8 +62,7 @@ export default function DataSettingsScreen() {
           <Pressable style={localStyles.modalSheet} onPress={(e) => e.stopPropagation()}>
             <Text style={localStyles.modalTitle}>Reset database</Text>
             <Text style={localStyles.modalText}>
-              All local data will be deleted. This cannot be undone. Type {RESET_CONFIRM_TEXT} to
-              confirm.
+              Deletes all local data. Type {RESET_CONFIRM_TEXT} to confirm.
             </Text>
             <FormInput
               label="Confirmation"

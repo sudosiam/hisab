@@ -3,9 +3,7 @@ import {
   View,
   Text,
   StyleSheet,
-  ActivityIndicator,
   Alert,
-  TouchableOpacity,
 } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter, useNavigation } from 'expo-router';
 import type { NavigationProp, ParamListBase } from '@react-navigation/native';
@@ -17,21 +15,23 @@ import {
 import { getPurchaseById } from '../../../src/services/purchases';
 import { getSaleById } from '../../../src/services/sales';
 import { formatSqliteError } from '../../../src/db/database';
-import { OverflowMenu } from '../../../src/components/OverflowMenu';
+import { DetailHeaderActions } from '../../../src/components/DetailHeaderActions';
 import { StatCard } from '../../../src/components/StatCard';
+import { MoneyText } from '../../../src/components/MoneyText';
+import { DetailSkeleton } from '../../../src/components/Skeleton';
 import {
+  EmptyState,
+  ErrorState,
   FormScreen,
   SectionHeader,
   useScreenStyles,
 } from '../../../src/components/ui';
 import { formatCurrency } from '../../../src/utils/format';
 import { parseRouteId } from '../../../src/utils/route';
-import { useDatabase } from '../../../src/context/DatabaseContext';
-import { useGstEnabled } from '../../../src/context/GstContext';
+import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatDisplayDate } from '../../../src/utils/date';
 import { stackDetailBeforeRemove } from '../../../src/navigation/screenOptions';
-import { stateName } from '../../../src/services/gst';
 import { spacing, radius } from '../../../src/constants/theme';
 import type { AdjustmentNote, AdjustmentNoteItem } from '../../../src/types';
 
@@ -43,10 +43,9 @@ export default function NoteDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
-  const { refresh } = useDatabase();
-  const styles = useScreenStyles();
+  const { refresh } = useDatabaseActions();
   const { colors } = useTheme();
-  const gstEnabled = useGstEnabled();
+  const styles = useScreenStyles();
   const noteId = useMemo(() => parseRouteId(id), [id]);
 
   useEffect(() => {
@@ -74,12 +73,6 @@ export default function NoteDetailScreen() {
         kindBadgeTextCredit: { color: colors.warning },
         party: { fontSize: 16, color: colors.textSecondary, marginTop: 4 },
         date: { fontSize: 13, color: colors.textSecondary },
-        kpiRow: {
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: spacing.sm,
-          marginVertical: spacing.md,
-        },
         itemRow: {
           flexDirection: 'row',
           justifyContent: 'space-between',
@@ -91,7 +84,6 @@ export default function NoteDetailScreen() {
         itemMeta: { fontSize: 12, color: colors.textSecondary },
         itemTotal: { fontWeight: '600', color: colors.text },
         muted: { color: colors.textSecondary, fontSize: 13 },
-        linkRow: { marginTop: spacing.sm },
       }),
     [colors]
   );
@@ -196,11 +188,11 @@ export default function NoteDetailScreen() {
     navigation.setOptions({
       headerRight: note
         ? () => (
-            <OverflowMenu
-              actions={[
+            <DetailHeaderActions
+              onShare={handleSharePdf}
+              overflowActions={[
                 { label: 'Preview / Print', onPress: handlePreviewPdf },
                 { label: 'Download PDF', onPress: handleDownloadPdf },
-                { label: 'Share PDF', onPress: handleSharePdf },
                 { label: 'Delete Note', destructive: true, onPress: handleDelete },
               ]}
             />
@@ -210,29 +202,24 @@ export default function NoteDetailScreen() {
   }, [navigation, note, handleDelete, handlePreviewPdf, handleDownloadPdf, handleSharePdf]);
 
   if (loading) {
+    return <DetailSkeleton />;
+  }
+
+  if (error) {
+    return <ErrorState message={error} onRetry={() => { void load(); }} />;
+  }
+
+  if (!note) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
+      <EmptyState
+        title="Not found"
+        message="This record is missing or was deleted."
+        actionLabel="Go Back"
+        onAction={() => router.dismissTo('/(drawer)/notes' as never)}
+      />
     );
   }
 
-  if (error || !note) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.cardTitle}>{error ?? 'Note not found'}</Text>
-        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.dismissTo('/(drawer)/notes' as never)}>
-          <Text style={styles.link}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  const outputTax =
-    (note.cgst_amount ?? 0) + (note.sgst_amount ?? 0) + (note.igst_amount ?? 0);
-  const placeLabel = note.place_of_supply
-    ? stateName(note.place_of_supply) || note.place_of_supply
-    : null;
   const isCredit = note.note_kind === 'credit';
 
   return (
@@ -251,35 +238,15 @@ export default function NoteDetailScreen() {
         <Text style={localStyles.date}>Against invoice: {againstInvoiceNo}</Text>
       ) : null}
       {note.reason ? <Text style={localStyles.date}>Reason: {note.reason}</Text> : null}
-      {gstEnabled && placeLabel ? (
-        <Text style={localStyles.date}>Place of supply: {placeLabel}</Text>
-      ) : null}
+      
 
-      <View style={localStyles.kpiRow}>
+      <View style={styles.detailKpiRow}>
         <StatCard label="Total" value={note.total_amount} color={colors.primary} />
-        {gstEnabled ? (
-          <>
-            <StatCard
-              label="Tax"
-              value={outputTax}
-              color={outputTax > 0 ? colors.primary : colors.textSecondary}
-              subtitle={
-                (note.igst_amount ?? 0) > 0.009
-                  ? 'IGST'
-                  : outputTax > 0
-                    ? 'CGST + SGST'
-                    : 'No tax'
-              }
-            />
-            <StatCard label="Taxable" value={note.taxable_amount} color={colors.accent} />
-          </>
-        ) : null}
+        
       </View>
 
       <SectionHeader title="Items" />
       {items.map((item) => {
-        const lineTax =
-          (item.cgst_amount ?? 0) + (item.sgst_amount ?? 0) + (item.igst_amount ?? 0);
         const name = item.product_name ?? item.description ?? 'Item';
         return (
           <View key={item.id} style={localStyles.itemRow}>
@@ -287,15 +254,11 @@ export default function NoteDetailScreen() {
               <Text style={localStyles.itemName}>{name}</Text>
               <Text style={localStyles.itemMeta}>
                 {item.qty} × {formatCurrency(item.unit_price)}
-                {gstEnabled && item.hsn_sac ? ` · HSN ${item.hsn_sac}` : ''}
-                {gstEnabled
-                  ? (item.gst_rate ?? 0) > 0.009
-                    ? ` · GST ${item.gst_rate}% · Tax ${formatCurrency(lineTax)}`
-                    : ' · No GST'
-                  : ''}
+
+                
               </Text>
             </View>
-            <Text style={localStyles.itemTotal}>{formatCurrency(item.total)}</Text>
+            <MoneyText amount={item.total} size="md" style={localStyles.itemTotal} />
           </View>
         );
       })}

@@ -6,9 +6,9 @@ export default function NotesLayout() {
 
   return (
     <Stack screenOptions={screenOptions}>
-      <Stack.Screen name="index" options={{ title: 'Credit / Debit Notes' }} />
-      <Stack.Screen name="new" options={{ title: 'New Note' }} />
-      <Stack.Screen name="[id]" options={{ title: 'Note Details' }} />
+      <Stack.Screen name="index" options={{ title: 'Adjustments' }} />
+      <Stack.Screen name="new" options={{ title: 'New Adjustment' }} />
+      <Stack.Screen name="[id]" options={{ title: 'Adjustment' }} />
     </Stack>
   );
 }

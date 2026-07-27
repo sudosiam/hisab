@@ -14,6 +14,8 @@ import { useFinancialYear } from '../context/FinancialYearContext';
 import { useTheme } from '../context/ThemeContext';
 import { spacing, radius, typography } from '../constants/theme';
 
+const ACTIVE_OPACITY = 0.75;
+
 interface Props {
   monthKey: string;
   onChange: (monthKey: string) => void;
@@ -58,10 +60,13 @@ export function MonthPicker({ monthKey, onChange, allowAllTime = false }: Props)
         <TouchableOpacity
           style={[styles.btn, isAllTime && { opacity: 0.35 }]}
           onPress={() => {
-            if (!isAllTime) onChange(shiftPeriod(monthKey, -1));
+            if (!isAllTime) {
+              void import('../utils/haptics').then((m) => m.hapticLight());
+              onChange(shiftPeriod(monthKey, -1));
+            }
           }}
           disabled={isAllTime}
-          activeOpacity={0.7}
+          activeOpacity={ACTIVE_OPACITY}
           accessibilityRole="button"
           accessibilityLabel="Previous period"
         >
@@ -69,8 +74,11 @@ export function MonthPicker({ monthKey, onChange, allowAllTime = false }: Props)
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.labelWrap}
-          onPress={handleCenterPress}
-          activeOpacity={0.7}
+          onPress={() => {
+            void import('../utils/haptics').then((m) => m.hapticLight());
+            handleCenterPress();
+          }}
+          activeOpacity={ACTIVE_OPACITY}
           accessibilityRole="button"
           accessibilityLabel={`Current period ${periodKeyToLabel(monthKey)}`}
           accessibilityHint={
@@ -82,25 +90,17 @@ export function MonthPicker({ monthKey, onChange, allowAllTime = false }: Props)
           }
         >
           <Text style={styles.label}>{periodKeyToLabel(monthKey)}</Text>
-          <Text style={styles.hint}>
-            {allowAllTime
-              ? isAllTime
-                ? 'Tap for current month'
-                : isFinancialYear
-                  ? 'Tap for all time'
-                  : 'Tap for full financial year'
-              : isFinancialYear
-                ? 'Tap for current month'
-                : 'Tap for full financial year'}
-          </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.btn, isAllTime && { opacity: 0.35 }]}
           onPress={() => {
-            if (!isAllTime) onChange(shiftPeriod(monthKey, 1));
+            if (!isAllTime) {
+              void import('../utils/haptics').then((m) => m.hapticLight());
+              onChange(shiftPeriod(monthKey, 1));
+            }
           }}
           disabled={isAllTime}
-          activeOpacity={0.7}
+          activeOpacity={ACTIVE_OPACITY}
           accessibilityRole="button"
           accessibilityLabel="Next period"
         >
@@ -116,15 +116,18 @@ function createStyles(
   isFinancialYear: boolean
 ) {
   return StyleSheet.create({
-    wrap: { marginBottom: spacing.sm },
+    wrap: { marginBottom: 0 },
     container: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       borderRadius: radius.full,
-      backgroundColor: colors.surfaceContainer,
+      backgroundColor: colors.surfaceContainerHigh,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
       paddingVertical: 2,
       paddingHorizontal: 2,
+      minHeight: 44,
     },
     btn: {
       width: 40,
@@ -145,12 +148,6 @@ function createStyles(
       fontWeight: '600',
       color: isFinancialYear ? colors.onPrimaryContainer : colors.text,
       textAlign: 'center',
-    },
-    hint: {
-      fontSize: 10,
-      color: colors.textMuted,
-      textAlign: 'center',
-      marginTop: 1,
     },
   });
 }

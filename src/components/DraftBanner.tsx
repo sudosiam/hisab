@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { spacing, radius } from '../constants/theme';
+import { configureExpandAnimation } from '../utils/layoutAnimation';
 
 interface Props {
   visible: boolean;
@@ -22,7 +23,8 @@ export function DraftBanner({ visible, onDiscard }: Props) {
           paddingVertical: spacing.sm,
           paddingHorizontal: spacing.md,
           marginBottom: spacing.md,
-          minHeight: 40,
+          minHeight: 44,
+          borderWidth: 0,
         },
         text: {
           flex: 1,
@@ -39,6 +41,10 @@ export function DraftBanner({ visible, onDiscard }: Props) {
       }),
     [colors]
   );
+
+  useEffect(() => {
+    configureExpandAnimation();
+  }, [visible]);
 
   if (!visible) return null;
 

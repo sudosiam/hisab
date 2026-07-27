@@ -244,6 +244,101 @@ export function sumReportAmounts(rows: { total_amount: number }[]): number {
   return roundMoney(rows.reduce((sum, row) => sum + row.total_amount, 0));
 }
 
+export type VendorAccountPurchaseRow = {
+  party_id: number | null;
+  vendor_name: string;
+  bill_count: number;
+  total_amount: number;
+  due_amount: number;
+  /** Always 0 after GST removal; kept for UI/PDF column compatibility. */
+  input_tax: number;
+  accounts: { account_name: string; paid: number }[];
+};
+
+/** Purchases in period grouped by vendor, with payment account breakdown. */
+export async function getPurchasesByVendorAccount(
+  periodKey: string
+): Promise<VendorAccountPurchaseRow[]> {
+  const db = await getDatabase();
+  const { start, end } = await resolvePeriodRange(periodKey);
+
+  const purchases = await db.getAllAsync<{
+    id: number;
+    party_id: number | null;
+    supplier_name: string;
+    total_amount: number;
+    paid_amount: number;
+  }>(
+    `SELECT id, party_id, supplier_name, total_amount, paid_amount
+     FROM purchases
+     WHERE date >= ? AND date <= ?
+       AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = purchases.id)
+     ORDER BY supplier_name COLLATE NOCASE, id`,
+    [start, end]
+  );
+
+  type Acc = {
+    party_id: number | null;
+    vendor_name: string;
+    bill_count: number;
+    total_amount: number;
+    due_amount: number;
+    accounts: Map<string, number>;
+  };
+  const byVendor = new Map<string, Acc>();
+
+  for (const p of purchases) {
+    const key = `${p.party_id ?? 'x'}::${p.supplier_name}`;
+    let row = byVendor.get(key);
+    if (!row) {
+      row = {
+        party_id: p.party_id,
+        vendor_name: p.supplier_name,
+        bill_count: 0,
+        total_amount: 0,
+        due_amount: 0,
+        accounts: new Map(),
+      };
+      byVendor.set(key, row);
+    }
+    row.bill_count += 1;
+    row.total_amount = roundMoney(row.total_amount + p.total_amount);
+    row.due_amount = roundMoney(
+      row.due_amount + Math.max(0, p.total_amount - p.paid_amount)
+    );
+
+    const pays = await db.getAllAsync<{ account_name: string; paid: number }>(
+      `SELECT a.name AS account_name, COALESCE(SUM(pp.amount), 0) AS paid
+       FROM purchase_payments pp
+       JOIN accounts a ON a.id = pp.account_id
+       WHERE pp.purchase_id = ?
+       GROUP BY a.id, a.name`,
+      [p.id]
+    );
+    for (const pay of pays) {
+      row.accounts.set(
+        pay.account_name,
+        roundMoney((row.accounts.get(pay.account_name) ?? 0) + pay.paid)
+      );
+    }
+  }
+
+  return [...byVendor.values()]
+    .map((row) => ({
+      party_id: row.party_id,
+      vendor_name: row.vendor_name,
+      bill_count: row.bill_count,
+      total_amount: row.total_amount,
+      due_amount: row.due_amount,
+      input_tax: 0,
+      accounts: [...row.accounts.entries()].map(([account_name, paid]) => ({
+        account_name,
+        paid,
+      })),
+    }))
+    .sort((a, b) => a.vendor_name.localeCompare(b.vendor_name));
+}
+
 export async function getReceivablesReport(): Promise<
   {
     id: number;

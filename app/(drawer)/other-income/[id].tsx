@@ -4,12 +4,13 @@ import {
   Text,
   ScrollView,
   StyleSheet,
-  ActivityIndicator,
   Alert,
   TouchableOpacity,
 } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
 import {
+  EmptyState,
+  ErrorState,
   FormInput,
   FormScreen,
   PrimaryButton,
@@ -17,6 +18,7 @@ import {
   useScreenStyles,
 } from '../../../src/components/ui';
 import { StatCard } from '../../../src/components/StatCard';
+import { DetailSkeleton } from '../../../src/components/Skeleton';
 import { AccountPicker } from '../../../src/components/AccountPicker';
 import { CategoryPicker } from '../../../src/components/CategoryPicker';
 import { otherIncomeCategorySource } from '../../../src/components/categorySources';
@@ -28,7 +30,7 @@ import {
 } from '../../../src/services/otherIncome';
 import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { parseRouteId } from '../../../src/utils/route';
-import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
 import { isValidISODate, formatDisplayDate } from '../../../src/utils/date';
@@ -39,7 +41,7 @@ import type { Account, OtherIncome } from '../../../src/types';
 export default function OtherIncomeDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { refresh } = useDatabase();
+  const { refresh } = useDatabaseActions();
   const styles = useScreenStyles();
   const { colors } = useTheme();
   const localStyles = useMemo(
@@ -62,13 +64,6 @@ export default function OtherIncomeDetailScreen() {
         },
         title: { fontSize: 18, fontWeight: '700', color: colors.text },
         meta: { color: colors.textSecondary, marginTop: 4, fontSize: 13, lineHeight: 18 },
-        kpiRow: {
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: spacing.sm,
-          marginVertical: spacing.md,
-          width: '100%',
-        },
         kpiFull: { width: '100%', maxWidth: '100%', flexBasis: '100%', flexGrow: 1 },
         deleteWrap: {
           width: '100%',
@@ -213,21 +208,21 @@ export default function OtherIncomeDetailScreen() {
   };
 
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <DetailSkeleton />;
   }
 
-  if (error || !item) {
+  if (error) {
+    return <ErrorState message={error} onRetry={() => { void load(); }} />;
+  }
+
+  if (!item) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.cardTitle}>{error ?? 'Entry not found'}</Text>
-        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.back()}>
-          <Text style={styles.link}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
+      <EmptyState
+        title="Not found"
+        message="This record is missing or was deleted."
+        actionLabel="Go Back"
+        onAction={() => router.back()}
+      />
     );
   }
 
@@ -279,7 +274,7 @@ export default function OtherIncomeDetailScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={localStyles.kpiRow}>
+      <View style={styles.detailKpiRow}>
         <StatCard
           label="Amount"
           value={item.amount}

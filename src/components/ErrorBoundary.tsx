@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { spacing, radius } from '../constants/theme';
+import { View, Text, StyleSheet } from 'react-native';
+import { spacing, radius, typography } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
+import { ThemedPressable } from './ThemedPressable';
 
 interface Props {
   children: React.ReactNode;
@@ -24,21 +25,34 @@ function ErrorFallback({ error, onReset }: { error: Error; onReset: () => void }
           padding: spacing.lg,
           backgroundColor: colors.background,
         },
-        title: { fontSize: 18, fontWeight: '600', marginBottom: spacing.sm, color: colors.text },
+        title: {
+          ...typography.title,
+          marginBottom: spacing.sm,
+          color: colors.text,
+          textAlign: 'center',
+        },
         message: {
-          fontSize: 14,
+          ...typography.body,
           textAlign: 'center',
           marginBottom: spacing.lg,
           color: colors.textSecondary,
-          lineHeight: 20,
         },
         btn: {
           paddingHorizontal: spacing.lg,
           paddingVertical: spacing.sm,
-          borderRadius: radius.md,
+          borderRadius: radius.full,
           backgroundColor: colors.primary,
+          minHeight: 44,
+          minWidth: 140,
+          justifyContent: 'center',
+          alignItems: 'center',
         },
-        btnText: { fontSize: 15, fontWeight: '600', color: colors.onPrimary },
+        btnText: {
+          ...typography.bodyMedium,
+          fontWeight: '600',
+          color: colors.onPrimary,
+          textAlign: 'center',
+        },
       }),
     [colors]
   );
@@ -47,9 +61,14 @@ function ErrorFallback({ error, onReset }: { error: Error; onReset: () => void }
     <View style={styles.center}>
       <Text style={styles.title}>Something went wrong</Text>
       <Text style={styles.message}>{error.message}</Text>
-      <TouchableOpacity style={styles.btn} onPress={onReset}>
+      <ThemedPressable
+        style={styles.btn}
+        onPress={onReset}
+        accessibilityRole="button"
+        accessibilityLabel="Try again"
+      >
         <Text style={styles.btnText}>Try Again</Text>
-      </TouchableOpacity>
+      </ThemedPressable>
     </View>
   );
 }

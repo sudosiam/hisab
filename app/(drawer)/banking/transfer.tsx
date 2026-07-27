@@ -38,17 +38,21 @@ export default function TransferScreen() {
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: spacing.sm,
+          minHeight: 44,
         },
-        chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+        chipActive: {
+          backgroundColor: colors.primaryContainer,
+          borderColor: colors.primaryContainer,
+        },
         chipText: { color: colors.text, fontSize: 14, flex: 1, minWidth: 0 },
-        chipTextActive: { color: colors.onPrimary, fontWeight: '600' },
+        chipTextActive: { color: colors.onPrimaryContainer, fontWeight: '600' },
         chipBal: {
           color: colors.textSecondary,
           fontSize: 12,
           fontVariant: ['tabular-nums'],
           flexShrink: 0,
         },
-        chipBalActive: { color: colors.onPrimary, opacity: 0.9 },
+        chipBalActive: { color: colors.onPrimaryContainer, opacity: 0.9 },
       }),
     [colors]
   );

@@ -1,16 +1,15 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
-  Text,
   FlatList,
-  ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { ListItem } from '../../../src/components/ListItem';
 import { MoneyTotalRow } from '../../../src/components/MoneyText';
-import { ErrorState, Fab, SearchField, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import { ListSkeleton } from '../../../src/components/Skeleton';
+import { ErrorState, EmptyState, Fab, SearchField, SectionHeader, useScreenStyles, useFabListPadding } from '../../../src/components/ui';
 import { getOtherIncome } from '../../../src/services/otherIncome';
 import { matchesSearch } from '../../../src/utils/search';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -19,7 +18,8 @@ import { getPeriodTotalLabel, formatDisplayDate } from '../../../src/utils/date'
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { spacing } from '../../../src/constants/theme';
-import { FLATLIST_PERF } from '../../../src/constants/listPerf';
+import { FLATLIST_PERF, listCardGetItemLayout } from '../../../src/constants/listPerf';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 import type { OtherIncome } from '../../../src/types';
 
 export default function OtherIncomeListScreen() {
@@ -27,6 +27,7 @@ export default function OtherIncomeListScreen() {
   const { refreshKey } = useDatabase();
   const { colors } = useTheme();
   const styles = useScreenStyles();
+  const fabListPadding = useFabListPadding();
 
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [items, setItems] = useState<OtherIncome[]>([]);
@@ -85,7 +86,6 @@ export default function OtherIncomeListScreen() {
       />
 
       <SectionHeader title="Other Income" />
-      {booting ? <ActivityIndicator color={colors.primary} /> : null}
     </View>
   );
 
@@ -95,25 +95,38 @@ export default function OtherIncomeListScreen() {
         data={booting && items.length === 0 ? [] : filtered}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
-        contentContainerStyle={[styles.list, { paddingTop: spacing.sm }]}
+        contentContainerStyle={[styles.list, { paddingTop: spacing.sm, paddingBottom: fabListPadding }]}
         ListHeaderComponent={header}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
-              load().finally(() => setRefreshing(false));
+              load()
+                .catch((e) => alertRefreshFailed(e))
+                .finally(() => setRefreshing(false));
             }}
             colors={[colors.primary]}
             tintColor={colors.primary}
           />
         }
+        getItemLayout={listCardGetItemLayout}
         {...FLATLIST_PERF}
         ListEmptyComponent={
-          booting ? null : (
-            <Text style={styles.empty}>
-              {search.trim() ? 'No entries match your search.' : 'No other income this month'}
-            </Text>
+          booting && items.length === 0 ? (
+            <ListSkeleton />
+          ) : search.trim() ? (
+            <EmptyState
+              title="No matches"
+              message="Try a different search."
+            />
+          ) : (
+            <EmptyState
+              title="No other income yet"
+              message="Record other income for this period."
+              actionLabel="Add Income"
+              onAction={() => router.push('/(drawer)/other-income/new' as never)}
+            />
           )
         }
       />

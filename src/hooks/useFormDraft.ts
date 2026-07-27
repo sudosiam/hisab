@@ -46,9 +46,9 @@ export function useFormDraft<T>(
       if (!enabled || !ready || skipSave.current) return;
       const payload = dataRef.current;
       if (isEmpty(payload)) {
-        clearDraft(key).catch(() => {});
+        clearDraft(key).catch((err) => console.warn('[draft] clear failed', key, err));
       } else {
-        saveDraft(key, payload).catch(() => {});
+        saveDraft(key, payload).catch((err) => console.warn('[draft] persist failed', key, err));
       }
     };
   }, [cancelPendingSave, enabled, isEmpty, key, ready]);
@@ -61,10 +61,10 @@ export function useFormDraft<T>(
     }
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
-      persistDraft().catch(() => {});
+      persistDraft().catch((err) => console.warn('[draft] persist failed', key, err));
     }, debounceMs);
     return cancelPendingSave;
-  }, [data, enabled, ready, debounceMs, persistDraft, cancelPendingSave]);
+  }, [data, enabled, ready, debounceMs, persistDraft, cancelPendingSave, key]);
 
   const markReady = useCallback(() => {
     setReady(true);

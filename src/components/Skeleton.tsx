@@ -1,7 +1,36 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import React, { createContext, useContext, useEffect, useMemo } from 'react';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  Easing,
+  type SharedValue,
+} from 'react-native-reanimated';
 import { useTheme } from '../context/ThemeContext';
+import { cardSurface } from '../constants/shadows';
 import { radius, spacing } from '../constants/theme';
+
+const SkeletonPulseContext = createContext<SharedValue<number> | null>(null);
+
+function SkeletonPulseProvider({ children }: { children: React.ReactNode }) {
+  const progress = useSharedValue(0.45);
+  useEffect(() => {
+    progress.value = withRepeat(
+      withSequence(
+        withTiming(0.9, { duration: 700, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0.4, { duration: 700, easing: Easing.inOut(Easing.ease) })
+      ),
+      -1,
+      false
+    );
+  }, [progress]);
+  return (
+    <SkeletonPulseContext.Provider value={progress}>{children}</SkeletonPulseContext.Provider>
+  );
+}
 
 export function SkeletonBar({
   width = '100%',
@@ -13,18 +42,23 @@ export function SkeletonBar({
   style?: StyleProp<ViewStyle>;
 }) {
   const { colors } = useTheme();
-  const opacity = useRef(new Animated.Value(0.45)).current;
+  const shared = useContext(SkeletonPulseContext);
+  const local = useSharedValue(0.45);
 
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, { toValue: 0.9, duration: 700, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0.4, duration: 700, useNativeDriver: true }),
-      ])
+    if (shared) return;
+    local.value = withRepeat(
+      withSequence(
+        withTiming(0.9, { duration: 700, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0.4, { duration: 700, easing: Easing.inOut(Easing.ease) })
+      ),
+      -1,
+      false
     );
-    loop.start();
-    return () => loop.stop();
-  }, [opacity]);
+  }, [shared, local]);
+
+  const progress = shared ?? local;
+  const animatedStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
 
   return (
     <Animated.View
@@ -33,9 +67,9 @@ export function SkeletonBar({
           width,
           height,
           borderRadius: radius.sm,
-          backgroundColor: colors.surfaceContainer,
-          opacity,
+          backgroundColor: colors.surfaceContainerHigh,
         },
+        animatedStyle,
         style,
       ]}
     />
@@ -44,57 +78,213 @@ export function SkeletonBar({
 
 /** Full-screen list placeholder used while booting empty screens. */
 export function ListSkeleton({ rows = 6 }: { rows?: number }) {
+  const { colors, isDark } = useTheme();
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        wrap: { padding: spacing.md, gap: spacing.md },
-        row: { gap: 8 },
+        wrap: { padding: spacing.md },
+        row: {
+          ...cardSurface(colors, isDark),
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm,
+          borderRadius: radius.lg,
+          minHeight: 52,
+          marginBottom: spacing.xs + 2,
+          backgroundColor: colors.surfaceContainer,
+          gap: 8,
+          justifyContent: 'center',
+        },
       }),
-    []
+    [colors, isDark]
   );
 
   return (
-    <View style={styles.wrap} accessibilityLabel="Loading">
-      <SkeletonBar width="40%" height={18} />
-      <SkeletonBar width="70%" height={12} />
-      {Array.from({ length: rows }).map((_, i) => (
-        <View key={i} style={styles.row}>
-          <SkeletonBar width="55%" height={14} />
-          <SkeletonBar width="28%" height={14} style={{ alignSelf: 'flex-end' }} />
-        </View>
-      ))}
-    </View>
+    <SkeletonPulseProvider>
+      <View style={styles.wrap} accessibilityLabel="Loading">
+        <SkeletonBar width="40%" height={18} style={{ marginBottom: spacing.md }} />
+        {Array.from({ length: rows }).map((_, i) => (
+          <View key={i} style={styles.row}>
+            <SkeletonBar width="55%" height={14} />
+            <SkeletonBar width="28%" height={14} style={{ alignSelf: 'flex-end' }} />
+          </View>
+        ))}
+      </View>
+    </SkeletonPulseProvider>
   );
 }
 
 export function DashboardSkeleton() {
+  const { colors, isDark } = useTheme();
   const styles = useMemo(
     () =>
       StyleSheet.create({
         wrap: { padding: spacing.md, gap: spacing.md },
-        hero: { gap: 10, marginBottom: spacing.sm },
-        cards: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+        hero: {
+          ...cardSurface(colors, isDark),
+          padding: spacing.md,
+          borderRadius: radius.lg,
+          backgroundColor: colors.surfaceElevated,
+          gap: spacing.sm,
+        },
+        tileRow: { flexDirection: 'row', gap: spacing.sm },
+        tile: {
+          flex: 1,
+          minHeight: 56,
+          borderRadius: radius.md,
+          backgroundColor: colors.surfaceContainer,
+          padding: spacing.sm,
+          gap: 6,
+          justifyContent: 'center',
+        },
+        metricRow: { flexDirection: 'row', gap: spacing.sm },
+        metric: {
+          flex: 1,
+          minHeight: 64,
+          borderRadius: radius.lg,
+          backgroundColor: colors.surfaceContainer,
+          padding: spacing.sm,
+          gap: 6,
+          justifyContent: 'center',
+        },
+        actionRow: { flexDirection: 'row', gap: spacing.sm },
+        action: {
+          flex: 1,
+          minHeight: 72,
+          borderRadius: radius.lg,
+          backgroundColor: colors.surfaceContainer,
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 6,
+          padding: spacing.sm,
+        },
       }),
-    []
+    [colors, isDark]
   );
 
   return (
-    <View style={styles.wrap} accessibilityLabel="Loading dashboard">
-      <View style={styles.hero}>
-        <SkeletonBar width="50%" height={16} />
-        <SkeletonBar width="70%" height={28} />
-        <SkeletonBar width="40%" height={12} />
+    <SkeletonPulseProvider>
+      <View style={styles.wrap} accessibilityLabel="Loading dashboard">
+        <SkeletonBar width="100%" height={40} style={{ borderRadius: radius.full }} />
+        <View style={styles.hero}>
+          <SkeletonBar width="28%" height={10} />
+          <SkeletonBar width="36%" height={12} />
+          <SkeletonBar width="62%" height={26} />
+          <SkeletonBar width="40%" height={10} />
+          <SkeletonBar width="100%" height={52} style={{ borderRadius: radius.md }} />
+          <View style={styles.tileRow}>
+            <View style={styles.tile}>
+              <SkeletonBar width="55%" height={8} />
+              <SkeletonBar width="70%" height={14} />
+            </View>
+            <View style={styles.tile}>
+              <SkeletonBar width="55%" height={8} />
+              <SkeletonBar width="70%" height={14} />
+            </View>
+          </View>
+          <View style={styles.tileRow}>
+            <View style={styles.tile}>
+              <SkeletonBar width="55%" height={8} />
+              <SkeletonBar width="70%" height={14} />
+            </View>
+            <View style={styles.tile}>
+              <SkeletonBar width="55%" height={8} />
+              <SkeletonBar width="70%" height={14} />
+            </View>
+          </View>
+        </View>
+        <View style={styles.hero}>
+          <SkeletonBar width="40%" height={12} />
+          <View style={styles.metricRow}>
+            <View style={styles.metric}>
+              <SkeletonBar width="50%" height={8} />
+              <SkeletonBar width="70%" height={14} />
+            </View>
+            <View style={styles.metric}>
+              <SkeletonBar width="50%" height={8} />
+              <SkeletonBar width="70%" height={14} />
+            </View>
+          </View>
+          <View style={styles.metricRow}>
+            <View style={styles.metric}>
+              <SkeletonBar width="50%" height={8} />
+              <SkeletonBar width="70%" height={14} />
+            </View>
+            <View style={styles.metric}>
+              <SkeletonBar width="50%" height={8} />
+              <SkeletonBar width="70%" height={14} />
+            </View>
+          </View>
+        </View>
+        <SkeletonBar width="24%" height={12} />
+        <View style={styles.actionRow}>
+          <View style={styles.action}>
+            <SkeletonBar width={28} height={28} style={{ borderRadius: 14 }} />
+            <SkeletonBar width="70%" height={8} />
+          </View>
+          <View style={styles.action}>
+            <SkeletonBar width={28} height={28} style={{ borderRadius: 14 }} />
+            <SkeletonBar width="70%" height={8} />
+          </View>
+          <View style={styles.action}>
+            <SkeletonBar width={28} height={28} style={{ borderRadius: 14 }} />
+            <SkeletonBar width="70%" height={8} />
+          </View>
+          <View style={styles.action}>
+            <SkeletonBar width={28} height={28} style={{ borderRadius: 14 }} />
+            <SkeletonBar width="70%" height={8} />
+          </View>
+        </View>
       </View>
-      <View style={styles.cards}>
-        <SkeletonBar width="47%" height={72} />
-        <SkeletonBar width="47%" height={72} />
-        <SkeletonBar width="47%" height={72} />
-        <SkeletonBar width="47%" height={72} />
+    </SkeletonPulseProvider>
+  );
+}
+
+/** Detail screen placeholder with hero bar and card rows. */
+export function DetailSkeleton({ rows = 4 }: { rows?: number }) {
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        wrap: { padding: spacing.md },
+        hero: {
+          ...cardSurface(colors, isDark),
+          padding: spacing.md,
+          borderRadius: radius.lg,
+          minHeight: 80,
+          marginBottom: spacing.md,
+          backgroundColor: colors.surfaceContainer,
+          gap: 10,
+          justifyContent: 'center',
+        },
+        row: {
+          ...cardSurface(colors, isDark),
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm,
+          borderRadius: radius.lg,
+          minHeight: 52,
+          marginBottom: spacing.xs + 2,
+          backgroundColor: colors.surfaceContainer,
+          gap: 8,
+          justifyContent: 'center',
+        },
+      }),
+    [colors, isDark]
+  );
+
+  return (
+    <SkeletonPulseProvider>
+      <View style={styles.wrap} accessibilityLabel="Loading">
+        <View style={styles.hero}>
+          <SkeletonBar width="35%" height={12} />
+          <SkeletonBar width="60%" height={28} />
+        </View>
+        {Array.from({ length: rows }).map((_, i) => (
+          <View key={i} style={styles.row}>
+            <SkeletonBar width="50%" height={14} />
+            <SkeletonBar width="25%" height={14} style={{ alignSelf: 'flex-end' }} />
+          </View>
+        ))}
       </View>
-      <SkeletonBar width="35%" height={14} />
-      <SkeletonBar height={48} />
-      <SkeletonBar height={48} />
-      <SkeletonBar height={48} />
-    </View>
+    </SkeletonPulseProvider>
   );
 }

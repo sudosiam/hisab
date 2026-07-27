@@ -47,9 +47,7 @@ export default function FinancialYearSettingsScreen() {
         />
         <SettingsDivider color={colors.borderLight} />
         <Text style={localStyles.rowLabel}>Year starts in</Text>
-        <Text style={localStyles.rowMeta}>
-          Current: {getFinancialYearRangeLabel(fyStartMonth)} · affects all reports
-        </Text>
+        <Text style={localStyles.rowMeta}>{getFinancialYearRangeLabel(fyStartMonth)}</Text>
         <View style={localStyles.monthGrid}>
           {MONTH_SHORT_NAMES.map((label, index) => {
             const month = index + 1;

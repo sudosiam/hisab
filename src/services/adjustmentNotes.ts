@@ -1,8 +1,7 @@
 import { getDatabase } from '../db/database';
 import { formatInvoiceSequence } from './invoiceNumbers';
 import { upsertParty } from './parties';
-import { assertGstPlaceOfSupply, computeGstDocument, resolveStateFromPartyFields } from './gst';
-import { getBusinessState, isGstEnabled, isTaxInclusivePricing } from './appSettings';
+import { computeUntaxedDocument } from './documentTotals';
 import { roundMoney } from '../utils/money';
 import { resolvePeriodRange } from '../utils/period';
 import type {
@@ -59,36 +58,9 @@ export async function resolveNextNoteNo(kind: AdjustmentNoteKind): Promise<strin
   return formatInvoiceSequence(stem, sequence, digitWidth);
 }
 
-async function resolvePartyState(
-  db: Awaited<ReturnType<typeof getDatabase>>,
-  partyName: string,
-  partyType: PartyType,
-  partyId?: number | null,
-  fallbackPlaceOfSupply?: string | null
-): Promise<string | null> {
-  if (partyId) {
-    const row = await db.getFirstAsync<{ state: string | null; gstin: string | null }>(
-      'SELECT state, gstin FROM parties WHERE id = ?',
-      [partyId]
-    );
-    const resolved = resolveStateFromPartyFields(row?.state, row?.gstin);
-    if (resolved) return resolved;
-  }
-  const byName = await db.getFirstAsync<{ state: string | null; gstin: string | null }>(
-    `SELECT state, gstin FROM parties WHERE name = ? COLLATE NOCASE AND type = ? LIMIT 1`,
-    [partyName.trim(), partyType]
-  );
-  const fromParty = resolveStateFromPartyFields(byName?.state, byName?.gstin);
-  if (fromParty) return fromParty;
-  return fallbackPlaceOfSupply?.trim() || null;
-}
-
 type AgainstDocumentDefaults = {
   party_id: number | null;
   party_name: string;
-  place_of_supply: string | null;
-  is_inter_state: number;
-  is_reverse_charge: number;
 };
 
 async function loadAgainstDocumentDefaults(
@@ -103,9 +75,6 @@ async function loadAgainstDocumentDefaults(
     return {
       party_id: sale.party_id,
       party_name: sale.party_name,
-      place_of_supply: sale.place_of_supply,
-      is_inter_state: sale.is_inter_state,
-      is_reverse_charge: sale.is_reverse_charge ?? 0,
     };
   }
   if (direction === 'purchase' && againstPurchaseId) {
@@ -116,9 +85,6 @@ async function loadAgainstDocumentDefaults(
     return {
       party_id: purchase.party_id,
       party_name: purchase.supplier_name,
-      place_of_supply: purchase.place_of_supply,
-      is_inter_state: purchase.is_inter_state,
-      is_reverse_charge: purchase.is_reverse_charge ?? 0,
     };
   }
   return null;
@@ -166,48 +132,19 @@ export async function createAdjustmentNote(params: {
   if (!partyName) throw new Error('Party name is required');
 
   const partyId = params.party_id ?? againstDefaults?.party_id ?? null;
-  const isReverseCharge =
-    params.is_reverse_charge ?? !!againstDefaults?.is_reverse_charge;
 
-  const gstEnabled = await isGstEnabled();
-  const businessState = await getBusinessState();
-  const taxInclusive = await isTaxInclusivePricing();
-  const partyState = await resolvePartyState(
-    db,
-    partyName,
-    partyType,
-    partyId,
-    againstDefaults?.place_of_supply
-  );
-
-  const gst = computeGstDocument({
+  const totals = computeUntaxedDocument({
     lines: params.items.map((item) => ({
       qty: item.qty,
       unit_price: item.unit_price,
-      gst_rate: item.gst_rate,
       hsn_sac: item.hsn_sac,
     })),
     discount_amount: 0,
     service_charges: 0,
-    business_state: businessState,
-    party_state: partyState,
-    place_of_supply: againstDefaults?.place_of_supply ?? undefined,
-    gst_enabled: gstEnabled,
-    tax_inclusive: taxInclusive,
   });
 
-  assertGstPlaceOfSupply({
-    gst_enabled: gstEnabled,
-    tax_amount: gst.tax_amount,
-    business_state: businessState,
-    party_state: partyState,
-  });
-
-  const taxableAmount = roundMoney(gst.taxable_amount);
-  const cgstAmount = roundMoney(gst.cgst_amount);
-  const sgstAmount = roundMoney(gst.sgst_amount);
-  const igstAmount = roundMoney(gst.igst_amount);
-  const totalAmount = roundMoney(gst.total_amount);
+  const taxableAmount = roundMoney(totals.taxable_amount);
+  const totalAmount = roundMoney(totals.total_amount);
 
   let noteId = 0;
 
@@ -234,12 +171,12 @@ export async function createAdjustmentNote(params: {
         params.date,
         params.reason?.trim() || null,
         taxableAmount,
-        cgstAmount,
-        sgstAmount,
-        igstAmount,
-        gst.is_inter_state ? 1 : 0,
-        gst.place_of_supply,
-        isReverseCharge ? 1 : 0,
+        0,
+        0,
+        0,
+        0,
+        null,
+        0,
         totalAmount,
         params.notes?.trim() || null,
       ]
@@ -248,7 +185,7 @@ export async function createAdjustmentNote(params: {
 
     for (let i = 0; i < params.items.length; i++) {
       const item = params.items[i];
-      const line = gst.lines[i];
+      const line = totals.lines[i];
       await db.runAsync(
         `INSERT INTO adjustment_note_items (
            note_id, product_id, description, qty, unit_price, total,
@@ -262,11 +199,11 @@ export async function createAdjustmentNote(params: {
           roundMoney(item.unit_price),
           roundMoney(line.line_total),
           line.hsn_sac,
-          line.gst_rate,
+          0,
           roundMoney(line.taxable_amount),
-          roundMoney(line.cgst_amount),
-          roundMoney(line.sgst_amount),
-          roundMoney(line.igst_amount),
+          0,
+          0,
+          0,
         ]
       );
     }

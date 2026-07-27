@@ -4,7 +4,6 @@ import {
   Text,
   ScrollView,
   StyleSheet,
-  ActivityIndicator,
   RefreshControl,
   ViewStyle,
   TextStyle,
@@ -12,21 +11,22 @@ import {
 import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
 import { useFinancialYear } from '../../src/context/FinancialYearContext';
 import { useDatabase } from '../../src/context/DatabaseContext';
-import { ErrorState, SectionHeader, useScreenStyles } from '../../src/components/ui';
+import { ErrorState, SectionHeader, SummaryHero, useScreenStyles } from '../../src/components/ui';
 import { GrowthChart } from '../../src/components/GrowthChart';
 import { getGrowthReport } from '../../src/services/growth';
 import { formatCurrency, formatPercent, formatSignedCurrency } from '../../src/utils/format';
 import { MoneyText, moneyRowStyles } from '../../src/components/MoneyText';
+import { DetailSkeleton } from '../../src/components/Skeleton';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useReportPdfHeader } from '../../src/hooks/useReportPdfHeader';
 import { shareGrowthReportPdf } from '../../src/services/reportPdf';
 import { spacing, typography } from '../../src/constants/theme';
-import { cardSurface } from '../../src/constants/shadows';
+import { alertRefreshFailed } from '../../src/utils/uiFeedback';
 import type { GrowthReport } from '../../src/services/growth';
 
 export default function GrowthScreen() {
   const styles = useScreenStyles();
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const { refreshKey } = useDatabase();
   const { fyRevision } = useFinancialYear();
   const [data, setData] = useState<GrowthReport | null>(null);
@@ -34,20 +34,12 @@ export default function GrowthScreen() {
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        hero: {
-          ...cardSurface(colors, isDark),
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.md,
-          marginBottom: spacing.md,
-          alignItems: 'center',
-        },
-        heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
-        heroValue: { marginTop: spacing.sm, textAlign: 'center', width: '100%' },
-        heroSub: { fontSize: 11, color: colors.textSecondary, marginTop: spacing.xs, textAlign: 'center' },
-        card: {
-          ...cardSurface(colors, isDark),
-          padding: spacing.md,
-          marginBottom: spacing.md,
+        block: { marginBottom: spacing.md },
+        blockTitle: {
+          ...typography.bodyMedium,
+          fontWeight: '700',
+          color: colors.text,
+          marginBottom: spacing.xs,
         },
         row: { ...moneyRowStyles.row, paddingVertical: spacing.sm },
         rowLabel: { fontSize: 14, color: colors.text, flex: 1, minWidth: 0, paddingRight: spacing.sm },
@@ -55,25 +47,26 @@ export default function GrowthScreen() {
         pos: { color: colors.success, fontWeight: '700' },
         neg: { color: colors.danger, fontWeight: '700' },
         bold: { fontWeight: '700' },
-        chartCard: {
-          ...cardSurface(colors, isDark),
-          padding: spacing.md,
-          marginBottom: spacing.md,
-        },
-        monthCard: {
-          ...cardSurface(colors, isDark),
-          padding: spacing.md,
+        hairline: { height: StyleSheet.hairlineWidth, backgroundColor: colors.borderLight },
+        chartBlock: { marginBottom: spacing.lg },
+        chartTitle: {
+          ...typography.bodyMedium,
+          fontWeight: '600',
+          color: colors.text,
           marginBottom: spacing.sm,
+        },
+        monthBlock: {
+          paddingVertical: spacing.sm,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: colors.borderLight,
         },
         monthHeader: {
           ...moneyRowStyles.row,
           alignItems: 'center',
-          marginBottom: spacing.sm,
+          marginBottom: spacing.xs,
         },
         monthTitle: { fontSize: 15, fontWeight: '700', color: colors.text, flex: 1, minWidth: 0, paddingRight: spacing.sm },
         monthProfit: { maxWidth: '58%', flexShrink: 1, minWidth: 80, width: '100%', textAlign: 'right' },
-        monthProfitNeg: { color: colors.danger },
-        monthProfitMuted: { color: colors.textMuted },
         detailRow: {
           ...moneyRowStyles.row,
           paddingVertical: 4,
@@ -89,13 +82,13 @@ export default function GrowthScreen() {
           fontVariant: ['tabular-nums'],
         },
         cumulative: {
-          borderTopWidth: 1,
+          borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: colors.borderLight,
           marginTop: spacing.sm,
           paddingTop: spacing.sm,
         },
       }),
-    [colors, isDark]
+    [colors]
   );
 
   const load = useCallback(async () => {
@@ -139,11 +132,7 @@ export default function GrowthScreen() {
   }
 
   if (booting || !data) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <DetailSkeleton />;
   }
 
   const { snapshot, months } = data;
@@ -158,7 +147,7 @@ export default function GrowthScreen() {
           onRefresh={() => {
             setRefreshing(true);
             load()
-              .catch(() => {})
+              .catch((e) => alertRefreshFailed(e))
               .finally(() => setRefreshing(false));
           }}
           colors={[colors.primary]}
@@ -166,33 +155,35 @@ export default function GrowthScreen() {
         />
       }
     >
-      <View style={localStyles.hero}>
-        <Text style={localStyles.heroLabel}>Net worth</Text>
-        <MoneyText amount={snapshot.netWorth} size="hero" style={localStyles.heroValue} />
-        <Text style={localStyles.heroSub} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
-          Assets {formatCurrency(snapshot.totalAssets)} − Liabilities{' '}
-          {formatCurrency(snapshot.liabilities)}
-        </Text>
-      </View>
+      <SummaryHero
+        label="Net worth"
+        amount={snapshot.netWorth}
+        hint={`Assets ${formatCurrency(snapshot.totalAssets)} − Liabilities ${formatCurrency(snapshot.liabilities)}`}
+      />
 
-      <View style={localStyles.card}>
-        <Text style={[localStyles.rowLabel, localStyles.bold, { marginBottom: spacing.xs }]}>
-          What you own
-        </Text>
+      <SectionHeader title="What you own" />
+      <View style={localStyles.block}>
         <MetricRow localStyles={rowStyles} label="Cash & bank" value={snapshot.cashAndBank} />
+        <View style={localStyles.hairline} />
         <MetricRow localStyles={rowStyles} label="Inventory" value={snapshot.inventory} />
+        <View style={localStyles.hairline} />
         <MetricRow localStyles={rowStyles} label="Receivables" value={snapshot.receivables} />
+        <View style={localStyles.hairline} />
         <MetricRow localStyles={rowStyles} label="Fixed assets" value={snapshot.fixedAssets} />
+        <View style={localStyles.hairline} />
         <MetricRow localStyles={rowStyles} label="Total assets" value={snapshot.totalAssets} bold />
+        <View style={localStyles.hairline} />
         <MetricRow localStyles={rowStyles} label="Liabilities (payables)" value={snapshot.liabilities} />
-        <View style={{ height: spacing.sm }} />
+        <View style={localStyles.hairline} />
         <MetricRow localStyles={rowStyles} label="You invested" value={snapshot.ownerInvestment} />
+        <View style={localStyles.hairline} />
         <MetricRow
           localStyles={rowStyles}
           label="Ahead / behind"
           value={snapshot.aheadBehind}
           signed
         />
+        <View style={localStyles.hairline} />
         <MetricRow
           localStyles={rowStyles}
           label="Return on money in"
@@ -209,17 +200,13 @@ export default function GrowthScreen() {
 
       <SectionHeader title="Equity over time" />
 
-      <View style={localStyles.chartCard}>
-        <Text style={[localStyles.rowLabel, localStyles.bold, { marginBottom: spacing.sm }]}>
-          Monthly net profit
-        </Text>
+      <View style={localStyles.chartBlock}>
+        <Text style={localStyles.chartTitle}>Monthly net profit</Text>
         <GrowthChart data={barData} variant="bar" />
       </View>
 
-      <View style={localStyles.chartCard}>
-        <Text style={[localStyles.rowLabel, localStyles.bold, { marginBottom: spacing.sm }]}>
-          Cumulative surplus (trend)
-        </Text>
+      <View style={localStyles.chartBlock}>
+        <Text style={localStyles.chartTitle}>Cumulative surplus (trend)</Text>
         <GrowthChart data={lineData} variant="line" />
       </View>
 
@@ -229,7 +216,7 @@ export default function GrowthScreen() {
           month.hasActivity && value > 0 ? formatCurrency(value) : '—';
 
         return (
-          <View key={month.monthKey} style={localStyles.monthCard}>
+          <View key={month.monthKey} style={localStyles.monthBlock}>
             <View style={localStyles.monthHeader}>
               <Text style={localStyles.monthTitle} numberOfLines={1}>
                 {month.label}

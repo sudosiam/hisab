@@ -1,15 +1,31 @@
-import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, type StyleProp, type TextStyle } from 'react-native';
+import React, { useCallback, useMemo, type ReactElement } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  type StyleProp,
+  type TextStyle,
+  type ViewStyle,
+  type RefreshControlProps,
+} from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { formatDisplayDate } from '../utils/date';
-import { spacing } from '../constants/theme';
+import { spacing, typography } from '../constants/theme';
+import { FLATLIST_PERF } from '../constants/listPerf';
 import { MoneyText } from './MoneyText';
 import type { PartyStatementLine } from '../types';
+
+const ROW_ACTIVE_OPACITY = 0.75;
 
 export type LedgerRow = Pick<
   PartyStatementLine,
   'id' | 'date' | 'description' | 'debit' | 'credit' | 'balance'
 >;
+
+/** Compact ledger row height for getItemLayout (padding + line). */
+export const LEDGER_ROW_HEIGHT = 36;
 
 interface Props {
   rows: LedgerRow[];
@@ -21,6 +37,19 @@ interface Props {
   /** Accessibility hint when a row is pressable (e.g. "Long-press to delete"). */
   rowActionHint?: string;
   footerRows?: { label: string; debit: number; credit: number; balance?: number }[];
+  /** Content above the column header (filters, totals). Ledger owns scroll when set with style flex. */
+  ListHeaderComponent?: ReactElement | null;
+  /** Extra content below footer totals. */
+  ListFooterComponent?: ReactElement | null;
+  refreshControl?: React.ReactElement<RefreshControlProps>;
+  style?: StyleProp<ViewStyle>;
+  contentContainerStyle?: StyleProp<ViewStyle>;
+  /**
+   * When false, list expands to fit all rows (nest inside another ScrollView).
+   * Prefer owning scroll via ListHeaderComponent instead for large datasets.
+   */
+  scrollEnabled?: boolean;
+  keyboardShouldPersistTaps?: 'always' | 'handled' | 'never';
 }
 
 function AmountCell({
@@ -59,87 +88,48 @@ export function LedgerTable({
   onRowPress,
   rowActionHint,
   footerRows,
+  ListHeaderComponent,
+  ListFooterComponent,
+  refreshControl,
+  style,
+  contentContainerStyle,
+  scrollEnabled = true,
+  keyboardShouldPersistTaps = 'handled',
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  if (rows.length === 0 && !footerRows?.length) {
-    return (
-      <View style={styles.emptyBox}>
-        <Text style={styles.emptyText}>{emptyText}</Text>
-      </View>
-    );
-  }
-
-  const renderAmountCells = (debit: number, credit: number, balance?: number, bold?: boolean) => (
-    <>
-      <View style={styles.amtCol}>
-        <AmountCell amount={debit} style={styles.debit} bold={bold} />
-      </View>
-      <View style={styles.amtCol}>
-        <AmountCell amount={credit} style={styles.credit} bold={bold} />
-      </View>
-      {showBalance ? (
+  const renderAmountCells = useCallback(
+    (debit: number, credit: number, balance?: number, bold?: boolean) => (
+      <>
         <View style={styles.amtCol}>
-          {balance != null ? (
-            <MoneyText
-              amount={balance}
-              size="sm"
-              style={[styles.balance, bold && staticStyles.boldCell]}
-              lines={1}
-              minimumFontScale={0.5}
-            />
-          ) : (
-            <Text style={[styles.balance, bold && staticStyles.boldCell]}>—</Text>
-          )}
+          <AmountCell amount={debit} style={styles.debit} bold={bold} />
         </View>
-      ) : null}
-    </>
+        <View style={styles.amtCol}>
+          <AmountCell amount={credit} style={styles.credit} bold={bold} />
+        </View>
+        {showBalance ? (
+          <View style={styles.amtCol}>
+            {balance != null ? (
+              <MoneyText
+                amount={balance}
+                size="sm"
+                style={[styles.balance, bold && staticStyles.boldCell]}
+                lines={1}
+                minimumFontScale={0.5}
+              />
+            ) : (
+              <Text style={[styles.balance, bold && staticStyles.boldCell]}>—</Text>
+            )}
+          </View>
+        ) : null}
+      </>
+    ),
+    [showBalance, styles]
   );
 
-  const renderRow = (row: LedgerRow, isLast: boolean, key: string) => {
-    const content = (
-      <View style={styles.line}>
-        {showDate ? (
-          <Text style={styles.dateText} numberOfLines={1}>
-            {formatDisplayDate(row.date)}
-          </Text>
-        ) : null}
-        <Text style={styles.descText} numberOfLines={1}>
-          {row.description}
-        </Text>
-        {renderAmountCells(row.debit, row.credit, row.balance)}
-      </View>
-    );
-
-    if (onRowLongPress || onRowPress) {
-      const actionHint = rowActionHint ?? (onRowLongPress ? 'Long-press for actions' : 'Tap for actions');
-      return (
-        <TouchableOpacity
-          key={key}
-          style={[styles.dataRow, isLast && styles.dataRowLast]}
-          onPress={onRowPress ? () => onRowPress(row) : undefined}
-          onLongPress={onRowLongPress ? () => onRowLongPress(row) : undefined}
-          delayLongPress={400}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel={`${row.description}. ${actionHint}`}
-          accessibilityHint={actionHint}
-        >
-          {content}
-        </TouchableOpacity>
-      );
-    }
-
-    return (
-      <View key={key} style={[styles.dataRow, isLast && styles.dataRowLast]}>
-        {content}
-      </View>
-    );
-  };
-
-  return (
-    <View style={styles.table}>
+  const columnHeader = useMemo(
+    () => (
       <View style={styles.headerRow}>
         {showDate ? <Text style={[styles.headerCell, styles.dateHeader]}>Date</Text> : null}
         <Text style={[styles.headerCell, styles.particularsHeader]}>Particulars</Text>
@@ -147,28 +137,140 @@ export function LedgerTable({
         <Text style={[styles.headerCell, styles.amtHeader]}>Cr</Text>
         {showBalance ? <Text style={[styles.headerCell, styles.amtHeader]}>Bal</Text> : null}
       </View>
-      {rows.map((row, index) =>
-        renderRow(row, index === rows.length - 1 && !footerRows?.length, String(row.id))
-      )}
-      {footerRows?.map((row, index) => (
-        <View
-          key={`footer-${row.label}`}
-          style={[
-            styles.dataRow,
-            styles.footerRow,
-            index === footerRows.length - 1 && styles.dataRowLast,
-          ]}
-        >
-          <View style={styles.line}>
-            {showDate ? <View style={styles.dateSpacer} /> : null}
-            <Text style={[styles.descText, styles.footerLabel]} numberOfLines={1}>
-              {row.label}
-            </Text>
-            {renderAmountCells(row.debit, row.credit, row.balance, true)}
+    ),
+    [showDate, showBalance, styles]
+  );
+
+  const listHeader = useMemo(
+    () => (
+      <View>
+        {ListHeaderComponent}
+        {rows.length > 0 || (footerRows?.length ?? 0) > 0 ? (
+          <View style={styles.tableChrome}>{columnHeader}</View>
+        ) : null}
+      </View>
+    ),
+    [ListHeaderComponent, rows.length, footerRows?.length, columnHeader, styles.tableChrome]
+  );
+
+  const listFooter = useMemo(() => {
+    if (!footerRows?.length && !ListFooterComponent) return null;
+    return (
+      <View>
+        {footerRows?.map((row, index) => (
+          <View
+            key={`footer-${row.label}`}
+            style={[
+              styles.dataRow,
+              styles.footerRow,
+              index === footerRows.length - 1 && !ListFooterComponent && styles.dataRowLast,
+            ]}
+          >
+            <View style={styles.line}>
+              {showDate ? <View style={styles.dateSpacer} /> : null}
+              <Text style={[styles.descText, styles.footerLabel]} numberOfLines={1}>
+                {row.label}
+              </Text>
+              {renderAmountCells(row.debit, row.credit, row.balance, true)}
+            </View>
           </View>
+        ))}
+        {ListFooterComponent}
+      </View>
+    );
+  }, [footerRows, ListFooterComponent, showDate, styles, renderAmountCells]);
+
+  const keyExtractor = useCallback((item: LedgerRow) => String(item.id), []);
+
+  const getItemLayout = useCallback(
+    (_: ArrayLike<LedgerRow> | null | undefined, index: number) => ({
+      length: LEDGER_ROW_HEIGHT,
+      offset: LEDGER_ROW_HEIGHT * index,
+      index,
+    }),
+    []
+  );
+
+  const renderItem = useCallback(
+    ({ item, index }: { item: LedgerRow; index: number }) => {
+      const isLast = index === rows.length - 1 && !footerRows?.length;
+      const content = (
+        <View style={styles.line}>
+          {showDate ? (
+            <Text style={styles.dateText} numberOfLines={1}>
+              {formatDisplayDate(item.date)}
+            </Text>
+          ) : null}
+          <Text style={styles.descText} numberOfLines={1}>
+            {item.description}
+          </Text>
+          {renderAmountCells(item.debit, item.credit, item.balance)}
         </View>
-      ))}
-    </View>
+      );
+
+      if (onRowLongPress || onRowPress) {
+        const actionHint =
+          rowActionHint ?? (onRowLongPress ? 'Long-press for actions' : 'Tap for actions');
+        return (
+          <TouchableOpacity
+            style={[styles.dataRow, isLast && styles.dataRowLast]}
+            onPress={onRowPress ? () => onRowPress(item) : undefined}
+            onLongPress={onRowLongPress ? () => onRowLongPress(item) : undefined}
+            delayLongPress={400}
+            activeOpacity={ROW_ACTIVE_OPACITY}
+            accessibilityRole="button"
+            accessibilityLabel={`${item.description}. ${actionHint}`}
+            accessibilityHint={actionHint}
+          >
+            {content}
+          </TouchableOpacity>
+        );
+      }
+
+      return <View style={[styles.dataRow, isLast && styles.dataRowLast]}>{content}</View>;
+    },
+    [
+      rows.length,
+      footerRows?.length,
+      showDate,
+      styles,
+      renderAmountCells,
+      onRowLongPress,
+      onRowPress,
+      rowActionHint,
+    ]
+  );
+
+  const empty = useMemo(
+    () =>
+      rows.length === 0 && !footerRows?.length ? (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyText}>{emptyText}</Text>
+        </View>
+      ) : null,
+    [rows.length, footerRows?.length, emptyText, styles]
+  );
+
+  return (
+    <FlatList
+      style={[scrollEnabled ? styles.list : styles.listEmbedded, style]}
+      contentContainerStyle={[styles.listContent, contentContainerStyle]}
+      data={rows}
+      keyExtractor={keyExtractor}
+      renderItem={renderItem}
+      getItemLayout={getItemLayout}
+      ListHeaderComponent={listHeader}
+      ListFooterComponent={listFooter}
+      ListEmptyComponent={empty}
+      refreshControl={refreshControl}
+      scrollEnabled={scrollEnabled}
+      keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+      {...FLATLIST_PERF}
+      // Nested (non-scrolling) tables must expand; windowing only when we own scroll.
+      {...(scrollEnabled
+        ? {}
+        : { initialNumToRender: rows.length || 1, windowSize: Math.max(1, rows.length) })}
+    />
   );
 }
 
@@ -178,9 +280,21 @@ const staticStyles = StyleSheet.create({
 
 function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
-    table: {
+    list: {
+      flex: 1,
       width: '100%',
-      borderRadius: 10,
+    },
+    listEmbedded: {
+      width: '100%',
+      flexGrow: 0,
+    },
+    listContent: {
+      flexGrow: 1,
+    },
+    tableChrome: {
+      width: '100%',
+      borderTopLeftRadius: 10,
+      borderTopRightRadius: 10,
       overflow: 'hidden',
       backgroundColor: colors.surface,
     },
@@ -193,9 +307,10 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       borderBottomColor: colors.border,
       backgroundColor: colors.surfaceContainer,
       gap: 4,
+      minHeight: 28,
     },
     headerCell: {
-      fontSize: 9,
+      ...typography.micro,
       fontWeight: '700',
       color: colors.textMuted,
       textTransform: 'uppercase',
@@ -209,8 +324,10 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       paddingVertical: 4,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.borderLight,
-      minHeight: 32,
+      minHeight: LEDGER_ROW_HEIGHT,
+      height: LEDGER_ROW_HEIGHT,
       justifyContent: 'center',
+      backgroundColor: colors.surface,
     },
     dataRowLast: { borderBottomWidth: 0 },
     line: {
@@ -240,7 +357,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     debit: { color: colors.text, fontWeight: '500', textAlign: 'right' },
     credit: { color: colors.textSecondary, fontWeight: '500', textAlign: 'right' },
     balance: { color: colors.text, fontWeight: '600', textAlign: 'right' },
-    footerRow: { backgroundColor: colors.surfaceContainer },
+    footerRow: { backgroundColor: colors.surfaceContainer, height: undefined, minHeight: LEDGER_ROW_HEIGHT },
     footerLabel: { fontWeight: '600', color: colors.text },
     emptyBox: { padding: spacing.lg, alignItems: 'center' },
     emptyText: { color: colors.textSecondary, fontSize: 13, textAlign: 'center' },

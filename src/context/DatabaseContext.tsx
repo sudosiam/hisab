@@ -12,17 +12,21 @@ import {
 import { ensureLedgerUpToDate } from '../services/ledger';
 import {
   backupOnBackground,
-  runDailyBackupIfDue,
+  runDueBackups,
   restoreDatabaseFromBackup,
   restoreLatestFromBackupFolder,
+  isDeviceFolderBackupSupported,
 } from '../services/backup';
 import {
   cloudBackupOnBackground,
   reconcileCloudBackupOnEmptyLocal,
-  runCloudDailyBackupIfDue,
+  restoreDatabaseFromCloud,
+  getCloudUserEmail,
 } from '../services/cloudBackup';
+import { isSupabaseConfigured } from '../services/supabaseClient';
 import { syncBackupBackgroundTask } from '../services/backupBackgroundTask';
 import { processRecurringExpenses } from '../services/banking';
+import { clearAllDrafts } from '../services/formDrafts';
 import { useTheme } from './ThemeContext';
 import { spacing, radius } from '../constants/theme';
 import { FormInput, PrimaryButton } from '../components/ui';
@@ -31,11 +35,28 @@ const IMPORT_CONFIRM_TEXT = 'IMPORT';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
-interface DatabaseContextValue {
+type RestoreSource = 'file' | 'folder' | 'cloud';
+
+interface DatabaseActionsValue {
   ready: boolean;
-  refreshKey: number;
   refresh: () => void;
 }
+
+interface DatabaseVersionValue {
+  refreshKey: number;
+}
+
+const DatabaseActionsContext = createContext<DatabaseActionsValue>({
+  ready: false,
+  refresh: () => {},
+});
+
+const DatabaseVersionContext = createContext<DatabaseVersionValue>({
+  refreshKey: 0,
+});
+
+/** @deprecated Prefer useDatabaseActions + useRefreshKey for fewer re-renders. */
+interface DatabaseContextValue extends DatabaseActionsValue, DatabaseVersionValue {}
 
 const DatabaseContext = createContext<DatabaseContextValue>({
   ready: false,
@@ -48,9 +69,13 @@ function DatabaseErrorUI({
   onRetry,
   onRestoreFromFolder,
   onRestoreFromFile,
+  onRestoreFromCloud,
+  showFolderRestore,
+  showCloudRestore,
   onReset,
   importModalOpen,
   importConfirmInput,
+  importMode,
   onImportConfirmChange,
   onImportConfirm,
   onImportCancel,
@@ -60,9 +85,13 @@ function DatabaseErrorUI({
   onRetry: () => void;
   onRestoreFromFolder: () => void;
   onRestoreFromFile: () => void;
+  onRestoreFromCloud?: () => void;
+  showFolderRestore: boolean;
+  showCloudRestore: boolean;
   onReset: () => void;
   importModalOpen: boolean;
   importConfirmInput: string;
+  importMode: RestoreSource;
   onImportConfirmChange: (value: string) => void;
   onImportConfirm: () => void;
   onImportCancel: () => void;
@@ -70,6 +99,20 @@ function DatabaseErrorUI({
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const importTitle =
+    importMode === 'folder'
+      ? 'Restore from folder'
+      : importMode === 'cloud'
+        ? 'Restore from cloud'
+        : 'Import backup file';
+  const importBody =
+    importMode === 'folder'
+      ? 'Replaces all data with the latest folder backup.'
+      : importMode === 'cloud'
+        ? 'Replaces all data with your latest cloud backup.'
+        : 'Replaces all data with the chosen backup file.';
+  const confirmTitle =
+    importMode === 'file' ? 'Choose file & import' : 'Import & replace data';
   return (
     <View style={styles.center}>
       <Text style={styles.errorTitle}>Could not open Hisab</Text>
@@ -77,23 +120,29 @@ function DatabaseErrorUI({
       <Text style={styles.retryLink} onPress={onRetry}>
         Try again
       </Text>
-      <Text style={styles.retryLink} onPress={onRestoreFromFolder}>
-        Restore from backup folder
-      </Text>
+      {showFolderRestore ? (
+        <Text style={styles.retryLink} onPress={onRestoreFromFolder}>
+          Restore from backup folder
+        </Text>
+      ) : null}
       <Text style={styles.retryLink} onPress={onRestoreFromFile}>
         Choose backup file
       </Text>
+      {showCloudRestore && onRestoreFromCloud ? (
+        <Text style={styles.retryLink} onPress={onRestoreFromCloud}>
+          Restore from cloud
+        </Text>
+      ) : null}
       <Text style={styles.resetLink} onPress={onReset}>
-        Reset database (erases all data)
+        Reset database
       </Text>
 
       <Modal visible={importModalOpen} transparent animationType="fade" onRequestClose={onImportCancel}>
         <Pressable style={styles.modalBackdrop} onPress={onImportCancel}>
           <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.errorTitle}>Import backup</Text>
+            <Text style={styles.errorTitle}>{importTitle}</Text>
             <Text style={styles.errorText}>
-              This replaces all current data with the chosen backup file. Type {IMPORT_CONFIRM_TEXT} to
-              confirm.
+              {importBody} Type {IMPORT_CONFIRM_TEXT}.
             </Text>
             <FormInput
               label="Confirmation"
@@ -107,7 +156,7 @@ function DatabaseErrorUI({
               </TouchableOpacity>
               <View style={{ flex: 1 }}>
                 <PrimaryButton
-                  title="Choose file & import"
+                  title={confirmTitle}
                   onPress={onImportConfirm}
                   loading={restoring}
                   disabled={importConfirmInput.trim().toUpperCase() !== IMPORT_CONFIRM_TEXT}
@@ -129,7 +178,23 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
   const [initAttempt, setInitAttempt] = useState(0);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importConfirmInput, setImportConfirmInput] = useState('');
+  const [importMode, setImportMode] = useState<RestoreSource>('file');
   const [restoring, setRestoring] = useState(false);
+  const [cloudRestoreAvailable, setCloudRestoreAvailable] = useState(false);
+
+  useEffect(() => {
+    if (!error || !isSupabaseConfigured()) {
+      setCloudRestoreAvailable(false);
+      return;
+    }
+    let active = true;
+    void getCloudUserEmail().then((email) => {
+      if (active) setCloudRestoreAvailable(Boolean(email));
+    });
+    return () => {
+      active = false;
+    };
+  }, [error]);
 
   useEffect(() => {
     let active = true;
@@ -183,32 +248,39 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
         .then((created) => {
           if (created > 0) setRefreshKey((k) => k + 1);
         })
-        .catch(() => {});
+        .catch((err) => console.warn('[boot] recurring expenses failed', err));
     }, 1000);
 
     // Defer backup so DB + UI finish mounting first (avoids Android SAF native crashes).
     const backupTimer = setTimeout(() => {
       void (async () => {
-        const reconcile = await reconcileCloudBackupOnEmptyLocal().catch(() => ({
-          restored: false as const,
-        }));
+        const reconcile = await reconcileCloudBackupOnEmptyLocal().catch((err) => {
+          console.warn('[boot] cloud reconcile failed', err);
+          return { restored: false as const };
+        });
         if (reconcile.restored) {
+          await clearAllDrafts().catch((err) => console.warn('[boot] clear drafts failed', err));
           setRefreshKey((k) => k + 1);
           setInitAttempt((a) => a + 1);
           return;
         }
-        await Promise.all([
-          runDailyBackupIfDue().catch(() => {}),
-          runCloudDailyBackupIfDue().catch(() => {}),
-        ]);
-        await syncBackupBackgroundTask().catch(() => {});
+        await runDueBackups().catch((err) => console.warn('[boot] due backups failed', err));
+        await syncBackupBackgroundTask().catch((err) => console.warn('[boot] backup task sync failed', err));
       })();
     }, 3000);
 
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'background' || state === 'inactive') {
-        backupOnBackground().catch(() => {});
-        cloudBackupOnBackground().catch(() => {});
+      if (state === 'active') {
+        processRecurringExpenses()
+          .then((created) => {
+            if (created > 0) setRefreshKey((k) => k + 1);
+          })
+          .catch((err) => console.warn('[boot] recurring expenses (foreground) failed', err));
+      }
+      // Prefer `background` only — `inactive` fires on iOS control center / Android dialogs.
+      if (state === 'background') {
+        backupOnBackground().catch((err) => console.warn('[boot] device backup on background failed', err));
+        cloudBackupOnBackground().catch((err) => console.warn('[boot] cloud backup on background failed', err));
       }
     });
 
@@ -224,6 +296,38 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     setRefreshKey((k) => k + 1);
   }, []);
 
+  const actionsValue = useMemo<DatabaseActionsValue>(
+    () => ({ ready, refresh }),
+    [ready, refresh]
+  );
+
+  const versionValue = useMemo<DatabaseVersionValue>(
+    () => ({ refreshKey }),
+    [refreshKey]
+  );
+
+  const wrap = (
+    child: React.ReactNode,
+    opts?: { ready?: boolean; refreshKey?: number }
+  ) => {
+    const actions =
+      opts?.ready === undefined ? actionsValue : { ready: opts.ready, refresh };
+    const version =
+      opts?.refreshKey === undefined ? versionValue : { refreshKey: opts.refreshKey };
+    const combined: DatabaseContextValue = {
+      ready: actions.ready,
+      refreshKey: version.refreshKey,
+      refresh,
+    };
+    return (
+      <DatabaseActionsContext.Provider value={actions}>
+        <DatabaseVersionContext.Provider value={version}>
+          <DatabaseContext.Provider value={combined}>{child}</DatabaseContext.Provider>
+        </DatabaseVersionContext.Provider>
+      </DatabaseActionsContext.Provider>
+    );
+  };
+
   const retryInit = useCallback(() => {
     void invalidateDatabase().then(() => {
       setError(null);
@@ -231,8 +335,9 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const reloadAfterRestore = useCallback((result: { success: boolean; message: string }) => {
+  const reloadAfterRestore = useCallback(async (result: { success: boolean; message: string }) => {
     if (result.success) {
+      await clearAllDrafts().catch((err) => console.warn('[boot] clear drafts after restore failed', err));
       setError(null);
       setRefreshKey((k) => k + 1);
       setInitAttempt((a) => a + 1);
@@ -241,38 +346,25 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const openImportModal = useCallback((mode: RestoreSource) => {
+    setImportMode(mode);
+    setImportConfirmInput('');
+    setImportModalOpen(true);
+  }, []);
+
   if (error) {
-    return (
-      <DatabaseContext.Provider value={{ ready: false, refreshKey, refresh }}>
+    return wrap(
         <DatabaseErrorUI
           error={error}
           onRetry={retryInit}
-          onRestoreFromFolder={() => {
-            Alert.alert(
-              'Restore from backup folder?',
-              'This replaces all data on this device with the latest backup from your backup folder.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Restore',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      reloadAfterRestore(await restoreLatestFromBackupFolder());
-                    } catch (err) {
-                      setError(formatSqliteError(err));
-                    }
-                  },
-                },
-              ]
-            );
-          }}
-          onRestoreFromFile={() => {
-            setImportConfirmInput('');
-            setImportModalOpen(true);
-          }}
+          showFolderRestore={isDeviceFolderBackupSupported()}
+          showCloudRestore={cloudRestoreAvailable}
+          onRestoreFromFolder={() => openImportModal('folder')}
+          onRestoreFromFile={() => openImportModal('file')}
+          onRestoreFromCloud={() => openImportModal('cloud')}
           importModalOpen={importModalOpen}
           importConfirmInput={importConfirmInput}
+          importMode={importMode}
           onImportConfirmChange={setImportConfirmInput}
           onImportCancel={() => {
             if (restoring) return;
@@ -284,7 +376,13 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
             if (importConfirmInput.trim().toUpperCase() !== IMPORT_CONFIRM_TEXT) return;
             setRestoring(true);
             try {
-              reloadAfterRestore(await restoreDatabaseFromBackup());
+              const result =
+                importMode === 'folder'
+                  ? await restoreLatestFromBackupFolder()
+                  : importMode === 'cloud'
+                    ? await restoreDatabaseFromCloud()
+                    : await restoreDatabaseFromBackup();
+              await reloadAfterRestore(result);
               setImportModalOpen(false);
               setImportConfirmInput('');
             } catch (err) {
@@ -305,6 +403,9 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
                   onPress: async () => {
                     try {
                       await resetDatabase();
+                      await clearAllDrafts().catch((err) =>
+                        console.warn('[boot] clear drafts after reset failed', err)
+                      );
                       setError(null);
                       setRefreshKey((k) => k + 1);
                       setInitAttempt((a) => a + 1);
@@ -316,24 +417,16 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
               ]
             );
           }}
-        />
-      </DatabaseContext.Provider>
+        />,
+      { ready: false }
     );
   }
 
   if (!ready) {
-    return (
-      <DatabaseContext.Provider value={{ ready: false, refreshKey, refresh }}>
-        <AppBootScreen />
-      </DatabaseContext.Provider>
-    );
+    return wrap(<AppBootScreen />, { ready: false });
   }
 
-  return (
-    <DatabaseContext.Provider value={{ ready, refreshKey, refresh }}>
-      {children}
-    </DatabaseContext.Provider>
-  );
+  return wrap(children);
 }
 
 function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
@@ -351,7 +444,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     resetLink: { color: colors.danger, fontWeight: '600', fontSize: 14 },
     modalBackdrop: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.45)',
+      backgroundColor: colors.scrim,
       justifyContent: 'center',
       padding: spacing.lg,
     },
@@ -367,6 +460,17 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
   });
 }
 
+/** Combined hook — re-renders on refreshKey changes. Prefer split hooks when possible. */
 export function useDatabase() {
   return useContext(DatabaseContext);
+}
+
+/** Stable actions — does not re-render when refreshKey bumps. */
+export function useDatabaseActions() {
+  return useContext(DatabaseActionsContext);
+}
+
+/** Version key only — subscribe when a screen must reload on data writes. */
+export function useRefreshKey() {
+  return useContext(DatabaseVersionContext).refreshKey;
 }

@@ -3,9 +3,7 @@ import {
   View,
   Text,
   StyleSheet,
-  ActivityIndicator,
   Alert,
-  TouchableOpacity,
 } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter, useNavigation } from 'expo-router';
 import {
@@ -17,6 +15,8 @@ import {
   updateProduct,
 } from '../../../src/services/inventory';
 import {
+  EmptyState,
+  ErrorState,
   FormInput,
   FormScreen,
   PrimaryButton,
@@ -24,6 +24,7 @@ import {
   useScreenStyles,
 } from '../../../src/components/ui';
 import { StatCard } from '../../../src/components/StatCard';
+import { DetailSkeleton } from '../../../src/components/Skeleton';
 import { CategoryPicker } from '../../../src/components/CategoryPicker';
 import { OverflowMenu } from '../../../src/components/OverflowMenu';
 import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
@@ -31,18 +32,16 @@ import { parseRouteId } from '../../../src/utils/route';
 import { formatAmountInput, formatCurrency, formatQty, parseAmountInput } from '../../../src/utils/format';
 import { roundMoney } from '../../../src/utils/money';
 import { formatSqliteError } from '../../../src/db/database';
-import { useDatabase } from '../../../src/context/DatabaseContext';
-import { useGstEnabled } from '../../../src/context/GstContext';
+import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { radius, spacing } from '../../../src/constants/theme';
 import type { InventoryMovement, Product } from '../../../src/types';
 
 export default function ProductDetailScreen() {
-  const gstEnabled = useGstEnabled();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const navigation = useNavigation();
-  const { refresh } = useDatabase();
+  const { refresh } = useDatabaseActions();
   const styles = useScreenStyles();
   const { colors } = useTheme();
   const localStyles = useMemo(
@@ -50,12 +49,6 @@ export default function ProductDetailScreen() {
       StyleSheet.create({
         name: { fontSize: 22, fontWeight: '700', color: colors.text },
         meta: { color: colors.textSecondary, marginBottom: spacing.sm },
-        kpiRow: {
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: spacing.sm,
-          marginVertical: spacing.md,
-        },
         moveRow: {
           flexDirection: 'row',
           backgroundColor: colors.surface,
@@ -82,8 +75,6 @@ export default function ProductDetailScreen() {
   const [sku, setSku] = useState('');
   const [unit, setUnit] = useState('');
   const [sellPrice, setSellPrice] = useState('');
-  const [hsnSac, setHsnSac] = useState('');
-  const [gstRate, setGstRate] = useState('');
   const [adjustQty, setAdjustQty] = useState('');
   const [adjustNotes, setAdjustNotes] = useState('');
   const [saving, setSaving] = useState(false);
@@ -106,8 +97,6 @@ export default function ProductDetailScreen() {
         setSku(p.sku ?? '');
         setUnit(p.unit);
         setSellPrice(p.sell_price > 0 ? formatAmountInput(p.sell_price) : '');
-        setHsnSac(p.hsn_sac ?? '');
-        setGstRate(formatAmountInput(p.gst_rate ?? 0));
       }
       setError(p ? null : 'Product not found');
     } catch (e) {
@@ -140,12 +129,10 @@ export default function ProductDetailScreen() {
         (category.trim() || '') !== (product.category ?? '') ||
         (sku.trim() || '') !== (product.sku ?? '') ||
         (unit.trim() || 'pcs') !== (product.unit || 'pcs') ||
-        price !== (product.sell_price > 0 ? product.sell_price : 0) ||
-        (hsnSac.trim() || '') !== (product.hsn_sac ?? '') ||
-        (parseAmountInput(gstRate) || 0) !== (product.gst_rate ?? 0));
+        price !== (product.sell_price > 0 ? product.sell_price : 0));
     const adjustingDirty = adjustQty.trim().length > 0 || adjustNotes.trim().length > 0;
     return editingDirty || adjustingDirty;
-  }, [product, editing, name, category, sku, unit, sellPrice, hsnSac, gstRate, adjustQty, adjustNotes]);
+  }, [product, editing, name, category, sku, unit, sellPrice, adjustQty, adjustNotes]);
   useUnsavedChangesGuard(isEditDirty);
 
   const handleSaveEdit = async () => {
@@ -159,12 +146,7 @@ export default function ProductDetailScreen() {
       Alert.alert('Error', 'Enter a valid sell price');
       return;
     }
-    const rate = gstEnabled ? (gstRate.trim() ? parseAmountInput(gstRate) : 0) : 0;
-    if (gstEnabled && (!Number.isFinite(rate) || rate < 0)) {
-      Alert.alert('Error', 'Enter a valid GST rate');
-      return;
-    }
-    setSaving(true);
+        setSaving(true);
     try {
       await updateProduct(product.id, {
         name: name.trim(),
@@ -172,8 +154,6 @@ export default function ProductDetailScreen() {
         sku: sku.trim() || undefined,
         unit: unit.trim() || 'pcs',
         sell_price: price,
-        hsn_sac: gstEnabled ? hsnSac.trim() || null : null,
-        gst_rate: rate,
       });
       refresh();
       setEditing(false);
@@ -256,21 +236,21 @@ export default function ProductDetailScreen() {
   }, [navigation, product, handleDelete]);
 
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <DetailSkeleton />;
   }
 
-  if (error || !product) {
+  if (error) {
+    return <ErrorState message={error} onRetry={() => { void load(); }} />;
+  }
+
+  if (!product) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.cardTitle}>{error ?? 'Product not found'}</Text>
-        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.back()}>
-          <Text style={styles.link}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
+      <EmptyState
+        title="Not found"
+        message="This record is missing or was deleted."
+        actionLabel="Go Back"
+        onAction={() => router.back()}
+      />
     );
   }
 
@@ -288,12 +268,8 @@ export default function ProductDetailScreen() {
             <Text style={localStyles.meta}>{product.category}</Text>
           ) : null}
           {product.sku ? <Text style={localStyles.meta}>SKU: {product.sku}</Text> : null}
-          {gstEnabled && product.hsn_sac ? (
-            <Text style={localStyles.meta}>HSN/SAC: {product.hsn_sac}</Text>
-          ) : null}
-          {gstEnabled && (product.gst_rate ?? 0) > 0 ? (
-            <Text style={localStyles.meta}>GST: {product.gst_rate}%</Text>
-          ) : null}
+          
+          
         </>
       ) : (
         <>
@@ -302,30 +278,13 @@ export default function ProductDetailScreen() {
           <FormInput label="SKU" value={sku} onChangeText={setSku} />
           <FormInput label="Unit" value={unit} onChangeText={setUnit} />
           <FormInput label="Sell Price (₹)" value={sellPrice} onChangeText={setSellPrice} money />
-          {gstEnabled ? (
-            <>
-              <FormInput
-                label="HSN/SAC (optional)"
-                value={hsnSac}
-                onChangeText={setHsnSac}
-                placeholder="e.g. 8471"
-                keyboardType="number-pad"
-              />
-              <FormInput
-                label="GST rate (%)"
-                value={gstRate}
-                onChangeText={setGstRate}
-                money
-                placeholder="0, 5, 12, 18, 28"
-              />
-            </>
-          ) : null}
+          
           <PrimaryButton title="Save Changes" onPress={handleSaveEdit} loading={saving} />
         </>
       )}
 
       {!editing ? (
-        <View style={localStyles.kpiRow}>
+        <View style={styles.detailKpiRow}>
           <StatCard
             label="Stock Value"
             value={stockValue}
@@ -388,8 +347,6 @@ export default function ProductDetailScreen() {
               setSku(product.sku ?? '');
               setUnit(product.unit);
               setSellPrice(product.sell_price > 0 ? formatAmountInput(product.sell_price) : '');
-              setHsnSac(product.hsn_sac ?? '');
-              setGstRate(formatAmountInput(product.gst_rate ?? 0));
             }
             setEditing(!editing);
           }}

@@ -466,126 +466,21 @@ export async function shareGrowthReportPdf(data: GrowthReport) {
   );
 }
 
-export async function shareGstSummaryPdf(
-  periodKey: string,
-  data: import('./gstReports').GstSummaryRow
-) {
-  const period = monthKeyToLabel(periodKey);
-  const body =
-    buildLinesSection([
-      { label: 'Outward taxable', value: pdfMoney(data.outwardTaxable) },
-      { label: 'Output CGST', value: pdfMoney(data.outwardCgst) },
-      { label: 'Output SGST', value: pdfMoney(data.outwardSgst) },
-      { label: 'Output IGST', value: pdfMoney(data.outwardIgst) },
-      { label: 'Output tax', value: pdfMoney(data.outwardTax), bold: true },
-      { label: 'Inward taxable', value: pdfMoney(data.inwardTaxable) },
-      { label: 'Input CGST', value: pdfMoney(data.inwardCgst) },
-      { label: 'Input SGST', value: pdfMoney(data.inwardSgst) },
-      { label: 'Input IGST', value: pdfMoney(data.inwardIgst) },
-      { label: 'Input tax', value: pdfMoney(data.inwardTax), bold: true },
-      { label: 'Net payable / (credit)', value: pdfMoney(data.netPayable), bold: true },
-    ]);
-  const html = await wrapReportHtml({ title: 'GST Summary', period, subtitle: 'GSTR-3B style' }, body);
-  return exportPdf(html, `GST-Summary-${safeFilePart(period)}.pdf`, 'Download GST Summary PDF');
-}
-
-export async function shareGstOutwardPdf(
-  periodKey: string,
-  rows: import('./gstReports').GstOutwardLine[]
-) {
-  const period = monthKeyToLabel(periodKey);
-  const body = buildTableHtml(
-    [
-      { key: 'date', label: 'Date', width: '72px' },
-      { key: 'invoice', label: 'Invoice' },
-      { key: 'party', label: 'Party' },
-      { key: 'type', label: 'Type', width: '48px' },
-      { key: 'taxable', label: 'Taxable', align: 'right', width: '72px' },
-      { key: 'tax', label: 'Tax', align: 'right', width: '64px' },
-      { key: 'total', label: 'Total', align: 'right', width: '72px' },
-    ],
-    rows.map((row) => ({
-      date: row.date,
-      invoice: row.invoice_no,
-      party: row.party_name,
-      type: row.supply_type,
-      taxable: pdfMoney(row.taxable_amount),
-      tax: pdfMoney(row.cgst_amount + row.sgst_amount + row.igst_amount),
-      total: pdfMoney(row.total_amount),
-    }))
-  );
-  const html = await wrapReportHtml(
-    { title: 'Outward Supplies', period, subtitle: 'GSTR-1 style' },
-    body
-  );
-  return exportPdf(html, `GST-Outward-${safeFilePart(period)}.pdf`, 'Download Outward Supplies PDF');
-}
-
-export async function shareGstHsnPdf(periodKey: string, rows: import('./gstReports').GstHsnLine[]) {
-  const period = monthKeyToLabel(periodKey);
-  const body = buildTableHtml(
-    [
-      { key: 'hsn', label: 'HSN' },
-      { key: 'qty', label: 'Qty', align: 'right', width: '56px' },
-      { key: 'taxable', label: 'Taxable', align: 'right', width: '80px' },
-      { key: 'tax', label: 'Tax', align: 'right', width: '72px' },
-    ],
-    rows.map((row) => ({
-      hsn: row.hsn_sac,
-      qty: String(row.qty),
-      taxable: pdfMoney(row.taxable_amount),
-      tax: pdfMoney(row.tax_amount),
-    }))
-  );
-  const html = await wrapReportHtml({ title: 'HSN Summary', period }, body);
-  return exportPdf(html, `GST-HSN-${safeFilePart(period)}.pdf`, 'Download HSN Summary PDF');
-}
-
-export async function shareGstStateWisePdf(
-  periodKey: string,
-  rows: import('./gstReports').GstStateWiseRow[]
-) {
-  const period = monthKeyToLabel(periodKey);
-  const body = buildTableHtml(
-    [
-      { key: 'state', label: 'State' },
-      { key: 'count', label: 'Invoices', align: 'right', width: '64px' },
-      { key: 'taxable', label: 'Taxable', align: 'right', width: '80px' },
-      { key: 'tax', label: 'Tax', align: 'right', width: '72px' },
-      { key: 'total', label: 'Total', align: 'right', width: '80px' },
-    ],
-    rows.map((row) => ({
-      state: `${row.state_label}${row.state_code !== '—' ? ` (${row.state_code})` : ''}`,
-      count: String(row.invoice_count),
-      taxable: pdfMoney(row.taxable_amount),
-      tax: pdfMoney(row.tax_amount),
-      total: pdfMoney(row.total_amount),
-    }))
-  );
-  const html = await wrapReportHtml(
-    { title: 'GST Customers by State', period },
-    body
-  );
-  return exportPdf(html, `GST-By-State-${safeFilePart(period)}.pdf`, 'Download State-wise GST PDF');
-}
-
 export async function shareVendorAccountPurchasesPdf(
   periodKey: string,
-  rows: import('./gstReports').VendorAccountPurchaseRow[]
+  rows: import('./reports').VendorAccountPurchaseRow[]
 ) {
   const period = monthKeyToLabel(periodKey);
   const body = buildTableHtml(
     [
       { key: 'vendor', label: 'Vendor' },
       { key: 'bills', label: 'Bills', align: 'right', width: '48px' },
-      { key: 'itc', label: 'ITC', align: 'right', width: '72px' },
       { key: 'total', label: 'Total', align: 'right', width: '80px' },
       { key: 'accounts', label: 'Paid via' },
     ],
     rows.map((row) => ({
       vendor: row.vendor_name,
       bills: String(row.bill_count),
-      itc: pdfMoney(row.input_tax),
       total: pdfMoney(row.total_amount),
       accounts:
         row.accounts.map((a) => `${a.account_name} ${pdfMoney(a.paid)}`).join(', ') || '—',

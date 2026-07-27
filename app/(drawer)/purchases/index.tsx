@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
-  Text,
   FlatList,
   RefreshControl,
 } from 'react-native';
@@ -13,12 +12,14 @@ import { ListItem } from '../../../src/components/ListItem';
 import { MoneyTotalRow } from '../../../src/components/MoneyText';
 import { ListSkeleton } from '../../../src/components/Skeleton';
 import {
+  EmptyState,
   ErrorState,
   Fab,
   FilterChip,
   FilterRow,
   SearchField,
   useScreenStyles,
+  useFabListPadding,
 } from '../../../src/components/ui';
 import { formatDisplayDate, getPeriodTotalLabel } from '../../../src/utils/date';
 import { matchesSearch } from '../../../src/utils/search';
@@ -26,8 +27,9 @@ import { useTheme } from '../../../src/context/ThemeContext';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
-import { FLATLIST_PERF } from '../../../src/constants/listPerf';
+import { FLATLIST_PERF, listCardGetItemLayout } from '../../../src/constants/listPerf';
 import { spacing } from '../../../src/constants/theme';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 import type { Purchase } from '../../../src/types';
 
 type Filter = 'all' | 'paid' | 'unpaid';
@@ -37,6 +39,7 @@ export default function PurchasesListScreen() {
   const { refreshKey } = useDatabase();
   const { colors } = useTheme();
   const styles = useScreenStyles();
+  const fabListPadding = useFabListPadding();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
@@ -141,7 +144,7 @@ export default function PurchasesListScreen() {
         <FlatList
           data={filteredPurchases}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: fabListPadding }]}
           renderItem={renderItem}
           refreshControl={
             <RefreshControl
@@ -149,20 +152,29 @@ export default function PurchasesListScreen() {
               onRefresh={() => {
                 setRefreshing(true);
                 load()
-                  .catch(() => {})
+                  .catch((e) => alertRefreshFailed(e))
                   .finally(() => setRefreshing(false));
               }}
               colors={[colors.primary]}
               tintColor={colors.primary}
             />
           }
+          getItemLayout={listCardGetItemLayout}
           {...FLATLIST_PERF}
           ListEmptyComponent={
-            <Text style={styles.empty}>
-              {search.trim()
-                ? 'No purchases match your search.'
-                : 'No purchases in this period.'}
-            </Text>
+            search.trim() || filter !== 'all' ? (
+              <EmptyState
+                title="No matches"
+                message="Try a different filter or search."
+              />
+            ) : (
+              <EmptyState
+                title="No purchases yet"
+                message="Record your first purchase for this period."
+                actionLabel="New Purchase"
+                onAction={() => router.push('/(drawer)/purchases/new' as never)}
+              />
+            )
           }
         />
       )}

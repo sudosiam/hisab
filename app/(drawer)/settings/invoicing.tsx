@@ -19,14 +19,12 @@ import {
   getNextBosInvoiceNo,
   getNextPurchaseInvoiceNo,
 } from '../../../src/services/invoiceNumbers';
-import { useGstEnabled } from '../../../src/context/GstContext';
 import { SettingsDivider, useSettingsStyles } from '../../../src/components/settings/settingsUi';
 
 export default function InvoicingSettingsScreen() {
   const styles = useScreenStyles();
   const localStyles = useSettingsStyles();
   const { colors } = useTheme();
-  const gstEnabled = useGstEnabled();
 
   const [salePrefix, setSalePrefix] = useState('S');
   const [bosPrefix, setBosPrefix] = useState('BOS');
@@ -110,10 +108,6 @@ export default function InvoicingSettingsScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={localStyles.sectionCard}>
-        <Text style={localStyles.rowMeta}>
-          Set the invoice number your next sale or purchase should use. Useful when moving from
-          another system — not starting from 0001.
-        </Text>
         <FormInput
           label="Next sale invoice number"
           value={salePrefix}
@@ -122,31 +116,19 @@ export default function InvoicingSettingsScreen() {
           onEndEditing={saveSalePrefix}
         />
         <Text style={localStyles.rowMeta}>
-          After save, next sale: {previewNextInvoiceFromSetting(salePrefix, 'S')}
-          {nextSaleInvoice &&
-          nextSaleInvoice !== previewNextInvoiceFromSetting(salePrefix, 'S')
-            ? ` (with existing sales: ${nextSaleInvoice})`
-            : ''}
+          Next: {nextSaleInvoice || previewNextInvoiceFromSetting(salePrefix, 'S')}
         </Text>
-        {gstEnabled ? (
-          <>
-            <SettingsDivider color={colors.borderLight} />
-            <FormInput
-              label="Next BOS number"
-              value={bosPrefix}
-              onChangeText={setBosPrefix}
-              placeholder="BOS2627-0001"
-              onEndEditing={saveBosPrefix}
-            />
-            <Text style={localStyles.rowMeta}>
-              After save, next BOS: {previewNextInvoiceFromSetting(bosPrefix, 'BOS')}
-              {nextBosInvoice &&
-              nextBosInvoice !== previewNextInvoiceFromSetting(bosPrefix, 'BOS')
-                ? ` (with existing BOS: ${nextBosInvoice})`
-                : ''}
-            </Text>
-          </>
-        ) : null}
+        <SettingsDivider color={colors.borderLight} />
+        <FormInput
+          label="Next BOS number"
+          value={bosPrefix}
+          onChangeText={setBosPrefix}
+          placeholder="BOS2627-0001"
+          onEndEditing={saveBosPrefix}
+        />
+        <Text style={localStyles.rowMeta}>
+          Next: {nextBosInvoice || previewNextInvoiceFromSetting(bosPrefix, 'BOS')}
+        </Text>
         <SettingsDivider color={colors.borderLight} />
         <FormInput
           label="Next purchase invoice number"
@@ -156,11 +138,7 @@ export default function InvoicingSettingsScreen() {
           onEndEditing={savePurchasePrefix}
         />
         <Text style={localStyles.rowMeta}>
-          After save, next purchase: {previewNextInvoiceFromSetting(purchasePrefix, 'P')}
-          {nextPurchaseInvoice &&
-          nextPurchaseInvoice !== previewNextInvoiceFromSetting(purchasePrefix, 'P')
-            ? ` (with existing purchases: ${nextPurchaseInvoice})`
-            : ''}
+          Next: {nextPurchaseInvoice || previewNextInvoiceFromSetting(purchasePrefix, 'P')}
         </Text>
       </View>
     </ScrollView>

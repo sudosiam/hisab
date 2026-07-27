@@ -3,7 +3,6 @@ import {
   View,
   Text,
   FlatList,
-  ActivityIndicator,
   StyleSheet,
   RefreshControl,
 } from 'react-native';
@@ -11,8 +10,9 @@ import { useRouter } from 'expo-router';
 import { getProducts, getProductSellPrice } from '../../../src/services/inventory';
 import { ListItem } from '../../../src/components/ListItem';
 import { MoneyText } from '../../../src/components/MoneyText';
-import { ErrorState, Fab, SearchField, useScreenStyles } from '../../../src/components/ui';
-import { FLATLIST_PERF } from '../../../src/constants/listPerf';
+import { ListSkeleton } from '../../../src/components/Skeleton';
+import { ErrorState, EmptyState, Fab, SearchField, useScreenStyles, useFabListPadding } from '../../../src/components/ui';
+import { FLATLIST_PERF, listCardGetItemLayout } from '../../../src/constants/listPerf';
 import { CategoryPicker } from '../../../src/components/CategoryPicker';
 import { formatQty } from '../../../src/utils/format';
 import { matchesSearch } from '../../../src/utils/search';
@@ -20,6 +20,7 @@ import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { spacing } from '../../../src/constants/theme';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 import type { Product } from '../../../src/types';
 
 function matchesCategory(product: Product, categoryFilter: string): boolean {
@@ -33,6 +34,7 @@ export default function InventoryListScreen() {
   const { refreshKey } = useDatabase();
   const { colors } = useTheme();
   const styles = useScreenStyles();
+  const fabListPadding = useFabListPadding();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
@@ -63,10 +65,7 @@ export default function InventoryListScreen() {
 
   const { booting, error, retry } = useFocusRefresh(load, [refreshKey]);
 
-  const emptyMessage =
-    search.trim() || categoryFilter
-      ? 'No products match your filters.'
-      : 'No products. Add your first item.';
+  const isFiltered = search.trim() || !!categoryFilter;
 
   const renderItem = useCallback(
     ({ item }: { item: Product }) => (
@@ -115,25 +114,42 @@ export default function InventoryListScreen() {
       />
 
       {booting && products.length === 0 ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
+        <ListSkeleton />
       ) : (
         <FlatList
           data={filteredProducts}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: fabListPadding }]}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => {
                 setRefreshing(true);
-                load().finally(() => setRefreshing(false));
+                load()
+                  .catch((e) => alertRefreshFailed(e))
+                  .finally(() => setRefreshing(false));
               }}
               colors={[colors.primary]}
               tintColor={colors.primary}
             />
           }
+          getItemLayout={listCardGetItemLayout}
           {...FLATLIST_PERF}
-          ListEmptyComponent={<Text style={styles.empty}>{emptyMessage}</Text>}
+          ListEmptyComponent={
+            isFiltered ? (
+              <EmptyState
+                title="No matches"
+                message="Try a different filter or search."
+              />
+            ) : (
+              <EmptyState
+                title="No products yet"
+                message="Add your first item to track inventory."
+                actionLabel="Add Product"
+                onAction={() => router.push('/(drawer)/inventory/new' as never)}
+              />
+            )
+          }
           renderItem={renderItem}
         />
       )}

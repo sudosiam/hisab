@@ -1,32 +1,32 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Easing, Image } from 'react-native';
+import React, { useEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, Image } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 import { useTheme } from '../context/ThemeContext';
 import { spacing, typography, radius } from '../constants/theme';
 
 export function AppBootScreen() {
   const { colors } = useTheme();
-  const pulse = useRef(new Animated.Value(0.4)).current;
+  const pulse = useSharedValue(0.4);
 
   useEffect(() => {
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, {
-          toValue: 1,
-          duration: 700,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulse, {
-          toValue: 0.4,
-          duration: 700,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
+    pulse.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 700, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0.4, { duration: 700, easing: Easing.inOut(Easing.ease) })
+      ),
+      -1,
+      false
     );
-    animation.start();
-    return () => animation.stop();
   }, [pulse]);
+
+  const indicatorStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
 
   const styles = useMemo(
     () =>
@@ -73,7 +73,7 @@ export function AppBootScreen() {
       <Image source={require('../../assets/logo.png')} style={styles.logo} />
       <Text style={styles.brand}>Hisab</Text>
       <Text style={styles.tagline}>Business accounts</Text>
-      <Animated.View style={[styles.indicator, { opacity: pulse }]} />
+      <Animated.View style={[styles.indicator, indicatorStyle]} />
     </View>
   );
 }

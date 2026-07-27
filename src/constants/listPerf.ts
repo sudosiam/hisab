@@ -9,3 +9,12 @@ export const FLATLIST_PERF = {
 
 /** Approximate compact card height for list rows (padding + 2 lines). */
 export const LIST_CARD_HEIGHT = 64;
+
+/** Stable getItemLayout for compact ListItem / ListCard rows. */
+export function listCardGetItemLayout(_data: unknown, index: number) {
+  return {
+    length: LIST_CARD_HEIGHT,
+    offset: LIST_CARD_HEIGHT * index,
+    index,
+  };
+}

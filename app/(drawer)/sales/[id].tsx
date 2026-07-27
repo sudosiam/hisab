@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ActivityIndicator,
   Alert,
   TouchableOpacity,
 } from 'react-native';
@@ -15,9 +14,13 @@ import { formatSqliteError } from '../../../src/db/database';
 import { getSelectableAccounts } from '../../../src/services/banking';
 import { StatusBadge } from '../../../src/components/StatusBadge';
 import { StatCard } from '../../../src/components/StatCard';
+import { MoneyText } from '../../../src/components/MoneyText';
+import { DetailSkeleton } from '../../../src/components/Skeleton';
 import { AccountPicker } from '../../../src/components/AccountPicker';
-import { OverflowMenu } from '../../../src/components/OverflowMenu';
+import { DetailHeaderActions } from '../../../src/components/DetailHeaderActions';
 import {
+  EmptyState,
+  ErrorState,
   FormInput,
   FormScreen,
   PrimaryButton,
@@ -28,21 +31,18 @@ import {
 import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
 import { roundMoney } from '../../../src/utils/money';
 import { parseRouteId } from '../../../src/utils/route';
-import { useDatabase } from '../../../src/context/DatabaseContext';
-import { useGstEnabled } from '../../../src/context/GstContext';
+import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { todayISO, isValidISODate, formatDisplayDate } from '../../../src/utils/date';
 import { stackDetailBeforeRemove } from '../../../src/navigation/screenOptions';
 import { radius, spacing } from '../../../src/constants/theme';
-import { stateName } from '../../../src/services/gst';
 import type { Account, Sale, SaleItem, SalePayment } from '../../../src/types';
 
 export default function SaleDetailScreen() {
-  const gstEnabled = useGstEnabled();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
-  const { refresh } = useDatabase();
+  const { refresh } = useDatabaseActions();
 
   useEffect(() => {
     const unsub = navigation.addListener('beforeRemove', (e) => {
@@ -74,12 +74,6 @@ export default function SaleDetailScreen() {
         typeBadgeTextBos: { color: colors.warning },
         party: { fontSize: 16, color: colors.textSecondary, marginTop: 4 },
         date: { fontSize: 13, color: colors.textSecondary },
-        kpiRow: {
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: spacing.sm,
-          marginVertical: spacing.md,
-        },
         discountNote: {
           fontSize: 12,
           color: colors.textMuted,
@@ -321,11 +315,11 @@ export default function SaleDetailScreen() {
     navigation.setOptions({
       headerRight: sale
         ? () => (
-            <OverflowMenu
-              actions={[
+            <DetailHeaderActions
+              onShare={handleSharePdf}
+              overflowActions={[
                 { label: 'Preview / Print', onPress: handlePreviewPdf },
                 { label: 'Download PDF', onPress: handleDownloadPdf },
-                { label: 'Share PDF', onPress: handleSharePdf },
                 { label: 'Share on WhatsApp', onPress: handleWhatsApp },
                 {
                   label: 'Issue credit note',
@@ -363,21 +357,21 @@ export default function SaleDetailScreen() {
   ]);
 
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <DetailSkeleton />;
   }
 
-  if (error || !sale) {
+  if (error) {
+    return <ErrorState message={error} onRetry={() => { void load(); }} />;
+  }
+
+  if (!sale) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.cardTitle}>{error ?? 'Sale not found'}</Text>
-        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.dismissTo('/(drawer)/sales')}>
-          <Text style={styles.link}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
+      <EmptyState
+        title="Not found"
+        message="This record is missing or was deleted."
+        actionLabel="Go Back"
+        onAction={() => router.dismissTo('/(drawer)/sales')}
+      />
     );
   }
 
@@ -389,17 +383,6 @@ export default function SaleDetailScreen() {
   const hasDiscount = (sale.discount_amount ?? 0) > 0;
   const hasServiceCharges = (sale.service_charges ?? 0) > 0;
   const isBos = sale.invoice_type === 'bos';
-  const outputTax =
-    (sale.cgst_amount ?? 0) + (sale.sgst_amount ?? 0) + (sale.igst_amount ?? 0);
-  const withGst = items.filter(
-    (item) =>
-      (item.gst_rate ?? 0) > 0.009 ||
-      (item.cgst_amount ?? 0) + (item.sgst_amount ?? 0) + (item.igst_amount ?? 0) > 0.009
-  );
-  const withoutGst = items.length - withGst.length;
-  const placeLabel = sale.place_of_supply
-    ? stateName(sale.place_of_supply) || sale.place_of_supply
-    : null;
 
   return (
     <FormScreen>
@@ -412,18 +395,12 @@ export default function SaleDetailScreen() {
           <StatusBadge status={sale.status} />
         </View>
       </View>
-      {gstEnabled ? (
-        <View style={[localStyles.typeBadge, isBos && localStyles.typeBadgeBos]}>
-          <Text style={[localStyles.typeBadgeText, isBos && localStyles.typeBadgeTextBos]}>
-            {isBos ? 'Bill of Supply' : 'Tax Invoice'}
-          </Text>
-        </View>
-      ) : null}
+      
       <Text style={localStyles.party}>{sale.party_name}</Text>
-      <Text style={localStyles.date}>{formatDisplayDate(sale.date)}</Text>
-      {gstEnabled && placeLabel ? (
-        <Text style={localStyles.date}>Place of supply: {placeLabel}</Text>
-      ) : null}
+      <Text style={localStyles.date}>
+        {formatDisplayDate(sale.date)} · {isBos ? 'Bill of Supply' : 'Invoice'}
+      </Text>
+      
 
       {hasDiscount || hasServiceCharges ? (
         <Text style={localStyles.discountNote}>
@@ -433,7 +410,7 @@ export default function SaleDetailScreen() {
         </Text>
       ) : null}
 
-      <View style={localStyles.kpiRow}>
+      <View style={styles.detailKpiRow}>
         <StatCard label="Total" value={sale.total_amount} color={colors.primary} />
         <StatCard
           label="Due"
@@ -449,64 +426,21 @@ export default function SaleDetailScreen() {
         />
       </View>
 
-      {gstEnabled &&
-      (sale.cgst_amount ?? 0) + (sale.sgst_amount ?? 0) + (sale.igst_amount ?? 0) > 0.009 ? (
-        <>
-          <SectionHeader title="GST" />
-          <View style={{ marginBottom: spacing.sm }}>
-            <View style={localStyles.kpiRow}>
-              <StatCard
-                label="Output tax"
-                value={outputTax}
-                color={outputTax > 0 ? colors.primary : colors.textSecondary}
-                subtitle={
-                  (sale.igst_amount ?? 0) > 0.009
-                    ? 'IGST'
-                    : outputTax > 0
-                      ? 'CGST + SGST'
-                      : 'No tax'
-                }
-              />
-              <StatCard
-                label="Taxable"
-                value={sale.taxable_amount ?? sale.subtotal}
-                color={colors.primary}
-              />
-              <StatCard
-                label="Lines"
-                displayValue={`${withGst.length}/${items.length}`}
-                color={withoutGst > 0 ? colors.warning : colors.success}
-                subtitle={withoutGst > 0 ? `${withoutGst} without GST` : 'All lines have GST'}
-              />
-            </View>
-          </View>
-        </>
-      ) : null}
+      
 
       <SectionHeader title="Items" />
-      {items.map((item) => {
-        const lineTax =
-          (item.cgst_amount ?? 0) + (item.sgst_amount ?? 0) + (item.igst_amount ?? 0);
-        const hasGst = (item.gst_rate ?? 0) > 0.009 || lineTax > 0.009;
-        return (
+      {items.map((item) => (
           <View key={item.id} style={localStyles.itemRow}>
             <View style={{ flex: 1 }}>
               <Text style={localStyles.itemName}>{item.product_name}</Text>
               <Text style={localStyles.itemMeta}>
                 {item.qty} × {formatCurrency(item.unit_price)} · Cost{' '}
                 {formatCurrency(item.unit_cost)}
-                {gstEnabled && item.hsn_sac ? ` · HSN ${item.hsn_sac}` : ''}
-                {gstEnabled
-                  ? hasGst
-                    ? ` · GST ${item.gst_rate ?? 0}% · Tax ${formatCurrency(lineTax)}`
-                    : ' · No GST'
-                  : ''}
               </Text>
             </View>
-            <Text style={localStyles.itemTotal}>{formatCurrency(item.total)}</Text>
+            <MoneyText amount={item.total} size="md" style={localStyles.itemTotal} />
           </View>
-        );
-      })}
+      ))}
 
       <SectionHeader title="Payments" />
       {payments.length === 0 ? (

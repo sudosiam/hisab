@@ -3,7 +3,7 @@ import { waitForDatabaseAccess } from '../services/dbMaintenance';
 import { roundMoney } from '../utils/money';
 
 export const DB_NAME = 'hisab.db';
-const SCHEMA_VERSION = 27;
+const SCHEMA_VERSION = 28;
 
 /** Removes the legacy attachment media folder left over from the removed attachments feature. */
 async function clearLegacyMediaFolder(): Promise<void> {
@@ -174,6 +174,8 @@ export function hasUserDataFromCounts(counts: {
   fixedAssets: number;
   loans: number;
   transactions: number;
+  adjustmentNotes?: number;
+  paymentVouchers?: number;
 }): boolean {
   const total =
     counts.sales +
@@ -184,7 +186,9 @@ export function hasUserDataFromCounts(counts: {
     counts.otherIncome +
     counts.fixedAssets +
     counts.loans +
-    counts.transactions;
+    counts.transactions +
+    (counts.adjustmentNotes ?? 0) +
+    (counts.paymentVouchers ?? 0);
   return total > 0;
 }
 
@@ -202,6 +206,8 @@ export async function databaseHasUserData(): Promise<boolean> {
       fixed_assets: number;
       loans: number;
       transactions: number;
+      adjustment_notes: number;
+      payment_vouchers: number;
     }>(
       `SELECT
         (SELECT COUNT(*) FROM sales) AS sales,
@@ -212,7 +218,9 @@ export async function databaseHasUserData(): Promise<boolean> {
         (SELECT COUNT(*) FROM other_income) AS other_income,
         (SELECT COUNT(*) FROM fixed_assets) AS fixed_assets,
         (SELECT COUNT(*) FROM loans) AS loans,
-        (SELECT COUNT(*) FROM transactions) AS transactions`
+        (SELECT COUNT(*) FROM transactions) AS transactions,
+        (SELECT COUNT(*) FROM adjustment_notes) AS adjustment_notes,
+        (SELECT COUNT(*) FROM payment_vouchers) AS payment_vouchers`
     );
     if (!row) return false;
     return hasUserDataFromCounts({
@@ -225,6 +233,8 @@ export async function databaseHasUserData(): Promise<boolean> {
       fixedAssets: row.fixed_assets,
       loans: row.loans,
       transactions: row.transactions,
+      adjustmentNotes: row.adjustment_notes,
+      paymentVouchers: row.payment_vouchers,
     });
   } catch {
     return false;
@@ -361,6 +371,17 @@ async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Pr
   await ensureGstColumns(db);
   await ensureAdjustmentNoteTables(db);
   await ensurePaymentVoucherTables(db);
+
+  // v28: GST product teardown — force setting off. Tax columns retained so old
+  // backups still open; new document writes store zero tax (see documentTotals).
+  if (fromVersion < 28) {
+    await db.runAsync(
+      `INSERT OR REPLACE INTO settings (key, value) VALUES ('gst_enabled', '0')`
+    );
+    await db.runAsync(
+      `INSERT OR REPLACE INTO settings (key, value) VALUES ('tax_inclusive_pricing', '0')`
+    );
+  }
 
   if (fromVersion < SCHEMA_VERSION) {
     await db.runAsync(
@@ -926,7 +947,7 @@ async function addMissingColumns(
   }
 }
 
-/** Additive GST columns for Regular scheme (schema v25). */
+/** Legacy tax columns retained for backup compatibility (added schema v25; GST UI removed in v28). */
 async function ensureGstColumns(db: SQLite.SQLiteDatabase): Promise<void> {
   await addMissingColumns(db, 'parties', [
     { name: 'gstin', ddl: 'gstin TEXT' },
@@ -1018,7 +1039,7 @@ async function ensureGstColumns(db: SQLite.SQLiteDatabase): Promise<void> {
   `);
 }
 
-/** Credit / debit notes for GST adjustments (schema v27). */
+/** Credit / debit notes (sales/purchase adjustments; schema v27). */
 async function ensureAdjustmentNoteTables(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS adjustment_notes (

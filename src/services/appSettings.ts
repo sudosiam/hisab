@@ -1,4 +1,5 @@
 import { getDatabase } from '../db/database';
+import type { BusinessProfile } from '../types';
 import {
   formatFinancialYearShortLabel,
   getFiscalYearStartYear,
@@ -15,8 +16,6 @@ const BUSINESS_NAME_KEY = 'business_name';
 const BUSINESS_ADDRESS_KEY = 'business_address';
 const BUSINESS_GSTIN_KEY = 'business_gstin';
 const BUSINESS_STATE_KEY = 'business_state';
-const GST_ENABLED_KEY = 'gst_enabled';
-const TAX_INCLUSIVE_KEY = 'tax_inclusive_pricing';
 const UPI_ID_KEY = 'business_upi_id';
 const WHATSAPP_MESSAGE_TEMPLATE_KEY = 'whatsapp_message_template';
 const HAPTICS_ENABLED_KEY = 'haptics_enabled';
@@ -198,88 +197,19 @@ export async function setBusinessAddress(address: string): Promise<void> {
   await setSettingValue(BUSINESS_ADDRESS_KEY, address.trim().slice(0, 500));
 }
 
+/** Legacy setting retained for old backups / Tally import; UI no longer edits GSTIN. */
 export async function getBusinessGstin(): Promise<string> {
   return (await getSettingValue(BUSINESS_GSTIN_KEY))?.trim().toUpperCase() || '';
 }
 
-export async function setBusinessGstin(gstin: string): Promise<void> {
-  const cleaned = gstin.trim().toUpperCase();
-  if (cleaned) {
-    const { isValidGstin, stateCodeFromGstin, isValidStateCode } = await import('./gst');
-    if (!isValidGstin(cleaned)) {
-      throw new Error('Enter a valid 15-character GSTIN');
-    }
-    await setSettingValue(BUSINESS_GSTIN_KEY, cleaned.slice(0, 15));
-    // Keep business_state in sync with GSTIN prefix when empty or mismatched.
-    const fromGstin = stateCodeFromGstin(cleaned);
-    if (fromGstin && isValidStateCode(fromGstin)) {
-      const current = ((await getSettingValue(BUSINESS_STATE_KEY)) ?? '').trim();
-      if (!current || current !== fromGstin) {
-        await setSettingValue(BUSINESS_STATE_KEY, fromGstin);
-      }
-    }
-    return;
-  }
-  await setSettingValue(BUSINESS_GSTIN_KEY, '');
-}
-
+/** Legacy setting retained for old backups / Tally import. */
 export async function getBusinessState(): Promise<string> {
   return (await getSettingValue(BUSINESS_STATE_KEY))?.trim() || '';
 }
 
 export async function setBusinessState(stateCode: string): Promise<void> {
-  const { normalizeStateToCode, isValidStateCode, stateCodeFromGstin } = await import('./gst');
-  const cleaned = normalizeStateToCode(stateCode) ?? stateCode.trim().slice(0, 2);
-  if (cleaned) {
-    if (!isValidStateCode(cleaned)) {
-      throw new Error('Enter a valid 2-digit GST state code (e.g. 27 for Maharashtra)');
-    }
-    const gstin = ((await getSettingValue(BUSINESS_GSTIN_KEY)) ?? '').trim().toUpperCase();
-    const fromGstin = gstin ? stateCodeFromGstin(gstin) : null;
-    if (fromGstin && fromGstin !== cleaned) {
-      throw new Error(
-        `State code ${cleaned} does not match business GSTIN prefix ${fromGstin}`
-      );
-    }
-  }
-  await setSettingValue(BUSINESS_STATE_KEY, cleaned || '');
-}
-
-const SERVICE_CHARGE_GST_RATE_KEY = 'service_charge_gst_rate';
-
-/** Default GST % applied to new sale service charges (Regular scheme). */
-export async function getServiceChargeGstRate(): Promise<number> {
-  const value = await getSettingValue(SERVICE_CHARGE_GST_RATE_KEY);
-  if (value == null || value === '') return 18;
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) return 18;
-  return Math.round(n * 100) / 100;
-}
-
-export async function setServiceChargeGstRate(rate: number): Promise<void> {
-  if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
-    throw new Error('Service charge GST rate must be between 0 and 100');
-  }
-  await setSettingValue(SERVICE_CHARGE_GST_RATE_KEY, String(Math.round(rate * 100) / 100));
-}
-
-export async function isGstEnabled(): Promise<boolean> {
-  const value = await getSettingValue(GST_ENABLED_KEY);
-  if (value === null) return true;
-  return value === '1' || value === 'true';
-}
-
-export async function setGstEnabled(enabled: boolean): Promise<void> {
-  await setSettingValue(GST_ENABLED_KEY, enabled ? '1' : '0');
-}
-
-export async function isTaxInclusivePricing(): Promise<boolean> {
-  const value = await getSettingValue(TAX_INCLUSIVE_KEY);
-  return value === '1' || value === 'true';
-}
-
-export async function setTaxInclusivePricing(enabled: boolean): Promise<void> {
-  await setSettingValue(TAX_INCLUSIVE_KEY, enabled ? '1' : '0');
+  const cleaned = stateCode.trim().slice(0, 2);
+  await setSettingValue(BUSINESS_STATE_KEY, cleaned);
 }
 
 export async function getBusinessUpiId(): Promise<string> {
@@ -317,42 +247,17 @@ export async function setHapticsEnabled(enabled: boolean): Promise<void> {
   await setSettingValue(HAPTICS_ENABLED_KEY, enabled ? '1' : '0');
 }
 
-export async function getBusinessProfile(): Promise<{
-  business_name: string;
-  business_address: string;
-  business_gstin: string;
-  business_state: string;
-  gst_enabled: boolean;
-  tax_inclusive: boolean;
-  business_upi_id: string;
-  whatsapp_message_template: string;
-}> {
-  const [
-    business_name,
-    business_address,
-    business_gstin,
-    business_state,
-    gst_enabled,
-    tax_inclusive,
-    business_upi_id,
-    whatsapp_message_template,
-  ] = await Promise.all([
-    getBusinessName(),
-    getBusinessAddress(),
-    getBusinessGstin(),
-    getBusinessState(),
-    isGstEnabled(),
-    isTaxInclusivePricing(),
-    getBusinessUpiId(),
-    getWhatsappMessageTemplate(),
-  ]);
+export async function getBusinessProfile(): Promise<BusinessProfile> {
+  const [business_name, business_address, business_upi_id, whatsapp_message_template] =
+    await Promise.all([
+      getBusinessName(),
+      getBusinessAddress(),
+      getBusinessUpiId(),
+      getWhatsappMessageTemplate(),
+    ]);
   return {
     business_name,
     business_address,
-    business_gstin,
-    business_state,
-    gst_enabled,
-    tax_inclusive,
     business_upi_id,
     whatsapp_message_template,
   };

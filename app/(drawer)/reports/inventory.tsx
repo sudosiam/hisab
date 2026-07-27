@@ -1,20 +1,22 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
+import { useRouter } from 'expo-router';
 import { getInventoryReport } from '../../../src/services/reports';
 import { formatCurrency } from '../../../src/utils/format';
 import { ReportRow } from '../../../src/components/ReportRow';
 import { MoneyText } from '../../../src/components/MoneyText';
-import { ErrorState, useScreenStyles } from '../../../src/components/ui';
+import { ListSkeleton } from '../../../src/components/Skeleton';
+import { ErrorState, EmptyState, useScreenStyles } from '../../../src/components/ui';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { shareInventoryReportPdf } from '../../../src/services/reportPdf';
 import { roundMoney } from '../../../src/utils/money';
-import { formatSqliteError } from '../../../src/db/database';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import { FLATLIST_PERF } from '../../../src/constants/listPerf';
+import { FLATLIST_PERF, listCardGetItemLayout } from '../../../src/constants/listPerf';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 
 export default function InventoryReportScreen() {
   const router = useRouter();
@@ -39,28 +41,24 @@ export default function InventoryReportScreen() {
     [colors, isDark]
   );
   const [rows, setRows] = useState<Awaited<ReturnType<typeof getInventoryReport>>>([]);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [booting, setBooting] = useState(true);
 
   const load = useCallback(async () => {
     void refreshKey;
-    try {
-      setRows(await getInventoryReport());
-      setError(null);
-    } catch (e) {
-      setError(formatSqliteError(e));
-    } finally {
-      setBooting(false);
-    }
+    setRows(await getInventoryReport());
   }, [refreshKey]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const { booting, error, retry } = useFocusRefresh(load, [refreshKey]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
-    setRefreshing(false);
+    try {
+      await load();
+    } catch (e) {
+      alertRefreshFailed(e);
+    } finally {
+      setRefreshing(false);
+    }
   }, [load]);
 
   const totalValue = roundMoney(rows.reduce((s, r) => s + r.value, 0));
@@ -69,16 +67,12 @@ export default function InventoryReportScreen() {
 
   useReportPdfHeader({ disabled: !!error, onExport: exportPdf });
 
-  if (error) {
-    return <ErrorState message={error} onRetry={load} />;
+  if (error && rows.length === 0) {
+    return <ErrorState message={error} onRetry={retry} />;
   }
 
-  if (booting) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+  if (booting && rows.length === 0) {
+    return <ListSkeleton />;
   }
 
   return (
@@ -94,7 +88,15 @@ export default function InventoryReportScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
-        ListEmptyComponent={<Text style={styles.empty}>No products in inventory</Text>}
+        ListEmptyComponent={
+          <EmptyState
+            title="No products"
+            message="No products in inventory."
+            actionLabel="Add Product"
+            onAction={() => router.push('/(drawer)/inventory/new' as never)}
+          />
+        }
+        getItemLayout={listCardGetItemLayout}
         {...FLATLIST_PERF}
         renderItem={({ item }) => {
           const sell = item.sell_price > 0 ? item.sell_price : item.avg_cost * 1.2;

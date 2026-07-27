@@ -1,10 +1,14 @@
-import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { memo, useMemo } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { CommonActions, useNavigation } from '@react-navigation/native';
 import type { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 import { formatDisplayDate } from '../utils/date';
-import { spacing } from '../constants/theme';
+import { formatCurrency } from '../utils/format';
+import { spacing, typography, radius } from '../constants/theme';
+import { ACTIVE_OPACITY, ICON } from './ui';
+import { ThemedPressable } from './ThemedPressable';
 import { cardSurface } from '../constants/shadows';
 import { MoneyText, moneyRowStyles } from './MoneyText';
 import type { ActivityItem, GroupedRecentActivity } from '../services/activity';
@@ -15,10 +19,14 @@ const DRAWER_STACK: Record<ActivityItem['type'], string> = {
   expense: 'expense',
 };
 
-const SECTIONS: { key: keyof GroupedRecentActivity; title: string }[] = [
-  { key: 'sales', title: 'Sales' },
-  { key: 'purchases', title: 'Purchases' },
-  { key: 'expenses', title: 'Expenses' },
+const SECTION_META: {
+  key: keyof GroupedRecentActivity;
+  title: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+}[] = [
+  { key: 'sales', title: 'Sales', icon: 'cart-outline' },
+  { key: 'purchases', title: 'Purchases', icon: 'bag-handle-outline' },
+  { key: 'expenses', title: 'Expenses', icon: 'receipt-outline' },
 ];
 
 function openActivityDetail(
@@ -26,8 +34,6 @@ function openActivityDetail(
   item: ActivityItem
 ): void {
   const stack = DRAWER_STACK[item.type];
-  // Open detail with a clean nested stack [list → detail] so back never hits a
-  // stale New/Edit screen left from an earlier visit.
   navigation.dispatch(
     CommonActions.navigate({
       name: stack,
@@ -44,24 +50,40 @@ function openActivityDetail(
   );
 }
 
-function ActivityRow({
+function activityAccessibilityLabel(item: ActivityItem): string {
+  const typeLabel = item.type.charAt(0).toUpperCase() + item.type.slice(1);
+  const party = item.subtitle.includes(' · ')
+    ? item.subtitle.split(' · ').slice(1).join(' · ')
+    : item.subtitle;
+  return `${typeLabel} · ${party} · ${formatCurrency(item.amount)} · ${formatDisplayDate(item.date)}`;
+}
+
+const ActivityRow = memo(function ActivityRow({
   item,
   isLast,
   styles,
   amountsHidden,
+  icon,
 }: {
   item: ActivityItem;
   isLast: boolean;
   styles: ReturnType<typeof createStyles>;
   amountsHidden?: boolean;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
 }) {
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
+  const { colors } = useTheme();
   return (
-    <TouchableOpacity
+    <ThemedPressable
       style={[styles.row, isLast && styles.rowLast]}
       onPress={() => openActivityDetail(navigation, item)}
-      activeOpacity={0.75}
+      activeOpacity={ACTIVE_OPACITY}
+      accessibilityRole="button"
+      accessibilityLabel={activityAccessibilityLabel(item)}
     >
+      <View style={styles.iconWrap}>
+        <Ionicons name={icon} size={ICON.inline} color={colors.onPrimaryContainer} />
+      </View>
       <View style={styles.rowLeft}>
         <Text style={styles.title} numberOfLines={1}>
           {item.title}
@@ -79,9 +101,9 @@ function ActivityRow({
           blurred={amountsHidden}
         />
       </View>
-    </TouchableOpacity>
+    </ThemedPressable>
   );
-}
+});
 
 /** Flat list (legacy). Prefer `grouped` on the dashboard. */
 export function RecentActivityList({
@@ -101,17 +123,24 @@ export function RecentActivityList({
     const hasAny =
       grouped.sales.length > 0 || grouped.purchases.length > 0 || grouped.expenses.length > 0;
     if (!hasAny) {
-      return <Text style={styles.empty}>No recent activity yet.</Text>;
+      return (
+        <View style={styles.emptyBox}>
+          <Text style={styles.empty}>No recent activity yet.</Text>
+        </View>
+      );
     }
 
     return (
       <View style={styles.stack}>
-        {SECTIONS.map(({ key, title }) => {
+        {SECTION_META.map(({ key, title, icon }) => {
           const sectionItems = grouped[key];
           if (sectionItems.length === 0) return null;
           return (
             <View key={key} style={styles.list}>
-              <Text style={styles.sectionTitle}>{title}</Text>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>{title}</Text>
+                <Text style={styles.sectionCount}>{sectionItems.length}</Text>
+              </View>
               {sectionItems.map((item, index) => (
                 <ActivityRow
                   key={item.id}
@@ -119,6 +148,7 @@ export function RecentActivityList({
                   isLast={index === sectionItems.length - 1}
                   styles={styles}
                   amountsHidden={amountsHidden}
+                  icon={icon}
                 />
               ))}
             </View>
@@ -130,7 +160,11 @@ export function RecentActivityList({
 
   const list = items ?? [];
   if (list.length === 0) {
-    return <Text style={styles.empty}>No recent activity yet.</Text>;
+    return (
+      <View style={styles.emptyBox}>
+        <Text style={styles.empty}>No recent activity yet.</Text>
+      </View>
+    );
   }
 
   return (
@@ -142,6 +176,13 @@ export function RecentActivityList({
           isLast={index === list.length - 1}
           styles={styles}
           amountsHidden={amountsHidden}
+          icon={
+            item.type === 'sale'
+              ? 'cart-outline'
+              : item.type === 'purchase'
+                ? 'bag-handle-outline'
+                : 'receipt-outline'
+          }
         />
       ))}
     </View>
@@ -153,42 +194,67 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     stack: { gap: spacing.sm },
     list: {
       ...cardSurface(colors, isDark),
-      paddingHorizontal: spacing.md,
+      paddingHorizontal: spacing.sm,
       overflow: 'hidden',
     },
+    sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.xs,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.xs,
+    },
     sectionTitle: {
-      fontSize: 11,
+      ...typography.micro,
       fontWeight: '700',
       color: colors.textMuted,
       textTransform: 'uppercase',
       letterSpacing: 0.4,
-      paddingTop: spacing.sm,
-      paddingBottom: 2,
+    },
+    sectionCount: {
+      ...typography.micro,
+      color: colors.textMuted,
+      fontVariant: ['tabular-nums'],
     },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingVertical: 7,
-      minHeight: 36,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.xs,
+      minHeight: 52,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.borderLight,
       gap: spacing.sm,
     },
+    iconWrap: {
+      width: 32,
+      height: 32,
+      borderRadius: radius.full,
+      backgroundColor: colors.primaryContainer,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
     rowLeft: { flex: 1, minWidth: 0 },
     rowLast: {
       borderBottomWidth: 0,
-      paddingBottom: spacing.sm,
     },
-    title: { fontSize: 13, fontWeight: '600', color: colors.text },
-    subtitle: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
+    title: { ...typography.bodyMedium, fontWeight: '600', color: colors.text },
+    subtitle: { ...typography.micro, color: colors.textSecondary, marginTop: 2 },
     amountCol: {
       ...moneyRowStyles.right,
+      width: 100,
+    },
+    emptyBox: {
+      ...cardSurface(colors, isDark),
+      paddingVertical: spacing.lg,
+      paddingHorizontal: spacing.md,
     },
     empty: {
-      fontSize: 13,
+      ...typography.caption,
       color: colors.textSecondary,
       textAlign: 'center',
-      paddingVertical: spacing.md,
     },
   });
 }

@@ -9,8 +9,10 @@ import {
 } from '../db/database';
 import { resolveSaleInvoiceNo, syncNextInvoiceSettingAfterUse } from './invoiceNumbers';
 import { upsertParty } from './parties';
-import { assertGstPlaceOfSupply, computeGstDocument } from './gst';
-import { getBusinessState, isGstEnabled, isTaxInclusivePricing } from './appSettings';
+import {
+  computeUntaxedDocument,
+  type DocumentTotalsResult,
+} from './documentTotals';
 import { formatCurrency } from '../utils/format';
 import { addMoney, roundMoney, subMoney } from '../utils/money';
 import { resolvePeriodRange } from '../utils/period';
@@ -29,83 +31,25 @@ function validateSaleItems(items: SaleItemInput[]): void {
   }
 }
 
-async function resolvePartyState(
-  db: Awaited<ReturnType<typeof getDatabase>>,
-  partyName: string,
-  partyId?: number | null
-): Promise<string | null> {
-  const { resolveStateFromPartyFields } = await import('./gst');
-  if (partyId) {
-    const row = await db.getFirstAsync<{ state: string | null; gstin: string | null }>(
-      'SELECT state, gstin FROM parties WHERE id = ?',
-      [partyId]
-    );
-    const resolved = resolveStateFromPartyFields(row?.state, row?.gstin);
-    if (resolved) return resolved;
-  }
-  const byName = await db.getFirstAsync<{ state: string | null; gstin: string | null }>(
-    `SELECT state, gstin FROM parties WHERE name = ? COLLATE NOCASE AND type = 'customer' LIMIT 1`,
-    [partyName.trim()]
-  );
-  return resolveStateFromPartyFields(byName?.state, byName?.gstin);
-}
-
-async function buildSaleGst(
-  db: Awaited<ReturnType<typeof getDatabase>>,
-  params: {
-    party_name: string;
-    party_id?: number | null;
-    /** Explicit state from sale form (new customers); wins over empty party row. */
-    party_state?: string | null;
-    items: SaleItemInput[];
-    discount_amount?: number;
-    service_charges?: number;
-    /** null = legacy untaxed; number = tax at rate; omit on new docs to use settings default */
-    service_charges_gst_rate?: number | null;
-    tax_service_charges?: boolean;
-    invoice_type?: SaleInvoiceType;
-  }
-) {
-  const gstEnabled = await isGstEnabled();
-  const businessState = await getBusinessState();
-  const taxInclusive = await isTaxInclusivePricing();
-  const { resolveStateFromPartyFields } = await import('./gst');
-  const fromDb = await resolvePartyState(db, params.party_name, params.party_id);
-  const partyState =
-    fromDb ?? resolveStateFromPartyFields(params.party_state, null) ?? null;
-  const gst = computeGstDocument({
+function buildSaleTotals(params: {
+  items: SaleItemInput[];
+  discount_amount?: number;
+  service_charges?: number;
+  invoice_type?: SaleInvoiceType;
+}): { totals: DocumentTotalsResult; invoiceType: SaleInvoiceType } {
+  const totals = computeUntaxedDocument({
     lines: params.items.map((item) => ({
       qty: item.qty,
       unit_price: item.unit_price,
-      gst_rate: item.gst_rate,
       hsn_sac: item.hsn_sac,
     })),
     discount_amount: params.discount_amount,
     service_charges: params.service_charges,
-    service_charges_gst_rate: params.service_charges_gst_rate,
-    tax_service_charges: params.tax_service_charges,
-    business_state: businessState,
-    party_state: partyState,
-    gst_enabled: gstEnabled,
-    tax_inclusive: taxInclusive,
   });
-  assertGstPlaceOfSupply({
-    gst_enabled: gstEnabled,
-    tax_amount: gst.tax_amount,
-    business_state: businessState,
-    party_state: partyState,
-  });
-  // Reject explicit BOS + tax before choosing a type (suggested_invoice_type already
-  // maps tax>0 → Tax Invoice when the UI omits invoice_type).
-  if (params.invoice_type === 'bos' && gst.tax_amount > 0.009) {
-    throw new Error(
-      'Bill of Supply cannot include GST. Clear tax rates or switch to Tax Invoice.'
-    );
-  }
-  const invoiceType = params.invoice_type
-    ? normalizeInvoiceType(params.invoice_type)
-    : gst.suggested_invoice_type;
-  return { gst, invoiceType, partyState };
+  return {
+    totals,
+    invoiceType: normalizeInvoiceType(params.invoice_type),
+  };
 }
 
 function validatePaymentAmount(
@@ -206,7 +150,6 @@ export async function getSalePayments(saleId: number): Promise<SalePayment[]> {
 export async function createSale(params: {
   party_name: string;
   party_phone?: string;
-  /** Saved onto new/blank parties so CGST/SGST vs IGST works without a Parties visit. */
   party_state?: string | null;
   date: string;
   items: SaleItemInput[];
@@ -222,19 +165,11 @@ export async function createSale(params: {
   validateSaleItems(params.items);
 
   const db = await getDatabase();
-  const { gst, invoiceType } = await buildSaleGst(db, {
-    ...params,
-    // New sales tax service charges by default when amount > 0 and rate not explicitly null.
-    tax_service_charges:
-      params.service_charges_gst_rate === undefined &&
-      (params.service_charges ?? 0) > 0,
-    service_charges_gst_rate: params.service_charges_gst_rate,
-  });
-  const subtotal = gst.subtotal;
-  const discount = gst.discount_amount;
-  const serviceCharges = gst.service_charges;
-  const totalAmount = gst.total_amount;
-  const isReverseCharge = !!params.is_reverse_charge;
+  const { totals, invoiceType } = buildSaleTotals(params);
+  const subtotal = totals.subtotal;
+  const discount = totals.discount_amount;
+  const serviceCharges = totals.service_charges;
+  const totalAmount = totals.total_amount;
 
   let paidAmount = 0;
   for (const payment of params.payments) {
@@ -271,14 +206,14 @@ export async function createSale(params: {
         subtotal,
         discount,
         serviceCharges,
-        gst.service_charges_gst_rate,
-        gst.taxable_amount,
-        gst.cgst_amount,
-        gst.sgst_amount,
-        gst.igst_amount,
-        gst.is_inter_state ? 1 : 0,
-        gst.place_of_supply,
-        isReverseCharge ? 1 : 0,
+        null,
+        totals.taxable_amount,
+        0,
+        0,
+        0,
+        0,
+        null,
+        0,
         totalAmount,
         paidAmount,
         status,
@@ -294,7 +229,7 @@ export async function createSale(params: {
 
     for (let i = 0; i < params.items.length; i++) {
       const item = params.items[i];
-      const line = gst.lines[i];
+      const line = totals.lines[i];
       await db.runAsync(
         `INSERT INTO sale_items (
            sale_id, product_id, qty, unit_price, unit_cost, total,
@@ -308,11 +243,11 @@ export async function createSale(params: {
           unitCosts[i],
           line.line_total,
           line.hsn_sac,
-          line.gst_rate,
+          0,
           line.taxable_amount,
-          line.cgst_amount,
-          line.sgst_amount,
-          line.igst_amount,
+          0,
+          0,
+          0,
         ]
       );
       await db.runAsync(
@@ -388,7 +323,7 @@ async function replaceSaleItems(
   invoiceNo: string,
   items: SaleItemInput[],
   invoiceType: SaleInvoiceType,
-  gstLines: ReturnType<typeof computeGstDocument>['lines']
+  gstLines: DocumentTotalsResult['lines']
 ): Promise<number> {
   validateSaleItems(items);
 
@@ -430,11 +365,11 @@ async function replaceSaleItems(
         unitCost,
         line.line_total,
         line.hsn_sac,
-        line.gst_rate,
+        0,
         line.taxable_amount,
-        line.cgst_amount,
-        line.sgst_amount,
-        line.igst_amount,
+        0,
+        0,
+        0,
       ]
     );
     await db.runAsync(
@@ -483,58 +418,29 @@ export async function updateSale(
   const invoiceTypeChanged = invoiceType !== sale.invoice_type;
   const discount = roundMoney(Math.max(0, params.discount_amount));
   const serviceCharges = roundMoney(Math.max(0, params.service_charges ?? sale.service_charges ?? 0));
-  const serviceRate =
-    params.service_charges_gst_rate !== undefined
-      ? params.service_charges_gst_rate
-      : (sale.service_charges_gst_rate ?? null);
-  const isReverseCharge =
-    params.is_reverse_charge !== undefined
-      ? !!params.is_reverse_charge
-      : !!(sale.is_reverse_charge ?? 0);
 
   await db.withTransactionAsync(async () => {
     let subtotal = sale.subtotal;
-    let gst = {
-      taxable_amount: sale.taxable_amount ?? sale.subtotal,
-      cgst_amount: sale.cgst_amount ?? 0,
-      sgst_amount: sale.sgst_amount ?? 0,
-      igst_amount: sale.igst_amount ?? 0,
-      is_inter_state: !!(sale.is_inter_state ?? 0),
-      place_of_supply: sale.place_of_supply ?? null,
-      total_amount: sale.total_amount,
-      service_charges_gst_rate: serviceRate as number | null,
-      lines: [] as ReturnType<typeof computeGstDocument>['lines'],
-    };
-
-    const gstParams = {
-      party_name: partyName,
-      party_id: sale.party_id,
-      party_state: params.party_state,
-      discount_amount: discount,
-      service_charges: serviceCharges,
-      service_charges_gst_rate: serviceRate,
-      tax_service_charges: false,
-      invoice_type: invoiceType,
-    };
+    let totals: DocumentTotalsResult;
 
     if (params.items !== undefined) {
-      const built = await buildSaleGst(db, {
-        ...gstParams,
+      totals = buildSaleTotals({
         items: params.items,
-      });
-      gst = built.gst;
+        discount_amount: discount,
+        service_charges: serviceCharges,
+        invoice_type: invoiceType,
+      }).totals;
       subtotal = await replaceSaleItems(
         db,
         saleId,
         invoiceNo,
         params.items,
         invoiceType,
-        built.gst.lines
+        totals.lines
       );
     } else {
       const existingItems = await getSaleItems(saleId);
-      const built = await buildSaleGst(db, {
-        ...gstParams,
+      totals = buildSaleTotals({
         items: existingItems.map((item) => ({
           product_id: item.product_id,
           qty: item.qty,
@@ -542,12 +448,14 @@ export async function updateSale(
           hsn_sac: item.hsn_sac,
           gst_rate: item.gst_rate,
         })),
-      });
-      gst = built.gst;
-      subtotal = built.gst.subtotal;
+        discount_amount: discount,
+        service_charges: serviceCharges,
+        invoice_type: invoiceType,
+      }).totals;
+      subtotal = totals.subtotal;
     }
 
-    const totalAmount = gst.total_amount;
+    const totalAmount = totals.total_amount;
     if (totalAmount + 0.01 < sale.paid_amount) {
       throw new Error(
         `New total (${formatCurrency(totalAmount)}) cannot be less than the amount already paid (${formatCurrency(sale.paid_amount)}). Remove payments first.`
@@ -573,14 +481,14 @@ export async function updateSale(
         subtotal,
         discount,
         serviceCharges,
-        gst.service_charges_gst_rate,
-        gst.taxable_amount,
-        gst.cgst_amount,
-        gst.sgst_amount,
-        gst.igst_amount,
-        gst.is_inter_state ? 1 : 0,
-        gst.place_of_supply,
-        isReverseCharge ? 1 : 0,
+        null,
+        totals.taxable_amount,
+        0,
+        0,
+        0,
+        0,
+        null,
+        0,
         totalAmount,
         status,
         params.notes ?? null,

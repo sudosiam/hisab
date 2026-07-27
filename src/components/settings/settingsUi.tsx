@@ -97,7 +97,7 @@ export function useSettingsStyles() {
         },
         modalBackdrop: {
           flex: 1,
-          backgroundColor: 'rgba(0,0,0,0.45)',
+          backgroundColor: colors.scrim,
           justifyContent: 'center',
           padding: spacing.md,
         },

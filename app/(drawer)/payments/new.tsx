@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,28 +14,46 @@ import {
   PrimaryButton,
   DatePickerField,
   SectionHeader,
+  SegmentedControl,
 } from '../../../src/components/ui';
 import { CustomerAutocomplete } from '../../../src/components/CustomerAutocomplete';
 import { AccountPicker } from '../../../src/components/AccountPicker';
+import { DraftBanner } from '../../../src/components/DraftBanner';
 import { getSelectableAccounts } from '../../../src/services/banking';
 import {
   createPaymentVoucher,
   getNextPaymentVoucherNo,
   getOpenInvoicesForParty,
 } from '../../../src/services/paymentVouchers';
-import { useDatabase } from '../../../src/context/DatabaseContext';
+import { DRAFT_KEYS, loadDraft, type PaymentFormDraft } from '../../../src/services/formDrafts';
+import { useFormDraft } from '../../../src/hooks/useFormDraft';
+import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
+import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
 import { formatCurrency, parseAmountInput } from '../../../src/utils/format';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
+import { alertLoadFailed } from '../../../src/utils/uiFeedback';
 import { spacing, radius } from '../../../src/constants/theme';
 import type { Account, PaymentBillType, PaymentVoucherType } from '../../../src/types';
 
 type ApplyMode = 'against_invoice' | 'advance' | 'on_account';
 
+function isPaymentDraftEmpty(d: PaymentFormDraft): boolean {
+  return (
+    !d.partyName.trim() &&
+    !d.amount.trim() &&
+    !d.narration.trim() &&
+    !d.instrumentNo.trim() &&
+    !d.paymentMode.trim() &&
+    d.applyMode === 'against_invoice' &&
+    !d.selectedInvoiceNo
+  );
+}
+
 export default function NewPaymentScreen() {
   const router = useRouter();
-  const { refresh } = useDatabase();
+  const { refresh } = useDatabaseActions();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -55,6 +73,48 @@ export default function NewPaymentScreen() {
   const [instrumentNo, setInstrumentNo] = useState('');
   const [paymentMode, setPaymentMode] = useState('');
   const [saving, setSaving] = useState(false);
+  const draftHydratedRef = useRef(false);
+  const leaveBypassRef = useRef(false);
+
+  const draftPayload = useMemo<PaymentFormDraft>(
+    () => ({
+      voucherType,
+      voucherNo,
+      date,
+      partyName,
+      accountId,
+      amount,
+      applyMode,
+      selectedInvoiceNo,
+      narration,
+      instrumentNo,
+      paymentMode,
+    }),
+    [
+      voucherType,
+      voucherNo,
+      date,
+      partyName,
+      accountId,
+      amount,
+      applyMode,
+      selectedInvoiceNo,
+      narration,
+      instrumentNo,
+      paymentMode,
+    ]
+  );
+
+  const { markReady, discardDraft, clearDraftOnSave, hasDraft, noteDraftLoaded } = useFormDraft(
+    DRAFT_KEYS.paymentNew,
+    draftPayload,
+    { isEmpty: isPaymentDraftEmpty }
+  );
+
+  useUnsavedChangesGuard(!isPaymentDraftEmpty(draftPayload) || hasDraft, {
+    bypassRef: leaveBypassRef,
+    message: 'You have an unsaved payment draft that will be lost.',
+  });
 
   const reloadMeta = useCallback(async (type: PaymentVoucherType) => {
     const [accs, nextNo] = await Promise.all([
@@ -65,12 +125,69 @@ export default function NewPaymentScreen() {
     setAccountId((current) =>
       current && accs.some((a) => a.id === current) ? current : accs[0]?.id ?? 0
     );
-    setVoucherNo(nextNo);
+    // After draft hydration, type switches should fetch a fresh voucher number.
+    // During the first load, the mount effect applies draft.voucherNo itself.
+    if (draftHydratedRef.current) {
+      setVoucherNo(nextNo);
+    }
+    return { accs, nextNo };
   }, []);
 
   useEffect(() => {
-    void reloadMeta(voucherType).catch((e) => Alert.alert('Error', formatSqliteError(e)));
-  }, [reloadMeta, voucherType]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const draft = await loadDraft<PaymentFormDraft>(DRAFT_KEYS.paymentNew);
+        if (cancelled) return;
+
+        const type: PaymentVoucherType =
+          draft && !isPaymentDraftEmpty(draft) ? draft.voucherType : 'receipt';
+
+        // Restore voucher type before meta/fields so subsequent type-driven
+        // reloads do not race against draft values on first paint.
+        if (type !== voucherType) {
+          setVoucherType(type);
+        }
+
+        const { accs, nextNo } = await reloadMeta(type);
+        if (cancelled) return;
+
+        if (draft && !isPaymentDraftEmpty(draft)) {
+          setVoucherType(draft.voucherType);
+          setVoucherNo(draft.voucherNo || nextNo);
+          setDate(isValidISODate(draft.date) ? draft.date : todayISO());
+          setPartyName(draft.partyName || '');
+          setAccountId(
+            draft.accountId && accs.some((a) => a.id === draft.accountId)
+              ? draft.accountId
+              : accs[0]?.id ?? 0
+          );
+          setAmount(draft.amount || '');
+          setApplyMode(draft.applyMode || 'against_invoice');
+          setSelectedInvoiceNo(draft.selectedInvoiceNo ?? null);
+          setNarration(draft.narration || '');
+          setInstrumentNo(draft.instrumentNo || '');
+          setPaymentMode(draft.paymentMode || '');
+          noteDraftLoaded();
+        } else {
+          setVoucherNo(nextNo);
+          if (accs.length > 0) setAccountId(accs[0].id);
+        }
+      } catch (e) {
+        if (!cancelled) Alert.alert('Error', formatSqliteError(e));
+      } finally {
+        if (!cancelled) {
+          draftHydratedRef.current = true;
+          markReady();
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // voucherType intentionally omitted — only initial hydrate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markReady, noteDraftLoaded, reloadMeta]);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,18 +204,54 @@ export default function NewPaymentScreen() {
           prev && rows.some((r) => r.invoice_no === prev) ? prev : rows[0]?.invoice_no ?? null
         );
       })
-      .catch(() => {
-        if (!cancelled) setOpenInvoices([]);
+      .catch((e) => {
+        if (cancelled) return;
+        setOpenInvoices([]);
+        alertLoadFailed(e);
       });
     return () => {
       cancelled = true;
     };
   }, [partyName, voucherType, applyMode]);
 
+  const resetForm = async (defaultAccountId: number) => {
+    setVoucherType('receipt');
+    setDate(todayISO());
+    setPartyName('');
+    setAccountId(defaultAccountId);
+    setAmount('');
+    setApplyMode('against_invoice');
+    setSelectedInvoiceNo(null);
+    setNarration('');
+    setInstrumentNo('');
+    setPaymentMode('');
+    try {
+      const nextNo = await getNextPaymentVoucherNo('receipt');
+      setVoucherNo(nextNo);
+    } catch {
+      setVoucherNo('');
+    }
+  };
+
+  const handleDiscardDraft = () => {
+    Alert.alert('Discard draft?', 'Your unsaved payment will be cleared.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: async () => {
+          await discardDraft();
+          await resetForm(accountId || accounts[0]?.id || 0);
+        },
+      },
+    ]);
+  };
+
   const switchType = (type: PaymentVoucherType) => {
     setVoucherType(type);
     setPartyName('');
     setSelectedInvoiceNo(null);
+    void reloadMeta(type).catch((e) => Alert.alert('Error', formatSqliteError(e)));
   };
 
   const handleSave = async () => {
@@ -200,6 +353,8 @@ export default function NewPaymentScreen() {
           },
         ],
       });
+      leaveBypassRef.current = true;
+      await clearDraftOnSave();
       refresh();
       router.replace(`/(drawer)/payments/${id}` as never);
     } catch (e) {
@@ -211,29 +366,15 @@ export default function NewPaymentScreen() {
 
   return (
     <FormScreen>
-      <View style={styles.typeRow}>
-        {(
-          [
-            { value: 'receipt', label: 'Money In (Receipt)' },
-            { value: 'payment', label: 'Money Out (Payment)' },
-          ] as { value: PaymentVoucherType; label: string }[]
-        ).map((opt) => (
-          <TouchableOpacity
-            key={opt.value}
-            style={[styles.typeChip, voucherType === opt.value && styles.typeChipActive]}
-            onPress={() => switchType(opt.value)}
-          >
-            <Text
-              style={[
-                styles.typeChipText,
-                voucherType === opt.value && styles.typeChipTextActive,
-              ]}
-            >
-              {opt.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
+      <SegmentedControl
+        options={[
+          { value: 'receipt', label: 'Money In (Receipt)' },
+          { value: 'payment', label: 'Money Out (Payment)' },
+        ]}
+        value={voucherType}
+        onChange={switchType}
+      />
 
       <View style={styles.metaRow}>
         <View style={{ flex: 1.1 }}>
@@ -258,39 +399,24 @@ export default function NewPaymentScreen() {
       <FormInput label="Amount" value={amount} onChangeText={setAmount} money />
 
       <SectionHeader title="Apply as" />
-      <View style={styles.modeRow}>
-        {(
-          [
-            { value: 'against_invoice', label: 'Against invoice' },
-            { value: 'advance', label: 'Advance' },
-            { value: 'on_account', label: 'On account' },
-          ] as { value: ApplyMode; label: string }[]
-        ).map((opt) => (
-          <TouchableOpacity
-            key={opt.value}
-            style={[styles.modeChip, applyMode === opt.value && styles.modeChipActive]}
-            onPress={() => setApplyMode(opt.value)}
-          >
-            <Text
-              style={[
-                styles.modeChipText,
-                applyMode === opt.value && styles.modeChipTextActive,
-              ]}
-            >
-              {opt.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      <SegmentedControl
+        options={[
+          { value: 'against_invoice', label: 'Against invoice' },
+          { value: 'advance', label: 'Advance' },
+          { value: 'on_account', label: 'On account' },
+        ]}
+        value={applyMode}
+        onChange={setApplyMode}
+      />
 
       {applyMode === 'against_invoice' ? (
         <View style={styles.invoiceBox}>
           <Text style={styles.hint}>
             {openInvoices.length === 0
               ? partyName.trim()
-                ? 'No open invoices for this party. Use Advance or On account.'
-                : 'Select a party to see open invoices.'
-              : 'Tap an open invoice to settle:'}
+                ? 'No open invoices.'
+                : 'Select a party first.'
+              : 'Select an invoice:'}
           </Text>
           <ScrollView style={{ maxHeight: 180 }} nestedScrollEnabled>
             {openInvoices.map((inv) => {
@@ -314,13 +440,7 @@ export default function NewPaymentScreen() {
             })}
           </ScrollView>
         </View>
-      ) : (
-        <Text style={styles.hint}>
-          {applyMode === 'advance'
-            ? 'Stored as advance credit for this party (reduces their balance due).'
-            : 'Stored on account without linking to a specific invoice.'}
-        </Text>
-      )}
+      ) : null}
 
       <FormInput
         label="Payment mode (optional)"
@@ -347,30 +467,7 @@ export default function NewPaymentScreen() {
 
 function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
-    typeRow: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.sm },
-    typeChip: {
-      flex: 1,
-      paddingVertical: 10,
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      alignItems: 'center',
-      backgroundColor: colors.surface,
-    },
-    typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-    typeChipText: { fontWeight: '600', color: colors.text, fontSize: 13, textAlign: 'center' },
-    typeChipTextActive: { color: colors.onPrimary },
-    metaRow: { flexDirection: 'row', gap: spacing.sm },
-    modeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.sm },
-    modeChip: {
-      paddingHorizontal: spacing.md,
-      paddingVertical: 8,
-      borderRadius: radius.full,
-      backgroundColor: colors.chip,
-    },
-    modeChipActive: { backgroundColor: colors.primaryContainer },
-    modeChipText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
-    modeChipTextActive: { color: colors.onPrimaryContainer },
+    metaRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
     invoiceBox: {
       marginBottom: spacing.md,
       borderRadius: radius.md,

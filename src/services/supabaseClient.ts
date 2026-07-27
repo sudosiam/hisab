@@ -6,7 +6,7 @@
  *   EXPO_PUBLIC_SUPABASE_ANON_KEY
  *
  * One-time project setup:
- * 1. Auth → Email enabled with password sign-in (app uses email + password; OTP optional).
+ * 1. Auth → Email enabled with password sign-in (app uses email + password).
  * 2. Storage bucket `hisab-backups` (private).
  * 3. Object paths per user:
  *      {auth.uid()}/hisab-latest.db
@@ -49,8 +49,8 @@
  *      using (user_id = auth.uid()) with check (user_id = auth.uid());
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { supabaseAuthStorage } from './supabaseAuthStorage';
 
 export const CLOUD_BACKUP_BUCKET = 'hisab-backups';
 export const CLOUD_LATEST_OBJECT = 'hisab-latest.db';
@@ -71,7 +71,7 @@ export function getSupabaseClient(): SupabaseClient | null {
   if (!client) {
     client = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
-        storage: AsyncStorage,
+        storage: supabaseAuthStorage,
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: false,

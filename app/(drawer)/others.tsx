@@ -1,23 +1,19 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Alert, FlatList } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ActivityIndicator,
-  Alert,
-  TouchableOpacity,
-} from 'react-native';
-import { useFocusEffect } from 'expo-router';
-import {
+  EmptyState,
   ErrorState,
   FormInput,
-  FormScreen,
   PrimaryButton,
   SearchField,
   SectionHeader,
+  SummaryHero,
+  ThemedPressable,
   useScreenStyles,
 } from '../../src/components/ui';
-import { MoneyText } from '../../src/components/MoneyText';
+import { ListItem } from '../../src/components/ListItem';
+import { ListSkeleton } from '../../src/components/Skeleton';
 import {
   addFixedAsset,
   deleteFixedAsset,
@@ -27,18 +23,26 @@ import {
 import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../src/utils/format';
 import { matchesSearch } from '../../src/utils/search';
 import { useTheme } from '../../src/context/ThemeContext';
-import { useDatabase } from '../../src/context/DatabaseContext';
+import { useDatabaseActions } from '../../src/context/DatabaseContext';
+import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
+import { useUnsavedChangesGuard } from '../../src/hooks/useUnsavedChangesGuard';
 import { formatSqliteError } from '../../src/db/database';
-import { spacing, typography } from '../../src/constants/theme';
+import { spacing } from '../../src/constants/theme';
+import { FLATLIST_PERF, listCardGetItemLayout } from '../../src/constants/listPerf';
 import { cardSurface } from '../../src/constants/shadows';
 import type { FixedAsset } from '../../src/types';
 
+type FieldErrors = {
+  name?: string;
+  value?: string;
+};
+
 export default function OthersScreen() {
   const styles = useScreenStyles();
+  const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
-  const { refresh } = useDatabase();
+  const { refresh } = useDatabaseActions();
   const [assets, setAssets] = useState<FixedAsset[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState('');
@@ -47,66 +51,67 @@ export default function OthersScreen() {
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const savedFormSnapshotRef = useRef<string | null>(null);
+
+  const formSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        editingId,
+        name,
+        value,
+        notes,
+      }),
+    [editingId, name, value, notes]
+  );
+  const formDirty =
+    showAdd &&
+    savedFormSnapshotRef.current !== null &&
+    formSnapshot !== savedFormSnapshotRef.current;
+  useUnsavedChangesGuard(formDirty);
 
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        hero: {
-          ...cardSurface(colors, isDark),
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.md,
-          marginBottom: spacing.lg,
-          alignItems: 'center',
-        },
-        heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
-        heroValueWrap: { width: '100%', marginTop: spacing.sm, paddingHorizontal: spacing.sm },
-        assetCard: {
-          ...cardSurface(colors, isDark),
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm,
-          marginBottom: spacing.xs + 2,
-          minHeight: 52,
-          overflow: 'visible',
-        },
-        assetName: { fontSize: 14, fontWeight: '600', color: colors.text },
-        amountCol: { flexShrink: 1, minWidth: 88, maxWidth: '48%', alignItems: 'flex-end' },
-        assetMeta: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
-        actions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
-        actionTap: {
-          paddingVertical: spacing.sm,
-          paddingHorizontal: spacing.sm,
-          minHeight: 40,
-          justifyContent: 'center',
-        },
         form: {
           ...cardSurface(colors, isDark),
           padding: spacing.md,
           marginBottom: spacing.lg,
+          gap: spacing.xs,
+        },
+        actionTap: {
+          paddingHorizontal: spacing.sm,
+          paddingVertical: spacing.sm,
+          minHeight: 44,
+          minWidth: 64,
+          justifyContent: 'center',
+          alignItems: 'flex-end',
+        },
+        headerRow: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: spacing.sm,
+          marginBottom: spacing.xs,
         },
       }),
     [colors, isDark]
   );
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setAssets(await getFixedAssets());
-      setError(null);
-    } catch (e) {
-      setError(formatSqliteError(e));
-    } finally {
-      setLoading(false);
-    }
+    setAssets(await getFixedAssets());
+    setError(null);
   }, []);
 
   const formOpenRef = useRef(false);
   formOpenRef.current = showAdd;
 
-  useFocusEffect(useCallback(() => {
-    // Don't reload over an open add/edit form.
-    if (formOpenRef.current) return;
-    load();
-  }, [load]));
+  const { booting, error: loadError, retry } = useFocusRefresh(
+    async () => {
+      if (!formOpenRef.current) await load();
+    },
+    []
+  );
 
   const total = assets.reduce((sum, a) => sum + a.value, 0);
 
@@ -121,21 +126,55 @@ export default function OthersScreen() {
     setNotes('');
     setEditingId(null);
     setShowAdd(false);
+    setFieldErrors({});
+    savedFormSnapshotRef.current = null;
+  };
+
+  const startAdd = () => {
+    const blank = {
+      editingId: null as number | null,
+      name: '',
+      value: '',
+      notes: '',
+    };
+    setEditingId(blank.editingId);
+    setName(blank.name);
+    setValue(blank.value);
+    setNotes(blank.notes);
+    setShowAdd(true);
+    savedFormSnapshotRef.current = JSON.stringify(blank);
+  };
+
+  const startEdit = (asset: FixedAsset) => {
+    const next = {
+      editingId: asset.id as number | null,
+      name: asset.name,
+      value: formatAmountInput(asset.value),
+      notes: asset.notes ?? '',
+    };
+    setEditingId(next.editingId);
+    setName(next.name);
+    setValue(next.value);
+    setNotes(next.notes);
+    setShowAdd(true);
+    savedFormSnapshotRef.current = JSON.stringify(next);
   };
 
   const handleSave = async () => {
     if (saving) return;
+    const nextErrors: FieldErrors = {};
     const val = parsePositiveAmount(value);
-    if (!name.trim() || val === null) {
-      Alert.alert('Error', 'Enter asset name and a value greater than zero');
-      return;
-    }
+    if (!name.trim()) nextErrors.name = 'Enter asset name';
+    if (val === null) nextErrors.value = 'Enter a value greater than zero';
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
     setSaving(true);
     try {
       if (editingId) {
-        await updateFixedAsset(editingId, { name: name.trim(), value: val, notes: notes.trim() || undefined });
+        await updateFixedAsset(editingId, { name: name.trim(), value: val!, notes: notes.trim() || undefined });
       } else {
-        await addFixedAsset({ name: name.trim(), value: val, notes: notes.trim() || undefined });
+        await addFixedAsset({ name: name.trim(), value: val!, notes: notes.trim() || undefined });
       }
       refresh();
       resetForm();
@@ -147,15 +186,7 @@ export default function OthersScreen() {
     }
   };
 
-  const startEdit = (asset: FixedAsset) => {
-    setEditingId(asset.id);
-    setName(asset.name);
-    setValue(formatAmountInput(asset.value));
-    setNotes(asset.notes ?? '');
-    setShowAdd(true);
-  };
-
-  const handleDelete = (asset: FixedAsset) => {
+  const handleDelete = useCallback((asset: FixedAsset) => {
     Alert.alert('Delete Asset', `Remove ${asset.name}?\nThis removes ${formatCurrency(asset.value)} from fixed assets on the balance sheet.`, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -172,46 +203,60 @@ export default function OthersScreen() {
         },
       },
     ]);
-  };
+  }, [load, refresh]);
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
+  const renderAssetItem = useCallback(
+    ({ item: asset }: { item: FixedAsset }) => (
+      <ListItem
+        title={asset.name}
+        subtitle={`Added ${asset.created_at.slice(0, 10)}`}
+        meta={asset.notes ?? undefined}
+        amount={asset.value}
+        amountColor={colors.primary}
+        onPress={() => startEdit(asset)}
+        trailing={
+          <ThemedPressable
+            style={localStyles.actionTap}
+            onPress={() => handleDelete(asset)}
+            haptic="warning"
+            accessibilityRole="button"
+            accessibilityLabel={`Delete asset ${asset.name}`}
+            hitSlop={6}
+          >
+            <Text style={{ color: colors.danger, fontWeight: '700', fontSize: 12 }}>Delete</Text>
+          </ThemedPressable>
+        }
+        accessibilityLabel={`Edit asset ${asset.name}`}
+      />
+    ),
+    [colors.danger, colors.primary, handleDelete, localStyles.actionTap]
+  );
 
-  if (error) {
-    return <ErrorState message={error} onRetry={load} />;
-  }
+  const listHeader = (
+    <>
+      <SummaryHero
+        label="Fixed Assets Total"
+        amount={total}
+        hint={`${assets.length} asset${assets.length === 1 ? '' : 's'}`}
+      />
 
-  return (
-    <FormScreen>
-      <View style={localStyles.hero}>
-        <Text style={localStyles.heroLabel}>Fixed Assets Total</Text>
-        <View style={localStyles.heroValueWrap}>
-          <MoneyText amount={total} size="hero" style={{ width: '100%', textAlign: 'center' }} />
-        </View>
-        <Text style={{ color: colors.textSecondary, marginTop: spacing.sm, fontSize: 13 }}>
-          {assets.length} asset{assets.length === 1 ? '' : 's'} · shown on Balance Sheet
-        </Text>
-      </View>
-
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+      <View style={localStyles.headerRow}>
         <SectionHeader title="Fixed Assets" />
-        <TouchableOpacity
+        <ThemedPressable
           onPress={() => {
             if (showAdd) {
               resetForm();
               return;
             }
-            resetForm();
-            setShowAdd(true);
+            startAdd();
           }}
+          accessibilityRole="button"
+          accessibilityLabel={showAdd ? 'Cancel asset form' : 'Add asset'}
+          hitSlop={8}
+          style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.sm }}
         >
           <Text style={styles.link}>{showAdd ? 'Cancel' : '+ Add Asset'}</Text>
-        </TouchableOpacity>
+        </ThemedPressable>
       </View>
 
       <SearchField
@@ -223,69 +268,73 @@ export default function OthersScreen() {
       {showAdd ? (
         <View style={localStyles.form}>
           <Text style={styles.cardTitle}>{editingId ? 'Edit Asset' : 'New Asset'}</Text>
-          <FormInput label="Asset Name" value={name} onChangeText={setName} placeholder="Vehicle, Equipment..." />
-          <FormInput label="Value (₹)" value={value} onChangeText={setValue} money />
+          <FormInput
+            label="Asset Name"
+            value={name}
+            onChangeText={(v) => {
+              setName(v);
+              if (fieldErrors.name) setFieldErrors((e) => ({ ...e, name: undefined }));
+            }}
+            placeholder="Vehicle, Equipment..."
+            error={fieldErrors.name}
+          />
+          <FormInput
+            label="Value (₹)"
+            value={value}
+            onChangeText={(v) => {
+              setValue(v);
+              if (fieldErrors.value) setFieldErrors((e) => ({ ...e, value: undefined }));
+            }}
+            money
+            error={fieldErrors.value}
+          />
           <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline placeholder="Details, purchase date..." />
           <PrimaryButton title={editingId ? 'Save Changes' : 'Add Asset'} onPress={handleSave} loading={saving} />
         </View>
       ) : null}
+    </>
+  );
 
-      {filteredAssets.length === 0 ? (
-        <Text style={styles.empty}>
-          {search.trim() ? 'No assets match your search.' : 'No fixed assets yet. Add vehicles, equipment, property, etc.'}
-        </Text>
-      ) : (
-        filteredAssets.map((asset) => (
-          <TouchableOpacity
-            key={asset.id}
-            style={localStyles.assetCard}
-            onPress={() => startEdit(asset)}
-            activeOpacity={0.75}
-            accessibilityRole="button"
-            accessibilityLabel={`Edit asset ${asset.name}`}
-          >
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={localStyles.assetName} numberOfLines={2}>
-                  {asset.name}
-                </Text>
-                {asset.notes ? (
-                  <Text style={localStyles.assetMeta} numberOfLines={2}>
-                    {asset.notes}
-                  </Text>
-                ) : null}
-                <Text style={localStyles.assetMeta}>Added {asset.created_at.slice(0, 10)}</Text>
-              </View>
-              <View style={localStyles.amountCol}>
-                <MoneyText
-                  amount={asset.value}
-                  size="md"
-                  color={colors.primary}
-                  style={{ width: '100%' }}
-                />
-              </View>
-            </View>
-            <View style={localStyles.actions}>
-              <TouchableOpacity
-                style={localStyles.actionTap}
-                onPress={() => startEdit(asset)}
-                accessibilityRole="button"
-                accessibilityLabel={`Edit asset ${asset.name}`}
-              >
-                <Text style={styles.link}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={localStyles.actionTap}
-                onPress={() => handleDelete(asset)}
-                accessibilityRole="button"
-                accessibilityLabel={`Delete asset ${asset.name}`}
-              >
-                <Text style={{ color: colors.danger, fontWeight: '700' }}>Delete</Text>
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        ))
-      )}
-    </FormScreen>
+  if (booting && assets.length === 0) {
+    return (
+      <View style={styles.container}>
+        <ListSkeleton />
+      </View>
+    );
+  }
+
+  if (error || loadError) {
+    return <ErrorState message={error ?? loadError ?? undefined} onRetry={retry} />;
+  }
+
+  return (
+    <FlatList
+      style={styles.container}
+      contentContainerStyle={[
+        styles.content,
+        { paddingBottom: spacing.xxl + Math.max(insets.bottom, spacing.md) },
+      ]}
+      data={filteredAssets}
+      keyExtractor={(item) => String(item.id)}
+      renderItem={renderAssetItem}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      showsVerticalScrollIndicator={false}
+      getItemLayout={listCardGetItemLayout}
+      {...FLATLIST_PERF}
+      ListHeaderComponent={listHeader}
+      ListEmptyComponent={
+        <EmptyState
+          title={search.trim() ? 'No matching assets' : 'No fixed assets yet'}
+          message={
+            search.trim()
+              ? 'Try a different search.'
+              : 'Add vehicles, equipment, property, and other assets.'
+          }
+          actionLabel={search.trim() ? undefined : 'Add Asset'}
+          onAction={search.trim() ? undefined : startAdd}
+        />
+      }
+    />
   );
 }

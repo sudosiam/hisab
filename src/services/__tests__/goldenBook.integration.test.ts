@@ -1,15 +1,16 @@
 import { getDatabase, initializeFreshDatabase } from '../../db/database';
+import { getBalanceSheet } from '../banking';
 import { createProduct } from '../inventory';
 import {
+  awaitPendingLedgerRefresh,
   getTrialBalanceFromLedger,
   rebuildGeneralLedger,
   resetLedgerRefreshSchedulerForTests,
+  scheduleGeneralLedgerRefresh,
 } from '../ledger';
 import { createPurchase } from '../purchases';
 import { createSale } from '../sales';
-import { getGstSummary } from '../gstReports';
 import { createAdjustmentNote } from '../adjustmentNotes';
-import { setBusinessState, setGstEnabled } from '../appSettings';
 import { upsertParty } from '../parties';
 
 const TEST_DATE = '2026-04-10';
@@ -23,12 +24,10 @@ async function getCashAccountId(): Promise<number> {
   return row.id;
 }
 
-describe('golden book — ledger + GST', () => {
+describe('golden book — ledger', () => {
   beforeEach(async () => {
     resetLedgerRefreshSchedulerForTests();
     await initializeFreshDatabase();
-    await setGstEnabled(true);
-    await setBusinessState('27');
   });
 
   afterEach(() => {
@@ -37,31 +36,28 @@ describe('golden book — ledger + GST', () => {
 
   it('keeps trial balance tied after sale, purchase, and credit note', async () => {
     const cashAccountId = await getCashAccountId();
-    await upsertParty('Mumbai Buyer', 'customer', undefined, undefined, { state: '27' });
-    await upsertParty('Pune Vendor', 'vendor', undefined, undefined, { state: '27' });
+    await upsertParty('Mumbai Buyer', 'customer');
+    await upsertParty('Pune Vendor', 'vendor');
 
     const productId = await createProduct({
       name: 'Golden Widget',
       opening_qty: 20,
       opening_cost: 40,
       sell_price: 100,
-      hsn_sac: '8517',
-      gst_rate: 18,
     });
 
     const saleId = await createSale({
       party_name: 'Mumbai Buyer',
-      party_state: '27',
       date: TEST_DATE,
-      items: [{ product_id: productId, qty: 2, unit_price: 100, gst_rate: 18, hsn_sac: '8517' }],
-      payments: [{ account_id: cashAccountId, amount: 236, date: TEST_DATE }],
+      items: [{ product_id: productId, qty: 2, unit_price: 100 }],
+      payments: [{ account_id: cashAccountId, amount: 200, date: TEST_DATE }],
     });
 
     await createPurchase({
       supplier_name: 'Pune Vendor',
       date: TEST_DATE,
-      items: [{ product_id: productId, qty: 5, unit_cost: 40, gst_rate: 18, hsn_sac: '8517' }],
-      payments: [{ account_id: cashAccountId, amount: 236, date: TEST_DATE }],
+      items: [{ product_id: productId, qty: 5, unit_cost: 40 }],
+      payments: [{ account_id: cashAccountId, amount: 200, date: TEST_DATE }],
     });
 
     await createAdjustmentNote({
@@ -71,21 +67,13 @@ describe('golden book — ledger + GST', () => {
       party_name: 'Mumbai Buyer',
       date: TEST_DATE,
       reason: 'Return one unit',
-      items: [{ product_id: productId, qty: 1, unit_price: 100, gst_rate: 18, hsn_sac: '8517' }],
+      items: [{ product_id: productId, qty: 1, unit_price: 100 }],
     });
 
     await rebuildGeneralLedger();
 
     const tb = await getTrialBalanceFromLedger();
     expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(0.02);
-
-    const summary = await getGstSummary('2026-04');
-    // Sale 200 taxable + CN −100 → outward 100 / tax 18; purchase 200 / ITC 36
-    expect(summary.outwardTaxable).toBeCloseTo(100, 1);
-    expect(summary.outwardTax).toBeCloseTo(18, 1);
-    expect(summary.inwardTaxable).toBeCloseTo(200, 1);
-    expect(summary.inwardTax).toBeCloseTo(36, 1);
-    expect(summary.netPayable).toBeCloseTo(-18, 1);
   });
 
   it('full rebuild after sale keeps trial balance balanced', async () => {
@@ -95,11 +83,10 @@ describe('golden book — ledger + GST', () => {
       opening_qty: 5,
       opening_cost: 10,
       sell_price: 50,
-      gst_rate: 0,
     });
 
     await createSale({
-      party_name: 'Cash Customer',
+      party_name: 'Walk-in',
       date: TEST_DATE,
       invoice_type: 'bos',
       items: [{ product_id: productId, qty: 1, unit_price: 50 }],
@@ -107,7 +94,124 @@ describe('golden book — ledger + GST', () => {
     });
 
     await rebuildGeneralLedger();
-    const after = await getTrialBalanceFromLedger();
-    expect(Math.abs(after.totalDebit - after.totalCredit)).toBeLessThan(0.02);
+    const tb = await getTrialBalanceFromLedger();
+    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(0.02);
+  });
+
+  it('ignores legacy tax columns so trial balance has no GST accounts', async () => {
+    const cashAccountId = await getCashAccountId();
+    const productId = await createProduct({
+      name: 'Taxed Legacy Item',
+      opening_qty: 10,
+      opening_cost: 20,
+      sell_price: 118,
+    });
+
+    const saleId = await createSale({
+      party_name: 'Legacy Buyer',
+      date: TEST_DATE,
+      items: [{ product_id: productId, qty: 1, unit_price: 118 }],
+      payments: [{ account_id: cashAccountId, amount: 118, date: TEST_DATE }],
+    });
+
+    const db = await getDatabase();
+    // Simulate a pre-GST-removal invoice that still stores tax splits on the row.
+    await db.runAsync(
+      `UPDATE sales
+       SET taxable_amount = 100, cgst_amount = 9, sgst_amount = 9, igst_amount = 0
+       WHERE id = ?`,
+      [saleId]
+    );
+
+    await rebuildGeneralLedger();
+    const tb = await getTrialBalanceFromLedger();
+    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(0.02);
+    const gstAccounts = tb.rows.filter((row) => /gst/i.test(row.account));
+    expect(gstAccounts).toEqual([]);
+
+    // Balance sheet must not resurrect Input/Output Tax from legacy tax columns.
+    const sheet = await getBalanceSheet();
+    expect(sheet.assets.inputTaxCredit).toBe(0);
+    expect(sheet.liabilities.outputTax).toBe(0);
+    expect(sheet.assets.currentAssets.some((l) => l.key === 'input_tax')).toBe(false);
+    expect(sheet.liabilities.currentLiabilities.some((l) => l.key === 'output_tax')).toBe(false);
+  });
+
+  it('drains ledger refresh scheduled during awaitPendingLedgerRefresh', async () => {
+    const cashAccountId = await getCashAccountId();
+    const productId = await createProduct({
+      name: 'Await Drain Item',
+      opening_qty: 5,
+      opening_cost: 10,
+      sell_price: 50,
+    });
+
+    await createSale({
+      party_name: 'Await Buyer',
+      date: TEST_DATE,
+      items: [{ product_id: productId, qty: 1, unit_price: 50 }],
+      payments: [{ account_id: cashAccountId, amount: 50, date: TEST_DATE }],
+    });
+
+    scheduleGeneralLedgerRefresh({ type: 'full' });
+    const pending = awaitPendingLedgerRefresh();
+    // Queue another refresh while the first flush may still be running.
+    scheduleGeneralLedgerRefresh({ type: 'full' });
+    await pending;
+    await awaitPendingLedgerRefresh();
+
+    const tb = await getTrialBalanceFromLedger();
+    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(0.02);
+  });
+
+  it('payment voucher against invoice keeps TB balanced after scoped refresh', async () => {
+    const { createPaymentVoucher } = await import('../paymentVouchers');
+    const cashAccountId = await getCashAccountId();
+    const productId = await createProduct({
+      name: 'Voucher Widget',
+      opening_qty: 10,
+      opening_cost: 20,
+      sell_price: 100,
+    });
+
+    const saleId = await createSale({
+      party_name: 'Voucher Customer',
+      date: TEST_DATE,
+      items: [{ product_id: productId, qty: 1, unit_price: 100 }],
+      payments: [],
+    });
+    const sale = await getDatabase().then((db) =>
+      db.getFirstAsync<{ invoice_no: string }>('SELECT invoice_no FROM sales WHERE id = ?', [saleId])
+    );
+
+    await createPaymentVoucher({
+      voucher_type: 'receipt',
+      voucher_no: 'RV-TEST-1',
+      date: TEST_DATE,
+      party_name: 'Voucher Customer',
+      party_type: 'customer',
+      account_id: cashAccountId,
+      amount: 100,
+      lines: [
+        { ledger_name: 'Voucher Customer', is_party: true, amount: -100, is_deemed_positive: true },
+        { ledger_name: 'Cash', is_bank_cash: true, amount: 100, is_deemed_positive: false },
+      ],
+      allocations: [
+        { bill_name: sale!.invoice_no, bill_type: 'agst_ref', amount: 100 },
+      ],
+    });
+
+    await awaitPendingLedgerRefresh();
+    const tb = await getTrialBalanceFromLedger();
+    expect(Math.abs(tb.totalDebit - tb.totalCredit)).toBeLessThan(0.02);
+
+    const paid = await getDatabase().then((db) =>
+      db.getFirstAsync<{ paid_amount: number; status: string }>(
+        'SELECT paid_amount, status FROM sales WHERE id = ?',
+        [saleId]
+      )
+    );
+    expect(paid?.paid_amount).toBe(100);
+    expect(paid?.status).toBe('paid');
   });
 });

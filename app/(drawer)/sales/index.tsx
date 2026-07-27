@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -13,22 +13,24 @@ import { ListItem } from '../../../src/components/ListItem';
 import { MoneyTotalRow } from '../../../src/components/MoneyText';
 import { ListSkeleton } from '../../../src/components/Skeleton';
 import {
+  EmptyState,
   ErrorState,
   Fab,
   FilterChip,
   FilterRow,
   SearchField,
   useScreenStyles,
+  useFabListPadding,
 } from '../../../src/components/ui';
 import { formatDisplayDate, getPeriodTotalLabel } from '../../../src/utils/date';
 import { matchesSearch } from '../../../src/utils/search';
 import { useTheme } from '../../../src/context/ThemeContext';
-import { useGstEnabled } from '../../../src/context/GstContext';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
-import { FLATLIST_PERF } from '../../../src/constants/listPerf';
+import { FLATLIST_PERF, listCardGetItemLayout } from '../../../src/constants/listPerf';
 import { spacing } from '../../../src/constants/theme';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 import type { Sale } from '../../../src/types';
 
 type Filter = 'all' | 'paid' | 'unpaid' | 'bos';
@@ -37,8 +39,8 @@ export default function SalesListScreen() {
   const router = useRouter();
   const { refreshKey } = useDatabase();
   const { colors } = useTheme();
-  const gstEnabled = useGstEnabled();
   const styles = useScreenStyles();
+  const fabListPadding = useFabListPadding();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [sales, setSales] = useState<Sale[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
@@ -46,10 +48,6 @@ export default function SalesListScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [invoiceCount, setInvoiceCount] = useState(0);
   const [bosCount, setBosCount] = useState(0);
-
-  useEffect(() => {
-    if (!gstEnabled && filter === 'bos') setFilter('all');
-  }, [gstEnabled, filter]);
 
   const filteredSales = useMemo(
     () =>
@@ -96,7 +94,7 @@ export default function SalesListScreen() {
 
   const renderItem = useCallback(
     ({ item }: { item: Sale }) => {
-      const isBos = gstEnabled && item.invoice_type === 'bos';
+      const isBos = item.invoice_type === 'bos';
       const due = Math.max(0, item.total_amount - item.paid_amount);
       return (
         <ListItem
@@ -112,7 +110,7 @@ export default function SalesListScreen() {
         />
       );
     },
-    [gstEnabled, router]
+    [router]
   );
 
   if (error) {
@@ -135,19 +133,17 @@ export default function SalesListScreen() {
             labelStyle={{ fontWeight: '400', fontSize: 13, color: colors.textSecondary }}
           />
         ) : null}
-        {gstEnabled ? (
-          <Text
-            style={{
-              fontSize: 11,
-              color: colors.textMuted,
-              marginTop: 2,
-              marginBottom: 2,
-              fontVariant: ['tabular-nums'],
-            }}
-          >
-            Inv {invoiceCount} · BOS {bosCount}
-          </Text>
-        ) : null}
+        <Text
+          style={{
+            fontSize: 11,
+            color: colors.textMuted,
+            marginTop: 2,
+            marginBottom: 2,
+            fontVariant: ['tabular-nums'],
+          }}
+        >
+          Inv {invoiceCount} · BOS {bosCount}
+        </Text>
       </View>
 
       <FilterRow>
@@ -156,7 +152,7 @@ export default function SalesListScreen() {
             { key: 'all', label: 'All' },
             { key: 'paid', label: 'Paid' },
             { key: 'unpaid', label: 'Outstanding' },
-            ...(gstEnabled ? [{ key: 'bos' as const, label: 'BOS' }] : []),
+            { key: 'bos' as const, label: 'BOS' },
           ] as { key: Filter; label: string }[]
         ).map((f) => (
           <FilterChip
@@ -180,15 +176,16 @@ export default function SalesListScreen() {
         <FlatList
           data={filteredSales}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: fabListPadding }]}
           renderItem={renderItem}
+          getItemLayout={listCardGetItemLayout}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => {
                 setRefreshing(true);
                 load()
-                  .catch(() => {})
+                  .catch((e) => alertRefreshFailed(e))
                   .finally(() => setRefreshing(false));
               }}
               colors={[colors.primary]}
@@ -197,11 +194,19 @@ export default function SalesListScreen() {
           }
           {...FLATLIST_PERF}
           ListEmptyComponent={
-            <Text style={styles.empty}>
-              {search.trim() || filter !== 'all'
-                ? 'No sales match your filters.'
-                : 'No sales in this period. Create your first sale.'}
-            </Text>
+            search.trim() || filter !== 'all' ? (
+              <EmptyState
+                title="No matches"
+                message="Try a different filter or search."
+              />
+            ) : (
+              <EmptyState
+                title="No sales yet"
+                message="Create your first sale for this period."
+                actionLabel="New Sale"
+                onAction={() => router.push('/(drawer)/sales/new' as never)}
+              />
+            )
           }
         />
       )}

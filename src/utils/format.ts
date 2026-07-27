@@ -137,16 +137,3 @@ export function getPaymentStatusLabel(status: string): string {
       return status;
   }
 }
-
-export function getPaymentStatusColor(status: string): string {
-  switch (status) {
-    case 'paid':
-      return '#059669';
-    case 'partial':
-      return '#D97706';
-    case 'unpaid':
-      return '#DC2626';
-    default:
-      return '#6B7280';
-  }
-}

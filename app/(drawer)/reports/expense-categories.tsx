@@ -1,21 +1,23 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
+import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getExpensesByCategoryReport } from '../../../src/services/reports';
 import { ReportRow } from '../../../src/components/ReportRow';
 import { MoneyText } from '../../../src/components/MoneyText';
-import { ErrorState, useScreenStyles } from '../../../src/components/ui';
+import { ListSkeleton } from '../../../src/components/Skeleton';
+import { EmptyState, ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { shareExpenseCategoriesPdf } from '../../../src/services/reportPdf';
 import { roundMoney } from '../../../src/utils/money';
-import { formatSqliteError } from '../../../src/db/database';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import { FLATLIST_PERF } from '../../../src/constants/listPerf';
+import { FLATLIST_PERF, listCardGetItemLayout } from '../../../src/constants/listPerf';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 
 export default function ExpenseCategoriesReportScreen() {
   const router = useRouter();
@@ -41,28 +43,24 @@ export default function ExpenseCategoriesReportScreen() {
     [colors, isDark]
   );
   const [rows, setRows] = useState<Awaited<ReturnType<typeof getExpensesByCategoryReport>>>([]);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [booting, setBooting] = useState(true);
 
   const load = useCallback(async () => {
     void refreshKey;
-    try {
-      setRows(await getExpensesByCategoryReport(monthKey));
-      setError(null);
-    } catch (e) {
-      setError(formatSqliteError(e));
-    } finally {
-      setBooting(false);
-    }
+    setRows(await getExpensesByCategoryReport(monthKey));
   }, [monthKey, refreshKey]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const { booting, error, retry } = useFocusRefresh(load, [monthKey, refreshKey]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
-    setRefreshing(false);
+    try {
+      await load();
+    } catch (e) {
+      alertRefreshFailed(e);
+    } finally {
+      setRefreshing(false);
+    }
   }, [load]);
 
   const total = roundMoney(rows.reduce((sum, row) => sum + row.total, 0));
@@ -71,16 +69,12 @@ export default function ExpenseCategoriesReportScreen() {
 
   useReportPdfHeader({ disabled: !!error, onExport: exportPdf });
 
-  if (error) {
-    return <ErrorState message={error} onRetry={load} />;
+  if (error && rows.length === 0) {
+    return <ErrorState message={error} onRetry={retry} />;
   }
 
-  if (booting) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+  if (booting && rows.length === 0) {
+    return <ListSkeleton />;
   }
 
   return (
@@ -99,7 +93,10 @@ export default function ExpenseCategoriesReportScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
-        ListEmptyComponent={<Text style={styles.empty}>No expenses in this period.</Text>}
+        ListEmptyComponent={
+          <EmptyState title="No expenses" message="No expenses in this period." />
+        }
+        getItemLayout={listCardGetItemLayout}
         {...FLATLIST_PERF}
         renderItem={({ item }) => (
           <ReportRow

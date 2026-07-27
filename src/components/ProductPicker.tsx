@@ -8,6 +8,7 @@ import {
   Alert,
   TextInput,
   ScrollView,
+  FlatList,
   ActivityIndicator,
   Modal,
 } from 'react-native';
@@ -329,10 +330,6 @@ export function ProductPicker({
     }
   };
 
-  const deletableCategories = categories.filter(
-    (cat) => cat !== 'All categories' && cat !== 'Uncategorized'
-  );
-
   const selectProduct = (item: Product) => {
     onChange(item.id);
     setCategoryFilter(categoryLabel(item));
@@ -364,9 +361,6 @@ export function ProductPicker({
           </TouchableOpacity>
           {categoryOpen ? (
             <View style={styles.panel}>
-              {deletableCategories.length > 0 ? (
-                <Text style={styles.hint}>Long press a category to delete</Text>
-              ) : null}
               <ScrollView style={{ maxHeight: 180 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
                 {categories.map((item) => (
                   <Pressable
@@ -428,8 +422,13 @@ export function ProductPicker({
               placeholder="Search products..."
               placeholderTextColor={colors.textMuted}
             />
-            <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-              {filteredProducts.length === 0 ? (
+            <FlatList
+              data={filteredProducts}
+              style={{ maxHeight: 220 }}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              keyExtractor={(item) => String(item.id)}
+              ListEmptyComponent={
                 <View style={styles.emptyWrap}>
                   <Text style={styles.empty}>
                     {products.length === 0
@@ -442,31 +441,29 @@ export function ProductPicker({
                     <Text style={styles.emptyLink}>Create new product</Text>
                   </TouchableOpacity>
                 </View>
-              ) : (
-                filteredProducts.map((item) => {
-                  const meta = productMeta(item, variant);
-                  return (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={[styles.option, item.id === value && styles.optionActive]}
-                      onPress={() => selectProduct(item)}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.optionText}>{item.name}</Text>
-                        <Text style={[styles.meta, meta.negative && { color: colors.danger }]}>
-                          {categoryFilter === 'All categories'
-                            ? `${categoryLabel(item)} · ${meta.text}`
-                            : meta.text}
-                        </Text>
-                      </View>
-                      {item.id === value ? (
-                        <Ionicons name="checkmark" size={18} color={colors.primary} />
-                      ) : null}
-                    </TouchableOpacity>
-                  );
-                })
-              )}
-            </ScrollView>
+              }
+              renderItem={({ item }) => {
+                const meta = productMeta(item, variant);
+                return (
+                  <TouchableOpacity
+                    style={[styles.option, item.id === value && styles.optionActive]}
+                    onPress={() => selectProduct(item)}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.optionText}>{item.name}</Text>
+                      <Text style={[styles.meta, meta.negative && { color: colors.danger }]}>
+                        {categoryFilter === 'All categories'
+                          ? `${categoryLabel(item)} · ${meta.text}`
+                          : meta.text}
+                      </Text>
+                    </View>
+                    {item.id === value ? (
+                      <Ionicons name="checkmark" size={18} color={colors.primary} />
+                    ) : null}
+                  </TouchableOpacity>
+                );
+              }}
+            />
             {saving ? (
               <View style={styles.savingOverlay}>
                 <ActivityIndicator color={colors.primary} />
@@ -630,7 +627,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     },
     createModalBackdrop: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.45)',
+      backgroundColor: colors.scrim,
       justifyContent: 'flex-end',
     },
     createModalCard: {
@@ -644,12 +641,6 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     },
     panelTitle: { fontSize: 15, fontWeight: '700', color: colors.text, marginBottom: spacing.sm },
     backLink: { color: colors.primary, fontWeight: '600', marginBottom: spacing.xs, fontSize: 14 },
-    hint: {
-      fontSize: 12,
-      color: colors.textMuted,
-      marginBottom: spacing.sm,
-      paddingHorizontal: spacing.xs,
-    },
     createBtn: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -696,7 +687,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       ...StyleSheet.absoluteFillObject,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: 'rgba(0,0,0,0.08)',
+      backgroundColor: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.08)',
     },
   });
 }

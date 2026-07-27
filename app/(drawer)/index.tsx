@@ -5,7 +5,6 @@ import {
   ScrollView,
   RefreshControl,
   Alert,
-  TouchableOpacity,
   StyleSheet,
 } from 'react-native';
 import { DashboardSkeleton } from '../../src/components/Skeleton';
@@ -23,7 +22,9 @@ import {
   ErrorState,
   FinanceHero,
   SectionHeader,
+  ACTIVE_OPACITY,
 } from '../../src/components/ui';
+import { ThemedPressable } from '../../src/components/ThemedPressable';
 import { getRecentActivitiesGrouped } from '../../src/services/activity';
 import { getDashboardStats, type AccountingBasis } from '../../src/services/dashboard';
 import { getPeriodSectionTitle } from '../../src/utils/date';
@@ -31,7 +32,8 @@ import { useDatabase } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
 import { useSyncedPeriodKey } from '../../src/hooks/useSyncedPeriodKey';
-import { radius, spacing } from '../../src/constants/theme';
+import { radius, spacing, typography } from '../../src/constants/theme';
+import { cardSurface } from '../../src/constants/shadows';
 import type { GroupedRecentActivity } from '../../src/services/activity';
 import type { DashboardStats } from '../../src/types';
 
@@ -42,7 +44,7 @@ export default function DashboardScreen() {
   const router = useRouter();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { refreshKey } = useDatabase();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const styles = useScreenStyles();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [debouncedRefreshKey, setDebouncedRefreshKey] = useState(refreshKey);
@@ -56,42 +58,76 @@ export default function DashboardScreen() {
   const [amountsHidden, setAmountsHidden] = useState(false);
   const [basis, setBasis] = useState<AccountingBasis>('accrual');
 
-  const basisStyles = useMemo(
+  const local = useMemo(
     () =>
       StyleSheet.create({
+        content: {
+          paddingHorizontal: spacing.md,
+          paddingTop: spacing.md,
+          paddingBottom: spacing.xxl,
+          gap: spacing.sm,
+        },
         headerRight: {
           flexDirection: 'row',
           alignItems: 'center',
-          marginRight: 4,
-          gap: 6,
+          gap: spacing.sm,
         },
         seg: {
           flexDirection: 'row',
-          backgroundColor: colors.primaryContainer,
+          backgroundColor: colors.surfaceContainerHigh,
           borderRadius: radius.full,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
           padding: 2,
+          minHeight: 44,
+          alignItems: 'center',
         },
         opt: {
-          paddingHorizontal: 8,
-          paddingVertical: 3,
+          paddingHorizontal: 14,
+          paddingVertical: 8,
           borderRadius: radius.full,
-          minHeight: 24,
+          minHeight: 40,
+          minWidth: 72,
           justifyContent: 'center',
+          alignItems: 'center',
         },
         optActive: {
-          backgroundColor: colors.primary,
+          backgroundColor: colors.primaryContainer,
         },
         optText: {
-          fontSize: 11,
-          fontWeight: '500',
-          color: colors.onPrimaryContainer,
+          ...typography.caption,
+          fontWeight: '600',
+          color: colors.textSecondary,
+          textAlign: 'center',
         },
         optTextActive: {
-          color: colors.onPrimary,
+          color: colors.onPrimaryContainer,
           fontWeight: '700',
         },
+        periodBlock: {
+          marginBottom: spacing.sm,
+        },
+        sectionBlock: {
+          marginBottom: spacing.lg,
+        },
+        kpiPanel: {
+          ...cardSurface(colors, isDark),
+          padding: spacing.md,
+          gap: spacing.sm,
+        },
+        kpiHeader: {
+          marginBottom: spacing.xs,
+        },
+        metricGrid: {
+          gap: spacing.sm,
+        },
+        metricRow: {
+          flexDirection: 'row',
+          gap: spacing.sm,
+          alignItems: 'stretch',
+        },
       }),
-    [colors]
+    [colors, isDark]
   );
 
   useEffect(() => {
@@ -104,7 +140,6 @@ export default function DashboardScreen() {
     });
   }, []);
 
-  // Coalesce rapid DB writes so the dashboard does not flash on every save.
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedRefreshKey(refreshKey), 250);
     return () => clearTimeout(timer);
@@ -126,9 +161,9 @@ export default function DashboardScreen() {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <View style={basisStyles.headerRight}>
+        <View style={local.headerRight}>
           <View
-            style={basisStyles.seg}
+            style={local.seg}
             accessibilityRole="tablist"
             accessibilityLabel="Accounting basis"
           >
@@ -140,19 +175,17 @@ export default function DashboardScreen() {
             ).map((opt) => {
               const active = basis === opt.key;
               return (
-                <TouchableOpacity
+                <ThemedPressable
                   key={opt.key}
-                  style={[basisStyles.opt, active && basisStyles.optActive]}
+                  style={[local.opt, active && local.optActive]}
                   onPress={() => setAccountingBasis(opt.key)}
-                  activeOpacity={0.7}
+                  activeOpacity={ACTIVE_OPACITY}
                   accessibilityRole="tab"
                   accessibilityState={{ selected: active }}
                   accessibilityLabel={`${opt.label} mode`}
                 >
-                  <Text style={[basisStyles.optText, active && basisStyles.optTextActive]}>
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
+                  <Text style={[local.optText, active && local.optTextActive]}>{opt.label}</Text>
+                </ThemedPressable>
               );
             })}
           </View>
@@ -160,7 +193,7 @@ export default function DashboardScreen() {
         </View>
       ),
     });
-  }, [navigation, basis, basisStyles, colors.headerText, setAccountingBasis]);
+  }, [navigation, basis, local, colors.headerText, setAccountingBasis]);
 
   const load = useCallback(async () => {
     const [data, recent] = await Promise.all([
@@ -173,6 +206,11 @@ export default function DashboardScreen() {
 
   const { booting, error, retry } = useFocusRefresh(load, [debouncedRefreshKey, monthKey, basis]);
 
+  const periodTitle =
+    basis === 'cash'
+      ? `${getPeriodSectionTitle(monthKey)} · Cash`
+      : getPeriodSectionTitle(monthKey);
+
   if (error) {
     return <ErrorState message={error} onRetry={retry} />;
   }
@@ -184,7 +222,7 @@ export default function DashboardScreen() {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={local.content}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -199,7 +237,9 @@ export default function DashboardScreen() {
         />
       }
     >
-      <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
+      <View style={local.periodBlock}>
+        <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
+      </View>
 
       {stats ? (
         <FinanceHero
@@ -214,49 +254,68 @@ export default function DashboardScreen() {
         />
       ) : null}
 
-      <SectionHeader
-        title={
-          basis === 'cash'
-            ? `${getPeriodSectionTitle(monthKey)} · Cash`
-            : getPeriodSectionTitle(monthKey)
-        }
-      />
-
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        <StatCard
-          label="Revenue"
-          value={stats?.sold ?? 0}
-          color={colors.text}
-          onPress={() => router.push('/(drawer)/sales' as never)}
-          blurred={amountsHidden}
-        />
-        <StatCard
-          label="Purchased"
-          value={stats?.purchased ?? 0}
-          color={colors.warning}
-          onPress={() => router.push('/(drawer)/purchases' as never)}
-          blurred={amountsHidden}
-        />
-        <StatCard
-          label="Other Income"
-          value={stats?.otherIncome ?? 0}
-          color={colors.success}
-          onPress={() => router.push('/(drawer)/other-income' as never)}
-          blurred={amountsHidden}
-        />
-        <StatCard
-          label="Expenses"
-          value={stats?.expense ?? 0}
-          color={colors.danger}
-          onPress={() => router.push('/(drawer)/expense' as never)}
-          blurred={amountsHidden}
-        />
+      <View style={local.sectionBlock}>
+        <View style={local.kpiPanel}>
+          <View style={local.kpiHeader}>
+            <SectionHeader title={periodTitle} tight />
+          </View>
+          <View style={local.metricGrid}>
+            <View style={local.metricRow}>
+              <StatCard
+                equal
+                variant="inset"
+                icon="cart-outline"
+                label="Revenue"
+                value={stats?.sold ?? 0}
+                color={colors.primary}
+                onPress={() => router.push('/(drawer)/sales' as never)}
+                blurred={amountsHidden}
+              />
+              <StatCard
+                equal
+                variant="inset"
+                icon="bag-handle-outline"
+                label="Purchased"
+                value={stats?.purchased ?? 0}
+                color={colors.warning}
+                onPress={() => router.push('/(drawer)/purchases' as never)}
+                blurred={amountsHidden}
+              />
+            </View>
+            <View style={local.metricRow}>
+              <StatCard
+                equal
+                variant="inset"
+                icon="cash-outline"
+                label="Other Income"
+                value={stats?.otherIncome ?? 0}
+                color={colors.success}
+                onPress={() => router.push('/(drawer)/other-income' as never)}
+                blurred={amountsHidden}
+              />
+              <StatCard
+                equal
+                variant="inset"
+                icon="receipt-outline"
+                label="Expenses"
+                value={stats?.expense ?? 0}
+                color={colors.danger}
+                onPress={() => router.push('/(drawer)/expense' as never)}
+                blurred={amountsHidden}
+              />
+            </View>
+          </View>
+        </View>
       </View>
 
-      <DashboardShortcuts />
+      <View style={local.sectionBlock}>
+        <DashboardShortcuts />
+      </View>
 
-      <SectionHeader title="Recent activity" />
-      <RecentActivityList grouped={activities} amountsHidden={amountsHidden} />
+      <View style={local.sectionBlock}>
+        <SectionHeader title="Recent activity" tight />
+        <RecentActivityList grouped={activities} amountsHidden={amountsHidden} />
+      </View>
     </ScrollView>
   );
 }

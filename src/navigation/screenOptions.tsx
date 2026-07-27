@@ -44,7 +44,7 @@ export function useHeaderScreenOptions() {
     headerStyle: {
       backgroundColor: colors.header,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.borderLight,
+      borderBottomColor: colors.border,
     },
     headerTintColor: colors.headerText,
     headerTitleStyle: {
@@ -148,13 +148,17 @@ export function stackDetailBeforeRemove(
 function DrawerMenuButton({ tintColor }: { tintColor: string }) {
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const openDrawer = useCallback(() => {
+    void import('../utils/haptics').then((m) => m.hapticLight());
     openDrawerFromNavigation(navigation);
   }, [navigation]);
 
   return (
     <Pressable
       onPress={openDrawer}
-      style={{ marginLeft: Platform.OS === 'ios' ? 0 : 4, padding: 8 }}
+      style={({ pressed }) => [
+        { marginLeft: Platform.OS === 'ios' ? 0 : 4, padding: 8 },
+        pressed ? { opacity: 0.75 } : null,
+      ]}
       hitSlop={8}
       android_ripple={{ borderless: true, radius: 20 }}
       accessibilityRole="button"

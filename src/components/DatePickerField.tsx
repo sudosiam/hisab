@@ -35,6 +35,8 @@ interface Props {
   /** Inline layout for payment rows and tight forms. */
   compact?: boolean;
   accessibilityLabel?: string;
+  /** Inline validation message — shows under the field in danger color. */
+  error?: string;
 }
 
 export function DatePickerField({
@@ -43,6 +45,7 @@ export function DatePickerField({
   onChange,
   compact = false,
   accessibilityLabel,
+  error,
 }: Props) {
   const { colors, isDark } = useTheme();
   const [open, setOpen] = useState(false);
@@ -50,6 +53,7 @@ export function DatePickerField({
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(selectedDate));
   const [draft, setDraft] = useState(selectedDate);
   const close = useCallback(() => setOpen(false), []);
+  const showError = Boolean(error?.trim());
 
   useEffect(() => {
     const next = isValidISODate(value) ? parseISODate(value) : new Date();
@@ -92,7 +96,11 @@ export function DatePickerField({
     <View style={[styles.field, compact && styles.fieldCompact, open && styles.fieldOpen]}>
       {!compact ? <Text style={styles.label}>{label}</Text> : null}
       <TouchableOpacity
-        style={[styles.trigger, compact && styles.triggerCompact]}
+        style={[
+          styles.trigger,
+          compact && styles.triggerCompact,
+          showError && styles.triggerError,
+        ]}
         onPress={openPicker}
         activeOpacity={0.75}
         accessibilityLabel={accessibilityLabel ?? label}
@@ -103,8 +111,9 @@ export function DatePickerField({
         <Text style={[styles.value, !isValidISODate(value) && styles.placeholder]}>{display}</Text>
         <Ionicons name="calendar-outline" size={compact ? 18 : 20} color={colors.primary} />
       </TouchableOpacity>
+      {showError ? <Text style={styles.errorText}>{error!.trim()}</Text> : null}
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
+      <Modal visible={open} transparent animationType="slide" onRequestClose={close}>
         <Pressable style={styles.backdrop} onPress={close} accessibilityLabel="Dismiss date picker">
           <Pressable style={styles.panel} onPress={(e) => e.stopPropagation()}>
             <View style={styles.sheetHeader}>
@@ -225,7 +234,8 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      borderWidth: 0,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: 'transparent',
       borderRadius: radius.md,
       paddingHorizontal: spacing.md,
       paddingVertical: 11,
@@ -233,10 +243,14 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       backgroundColor: colors.inputBg,
       gap: spacing.sm,
     },
+    triggerError: {
+      borderColor: colors.danger,
+      borderWidth: 1,
+    },
     triggerCompact: {
       paddingVertical: spacing.sm,
       paddingHorizontal: spacing.sm,
-      minHeight: 40,
+      minHeight: 44,
     },
     compactLabel: {
       fontSize: 12,
@@ -253,9 +267,14 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       color: colors.textMuted,
       fontWeight: '400',
     },
+    errorText: {
+      ...typography.caption,
+      color: colors.danger,
+      marginTop: spacing.xs,
+    },
     backdrop: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.45)',
+      backgroundColor: colors.scrim,
       justifyContent: 'center',
       padding: spacing.lg,
     },
@@ -345,6 +364,8 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     footerBtn: {
       paddingVertical: spacing.sm,
       paddingHorizontal: spacing.md,
+      minHeight: 44,
+      justifyContent: 'center',
     },
     footerBtnText: {
       color: colors.primary,

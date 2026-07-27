@@ -6,6 +6,11 @@ export const DRAFT_KEYS = {
   saleNew: 'sale_new',
   purchaseNew: 'purchase_new',
   expenseNew: 'expense_new',
+  paymentNew: 'payment_new',
+  noteNew: 'note_new',
+  otherIncomeNew: 'other_income_new',
+  inventoryNew: 'inventory_new',
+  addAccount: 'add_account',
 } as const;
 
 export type DraftKey = (typeof DRAFT_KEYS)[keyof typeof DRAFT_KEYS];
@@ -15,6 +20,61 @@ export interface DraftPaymentRow {
   amount: string;
   date: string;
   notes: string;
+}
+
+export interface PaymentFormDraft {
+  voucherType: 'receipt' | 'payment';
+  voucherNo: string;
+  date: string;
+  partyName: string;
+  accountId: number;
+  amount: string;
+  applyMode: 'against_invoice' | 'advance' | 'on_account';
+  selectedInvoiceNo: string | null;
+  narration: string;
+  instrumentNo: string;
+  paymentMode: string;
+}
+
+export interface NoteFormDraft {
+  noteKind: 'credit' | 'debit';
+  direction: 'sale' | 'purchase';
+  partyName: string;
+  date: string;
+  reason: string;
+  notes: string;
+  items: {
+    key: string;
+    product_id: number;
+    description: string;
+    qty: string;
+    unit_price: string;
+    hsn_sac: string;
+  }[];
+}
+
+export interface OtherIncomeFormDraft {
+  category: string;
+  description: string;
+  amount: string;
+  date: string;
+  accountId: number;
+}
+
+export interface InventoryFormDraft {
+  name: string;
+  category: string;
+  sku: string;
+  unit: string;
+  openingQty: string;
+  openingCost: string;
+  sellPrice: string;
+}
+
+export interface AddAccountFormDraft {
+  name: string;
+  type: 'cash' | 'bank';
+  opening: string;
 }
 
 export interface SaleFormDraft {
@@ -35,6 +95,8 @@ export interface SaleFormDraft {
     hsn_sac?: string;
   }[];
   payments: DraftPaymentRow[];
+  /** Prefer applying party advance when credit exists. Older drafts omit this. */
+  applyAdvance?: boolean;
 }
 
 export interface PurchaseFormDraft {
@@ -53,6 +115,7 @@ export interface PurchaseFormDraft {
     hsn_sac?: string;
   }[];
   payments: DraftPaymentRow[];
+  applyAdvance?: boolean;
 }
 
 export interface ExpenseFormDraft {

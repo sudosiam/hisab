@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { View, Text, StyleSheet, RefreshControl } from 'react-native';
 import { DatePickerField, ErrorState, useScreenStyles } from '../../../src/components/ui';
+import { ListSkeleton } from '../../../src/components/Skeleton';
 import { LedgerTable } from '../../../src/components/LedgerTable';
 import { getDayBookFromLedger, hasGeneralLedger } from '../../../src/services/ledger';
 import { getDayBookReport } from '../../../src/services/reports';
@@ -11,10 +11,11 @@ import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { shareDayBookPdf } from '../../../src/services/reportPdf';
 import { radius, spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import { formatSqliteError } from '../../../src/db/database';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { getCurrentMonthKey, getMonthRange, isValidISODate, todayISO } from '../../../src/utils/date';
 import { MoneyText } from '../../../src/components/MoneyText';
 import { roundMoney } from '../../../src/utils/money';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 import type { PartyStatementLine } from '../../../src/types';
 
 export default function DayBookReportScreen() {
@@ -26,10 +27,8 @@ export default function DayBookReportScreen() {
   const [fromDate, setFromDate] = useState(monthRange.start);
   const [toDate, setToDate] = useState(todayISO());
   const [rows, setRows] = useState<PartyStatementLine[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [booting, setBooting] = useState(true);
 
   const localStyles = useMemo(
     () =>
@@ -62,54 +61,48 @@ export default function DayBookReportScreen() {
     if (!isValidISODate(fromDate) || !isValidISODate(toDate)) {
       setRows([]);
       setHint('Choose valid from and to dates.');
-      setError(null);
-      setBooting(false);
       return;
     }
     if (fromDate > toDate) {
       setRows([]);
       setHint('From date must be on or before the to date.');
-      setError(null);
-      setBooting(false);
       return;
     }
-    try {
-      if (await hasGeneralLedger()) {
-        setRows(await getDayBookFromLedger(fromDate, toDate));
-      } else {
-        const legacy = await getDayBookReport(fromDate, toDate);
-        let balance = 0;
-        setRows(
-          legacy.map((row) => {
-            balance = roundMoney(balance + row.debit - row.credit);
-            return {
-              id: row.id,
-              date: row.date,
-              description: `${row.voucherType} ${row.voucherNo} — ${row.particulars}`,
-              debit: row.debit,
-              credit: row.credit,
-              balance,
-              reference_type: 'payment' as const,
-              reference_id: 0,
-            };
-          })
-        );
-      }
-      setHint(null);
-      setError(null);
-    } catch (e) {
-      setError(formatSqliteError(e));
-    } finally {
-      setBooting(false);
+    if (await hasGeneralLedger()) {
+      setRows(await getDayBookFromLedger(fromDate, toDate));
+    } else {
+      const legacy = await getDayBookReport(fromDate, toDate);
+      let balance = 0;
+      setRows(
+        legacy.map((row) => {
+          balance = roundMoney(balance + row.debit - row.credit);
+          return {
+            id: row.id,
+            date: row.date,
+            description: `${row.voucherType} ${row.voucherNo} — ${row.particulars}`,
+            debit: row.debit,
+            credit: row.credit,
+            balance,
+            reference_type: 'payment' as const,
+            reference_id: 0,
+          };
+        })
+      );
     }
+    setHint(null);
   }, [fromDate, toDate, refreshKey]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const { booting, error, retry } = useFocusRefresh(load, [fromDate, toDate, refreshKey]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
-    setRefreshing(false);
+    try {
+      await load();
+    } catch (e) {
+      alertRefreshFailed(e);
+    } finally {
+      setRefreshing(false);
+    }
   }, [load]);
 
   const totalDebit = roundMoney(rows.reduce((sum, row) => sum + row.debit, 0));
@@ -122,54 +115,50 @@ export default function DayBookReportScreen() {
 
   useReportPdfHeader({ disabled: !!error || !!hint, onExport: exportPdf });
 
-  if (error) {
-    return <ErrorState message={error} onRetry={load} />;
+  if (error && rows.length === 0) {
+    return <ErrorState message={error} onRetry={retry} />;
   }
 
-  if (booting) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+  if (booting && rows.length === 0) {
+    return <ListSkeleton />;
   }
 
   return (
-    <ScrollView
+    <LedgerTable
       style={styles.container}
       contentContainerStyle={styles.content}
+      rows={hint ? [] : rows}
+      emptyText={hint ?? 'No journal entries in this date range.'}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
       }
-    >
-      <View style={localStyles.header}>
-        <View style={localStyles.dateRow}>
-          <View style={localStyles.dateField}>
-            <DatePickerField label="From" value={fromDate} onChange={setFromDate} />
-          </View>
-          <View style={localStyles.dateField}>
-            <DatePickerField label="To" value={toDate} onChange={setToDate} />
-          </View>
-        </View>
-      </View>
-
-      {hint ? <Text style={styles.empty}>{hint}</Text> : null}
-
-      {!hint ? (
+      ListHeaderComponent={
         <>
-          <View style={localStyles.totals}>
-            <View style={localStyles.totalChip}>
-              <Text style={localStyles.totalLabel}>Total Debit</Text>
-              <MoneyText amount={totalDebit} size="md" style={{ marginTop: 2, textAlign: 'left' }} />
-            </View>
-            <View style={localStyles.totalChip}>
-              <Text style={localStyles.totalLabel}>Total Credit</Text>
-              <MoneyText amount={totalCredit} size="md" style={{ marginTop: 2, textAlign: 'left' }} />
+          <View style={localStyles.header}>
+            <View style={localStyles.dateRow}>
+              <View style={localStyles.dateField}>
+                <DatePickerField label="From" value={fromDate} onChange={setFromDate} />
+              </View>
+              <View style={localStyles.dateField}>
+                <DatePickerField label="To" value={toDate} onChange={setToDate} />
+              </View>
             </View>
           </View>
-          <LedgerTable rows={rows} emptyText="No journal entries in this date range." />
+
+          {!hint ? (
+            <View style={localStyles.totals}>
+              <View style={localStyles.totalChip}>
+                <Text style={localStyles.totalLabel}>Total Debit</Text>
+                <MoneyText amount={totalDebit} size="md" style={{ marginTop: 2, textAlign: 'left' }} />
+              </View>
+              <View style={localStyles.totalChip}>
+                <Text style={localStyles.totalLabel}>Total Credit</Text>
+                <MoneyText amount={totalCredit} size="md" style={{ marginTop: 2, textAlign: 'left' }} />
+              </View>
+            </View>
+          ) : null}
         </>
-      ) : null}
-    </ScrollView>
+      }
+    />
   );
 }

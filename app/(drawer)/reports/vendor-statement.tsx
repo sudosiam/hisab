@@ -1,14 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, RefreshControl } from 'react-native';
 import { VendorPickerField } from '../../../src/components/VendorPickerField';
 import { LedgerTable } from '../../../src/components/LedgerTable';
 import { DatePickerField, ErrorState, useScreenStyles } from '../../../src/components/ui';
+import { ListSkeleton } from '../../../src/components/Skeleton';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { radius, spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import { formatSqliteError } from '../../../src/db/database';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import {
   getPartyByName,
   getPartyStatementInRange,
@@ -17,6 +17,7 @@ import { shareVendorStatementPdf } from '../../../src/services/vendorStatementPd
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { getCurrentMonthKey, getMonthRange, isValidISODate, todayISO } from '../../../src/utils/date';
 import { MoneyText } from '../../../src/components/MoneyText';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 import type { Party } from '../../../src/types';
 
 export default function VendorStatementReportScreen() {
@@ -32,7 +33,6 @@ export default function VendorStatementReportScreen() {
   const [lines, setLines] = useState<Awaited<ReturnType<typeof getPartyStatementInRange>>['lines']>([]);
   const [openingBalance, setOpeningBalance] = useState(0);
   const [closingBalance, setClosingBalance] = useState(0);
-  const [error, setError] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>('Select a vendor to view their statement.');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -141,33 +141,30 @@ export default function VendorStatementReportScreen() {
       setOpeningBalance(0);
       setClosingBalance(0);
       setHint('Select a vendor to view their statement.');
-      setError(null);
       return;
     }
     if (!isValidISODate(fromDate) || !isValidISODate(toDate)) {
       setLines([]);
       setHint('Choose valid from and to dates.');
-      setError(null);
       return;
     }
     if (fromDate > toDate) {
       setLines([]);
       setHint('From date must be on or before the to date.');
-      setError(null);
       return;
     }
 
+    setLoading(true);
     try {
-      setLoading(true);
-      setLines([]);
-      setOpeningBalance(0);
-      setClosingBalance(0);
-      setVendorParty(null);
+      setHint(null);
 
       const party = await getPartyByName(trimmed, 'vendor');
       if (!party) {
+        setLines([]);
+        setOpeningBalance(0);
+        setClosingBalance(0);
+        setVendorParty(null);
         setHint('No vendor with this name. Create them in Parties first.');
-        setError(null);
         return;
       }
 
@@ -177,31 +174,25 @@ export default function VendorStatementReportScreen() {
       setOpeningBalance(result.openingBalance);
       setClosingBalance(result.closingBalance);
       setHint(null);
-      setError(null);
-    } catch (e) {
-      setError(formatSqliteError(e));
     } finally {
       setLoading(false);
     }
   }, [vendorName, fromDate, toDate, refreshKey]);
 
-  useFocusEffect(
-    useCallback(() => {
-      load();
-    }, [load])
-  );
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { error, retry } = useFocusRefresh(load, [vendorName, fromDate, toDate, refreshKey]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
-    setRefreshing(false);
+    try {
+      await load();
+    } catch (e) {
+      alertRefreshFailed(e);
+    } finally {
+      setRefreshing(false);
+    }
   }, [load]);
 
-  const showStatement = vendorName.trim().length > 0 && !hint && !loading;
+  const showStatement = vendorName.trim().length > 0 && !hint && (!loading || lines.length > 0);
 
   const exportPdf = useCallback(async () => {
     const trimmed = vendorName.trim();
@@ -224,58 +215,67 @@ export default function VendorStatementReportScreen() {
 
   useReportPdfHeader({ disabled: !showStatement || !!error, onExport: exportPdf });
 
-  if (error) {
-    return <ErrorState message={error} onRetry={load} />;
+  if (error && lines.length === 0) {
+    return <ErrorState message={error} onRetry={retry} />;
   }
 
   return (
-    <ScrollView
+    <LedgerTable
       style={styles.container}
       contentContainerStyle={styles.content}
+      rows={showStatement ? lines : []}
+      emptyText={
+        hint
+          ? hint
+          : loading && lines.length === 0
+            ? 'Loading…'
+            : 'No transactions in this date range.'
+      }
       keyboardShouldPersistTaps="handled"
-      nestedScrollEnabled
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
       }
-    >
-      <View style={localStyles.header}>
-        <VendorPickerField value={vendorName} onChange={setVendorName} />
-        <View style={localStyles.dateRow}>
-          <View style={localStyles.dateField}>
-            <DatePickerField label="From" value={fromDate} onChange={setFromDate} />
-          </View>
-          <View style={localStyles.dateField}>
-            <DatePickerField label="To" value={toDate} onChange={setToDate} />
-          </View>
-        </View>
-        {showStatement ? (
-          <>
-            <View style={localStyles.summaryRow}>
-              <View style={localStyles.summaryChip}>
-                <Text style={localStyles.summaryLabel}>Opening</Text>
-                <MoneyText amount={openingBalance} size="md" style={{ textAlign: 'left' }} />
+      ListHeaderComponent={
+        <>
+          <View style={localStyles.header}>
+            <VendorPickerField value={vendorName} onChange={setVendorName} />
+            <View style={localStyles.dateRow}>
+              <View style={localStyles.dateField}>
+                <DatePickerField label="From" value={fromDate} onChange={setFromDate} />
               </View>
-              <View style={localStyles.summaryChip}>
-                <Text style={localStyles.summaryLabel}>Closing</Text>
-                <MoneyText amount={closingBalance} size="md" color={colors.primary} style={{ textAlign: 'left' }} />
+              <View style={localStyles.dateField}>
+                <DatePickerField label="To" value={toDate} onChange={setToDate} />
               </View>
             </View>
-          </>
-        ) : null}
-      </View>
-
-      {hint ? <Text style={localStyles.hint}>{hint}</Text> : null}
-      {loading ? <Text style={localStyles.hint}>Loading statement…</Text> : null}
-
-      {showStatement ? (
-        <>
-          <View style={localStyles.sectionHeader}>
-            <Text style={localStyles.sectionTitle}>Vendor Statement</Text>
-            <Text style={localStyles.sectionCount}>{lines.length} entries</Text>
+            {showStatement ? (
+              <View style={localStyles.summaryRow}>
+                <View style={localStyles.summaryChip}>
+                  <Text style={localStyles.summaryLabel}>Opening</Text>
+                  <MoneyText amount={openingBalance} size="md" style={{ textAlign: 'left' }} />
+                </View>
+                <View style={localStyles.summaryChip}>
+                  <Text style={localStyles.summaryLabel}>Closing</Text>
+                  <MoneyText
+                    amount={closingBalance}
+                    size="md"
+                    color={colors.primary}
+                    style={{ textAlign: 'left' }}
+                  />
+                </View>
+              </View>
+            ) : null}
           </View>
-          <LedgerTable rows={lines} emptyText="No transactions in this date range." />
+
+          {loading && lines.length === 0 && !hint ? <ListSkeleton /> : null}
+
+          {showStatement ? (
+            <View style={localStyles.sectionHeader}>
+              <Text style={localStyles.sectionTitle}>Vendor Statement</Text>
+              <Text style={localStyles.sectionCount}>{lines.length} entries</Text>
+            </View>
+          ) : null}
         </>
-      ) : null}
-    </ScrollView>
+      }
+    />
   );
 }

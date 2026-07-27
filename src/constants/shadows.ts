@@ -45,9 +45,9 @@ export function primaryShadow(_isDark: boolean): ViewStyle {
 }
 
 /** Circular FAB elevation (Material 3). */
-export function fabShadow(isDark: boolean): ViewStyle {
+export function fabShadow(isDark: boolean, shadowColor: string): ViewStyle {
   return {
-    shadowColor: '#000000',
+    shadowColor,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: isDark ? 0.35 : 0.16,
     shadowRadius: 8,

@@ -9,7 +9,6 @@ import * as FileSystem from 'expo-file-system/legacy';
 import type { Session } from '@supabase/supabase-js';
 import { databaseHasUserData, getDatabase } from '../db/database';
 import {
-  formatLastBackupLabel,
   getBackupSafetyGuard,
   isAutoBackupPaused,
   readDatabaseBase64,
@@ -28,6 +27,10 @@ const CLOUD_ENABLED_KEY = '@hisab_cloud_backup_enabled';
 const CLOUD_LAST_BACKUP_KEY = '@hisab_cloud_last_backup';
 const CLOUD_LAST_ERROR_KEY = '@hisab_cloud_backup_last_error';
 const CLOUD_RECONCILE_ATTEMPTED_KEY = '@hisab_cloud_reconcile_attempted';
+const CLOUD_RECONCILE_FAIL_KEY = '@hisab_cloud_reconcile_failures';
+/** Skip rapid repeat uploads when leaving the app many times the same day. */
+const CLOUD_BACKGROUND_MIN_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const CLOUD_RECONCILE_MAX_FAILURES = 3;
 
 export const CLOUD_RETENTION_DAYS = 7;
 /** Personal / single-owner builds: same floor for sign-in and sign-up. */
@@ -128,8 +131,6 @@ export async function getLastCloudBackupDate(): Promise<string | null> {
   }
 }
 
-export { formatLastBackupLabel as formatLastCloudBackupLabel };
-
 async function recordCloudBackupSuccess(): Promise<void> {
   await AsyncStorage.setItem(CLOUD_LAST_BACKUP_KEY, new Date().toISOString());
   await AsyncStorage.removeItem(CLOUD_LAST_ERROR_KEY);
@@ -153,10 +154,36 @@ async function wasCloudReconcileAttempted(): Promise<boolean> {
 
 async function markCloudReconcileAttempted(): Promise<void> {
   await AsyncStorage.setItem(CLOUD_RECONCILE_ATTEMPTED_KEY, 'true');
+  await AsyncStorage.removeItem(CLOUD_RECONCILE_FAIL_KEY);
 }
 
 export async function clearCloudReconcileAttempted(): Promise<void> {
-  await AsyncStorage.removeItem(CLOUD_RECONCILE_ATTEMPTED_KEY);
+  await AsyncStorage.multiRemove([CLOUD_RECONCILE_ATTEMPTED_KEY, CLOUD_RECONCILE_FAIL_KEY]);
+}
+
+/** User chose start fresh — do not auto-restore cloud onto the empty DB. */
+export async function skipCloudReconcileAfterFreshStart(): Promise<void> {
+  await markCloudReconcileAttempted();
+}
+
+async function recordCloudReconcileFailure(): Promise<void> {
+  const raw = await AsyncStorage.getItem(CLOUD_RECONCILE_FAIL_KEY);
+  let count = 0;
+  let day = todayDateKey();
+  if (raw) {
+    const [storedDay, storedCount] = raw.split('|');
+    if (storedDay === day) count = Number.parseInt(storedCount, 10) || 0;
+  }
+  count += 1;
+  await AsyncStorage.setItem(CLOUD_RECONCILE_FAIL_KEY, `${day}|${count}`);
+}
+
+async function shouldSkipCloudReconcileAfterFailures(): Promise<boolean> {
+  const raw = await AsyncStorage.getItem(CLOUD_RECONCILE_FAIL_KEY);
+  if (!raw) return false;
+  const [storedDay, storedCount] = raw.split('|');
+  if (storedDay !== todayDateKey()) return false;
+  return (Number.parseInt(storedCount, 10) || 0) >= CLOUD_RECONCILE_MAX_FAILURES;
 }
 
 /** Delete all cloud backup objects for the signed-in user and clear local cloud markers. */
@@ -444,20 +471,24 @@ async function uploadCloudBackupLocked(): Promise<{ success: boolean; message: s
       const datedPath = objectPath(userId, datedBackupFileName(dateKey));
       const contentType = 'application/octet-stream';
 
-      const latestUpload = await supabase.storage.from(CLOUD_BACKUP_BUCKET).upload(latestPath, bytes, {
-        contentType,
-        upsert: true,
-      });
-      if (latestUpload.error) {
-        return { success: false, message: latestUpload.error.message };
-      }
-
+      // Dated object first so a failure never leaves only a new "latest" pointer.
       const datedUpload = await supabase.storage.from(CLOUD_BACKUP_BUCKET).upload(datedPath, bytes, {
         contentType,
         upsert: true,
       });
       if (datedUpload.error) {
         return { success: false, message: datedUpload.error.message };
+      }
+
+      const latestUpload = await supabase.storage.from(CLOUD_BACKUP_BUCKET).upload(latestPath, bytes, {
+        contentType,
+        upsert: true,
+      });
+      if (latestUpload.error) {
+        return {
+          success: false,
+          message: `Dated backup saved, but updating latest failed: ${latestUpload.error.message}`,
+        };
       }
 
       await pruneOldCloudDatedBackups(userId);
@@ -525,18 +556,38 @@ export async function runCloudDailyBackupIfDue(): Promise<{ ran: boolean; messag
   return { ran: result.success, message: result.message };
 }
 
-/** Background upload when cloud backup is on (same safety guards as daily). */
+/** Background upload when cloud backup is on — throttled to avoid thrash on every app leave. */
 export async function cloudBackupOnBackground(): Promise<void> {
   if (!isSupabaseConfigured()) return;
   if (!(await isCloudBackupEnabled())) return;
   const session = await getCloudSession();
   if (!session) return;
+
+  const lastAt = await getLastCloudBackupAt();
+  if (lastAt) {
+    try {
+      const lastMs = /^\d{4}-\d{2}-\d{2}$/.test(lastAt)
+        ? parseISO(`${lastAt}T00:00:00`).getTime()
+        : parseISO(lastAt).getTime();
+      if (
+        Number.isFinite(lastMs) &&
+        Date.now() - lastMs < CLOUD_BACKGROUND_MIN_INTERVAL_MS &&
+        (await getLastCloudBackupDate()) === todayDateKey()
+      ) {
+        return;
+      }
+    } catch {
+      // Fall through and attempt upload.
+    }
+  }
+
   await uploadCloudBackup();
 }
 
 /**
  * First-time reconcile: if local DB is empty and a cloud snapshot exists,
- * restore once. Skipped after reset pause and never runs when local has data.
+ * restore once. Marked complete only after success so transient failures can retry.
+ * After several failures the same day, skips until the user signs in again / clears cloud.
  */
 export async function reconcileCloudBackupOnEmptyLocal(): Promise<{
   restored: boolean;
@@ -546,6 +597,12 @@ export async function reconcileCloudBackupOnEmptyLocal(): Promise<{
   if (!(await isCloudBackupEnabled())) return { restored: false };
   if (await isAutoBackupPaused()) return { restored: false };
   if (await wasCloudReconcileAttempted()) return { restored: false };
+  if (await shouldSkipCloudReconcileAfterFailures()) {
+    return {
+      restored: false,
+      message: 'Cloud restore skipped after repeated failures today. Try Restore from cloud in Settings.',
+    };
+  }
 
   const session = await getCloudSession();
   if (!session) return { restored: false };
@@ -559,16 +616,17 @@ export async function reconcileCloudBackupOnEmptyLocal(): Promise<{
   const exists = await cloudLatestBackupExists();
   if (!exists) return { restored: false };
 
-  await markCloudReconcileAttempted();
   const result = await restoreDatabaseFromCloud();
   if (result.success) {
+    await markCloudReconcileAttempted();
     return { restored: true, message: result.message };
   }
+  await recordCloudReconcileFailure();
   await recordCloudBackupError(result.message);
   return { restored: false, message: result.message };
 }
 
-/** Enable cloud backup after OTP sign-in and run the first full upload. */
+/** Enable cloud backup after email/password sign-in and run the first full upload. */
 export async function enableCloudBackupAfterSignIn(): Promise<{ success: boolean; message: string }> {
   await setCloudBackupEnabled(true);
   await clearCloudReconcileAttempted();

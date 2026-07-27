@@ -28,7 +28,8 @@
       },
       "package": "com.hisab.app",
       "versionCode": 37,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -45,7 +46,7 @@
           "imageWidth": 220,
           "resizeMode": "contain",
           "dark": {
-            "backgroundColor": "#0B1731",
+            "backgroundColor": "#000000",
             "image": "./assets/splash-icon.png"
           }
         }
@@ -73,7 +74,8 @@
           "enableBase64ShareAndroid": false
         }
       ],
-      "expo-build-properties"
+      "expo-build-properties",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true

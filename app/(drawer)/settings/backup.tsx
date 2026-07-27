@@ -3,7 +3,6 @@ import {
   ScrollView,
   View,
   Text,
-  Switch,
   Alert,
   TouchableOpacity,
   Modal,
@@ -11,10 +10,12 @@ import {
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { FormInput, PrimaryButton, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import { ThemedSwitch } from '../../../src/components/ThemedSwitch';
 import { formatSqliteError } from '../../../src/db/database';
-import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { clearAllDrafts } from '../../../src/services/formDrafts';
+import { isDbMaintenanceBusy, isRestoreInProgress } from '../../../src/services/dbMaintenance';
 import {
   backupDatabase,
   dismissBackupPauseForFreshStart,
@@ -26,6 +27,7 @@ import {
   formatLastBackupLabel,
   isAutoBackupEnabled,
   isAutoBackupPaused,
+  isDeviceFolderBackupSupported,
   pickBackupFolder,
   restoreDatabaseFromBackup,
   restoreLatestFromBackupFolder,
@@ -50,20 +52,20 @@ import {
   deleteCloudBackups,
 } from '../../../src/services/cloudBackup';
 import { isSupabaseConfigured } from '../../../src/services/supabaseClient';
-import {
-  getBackupBackgroundTaskStatusLabel,
-} from '../../../src/services/backupBackgroundTask';
-import { getLastLedgerRefreshError } from '../../../src/services/ledger';
+import { getBackupBackgroundTaskStatusLabel } from '../../../src/services/backupBackgroundTask';
 import { spacing } from '../../../src/constants/theme';
 import { SettingsDivider, useSettingsStyles } from '../../../src/components/settings/settingsUi';
 
 const IMPORT_CONFIRM_TEXT = 'IMPORT';
 
+type RestoreSource = 'file' | 'folder' | 'cloud';
+
 export default function BackupSettingsScreen() {
-  const { refresh } = useDatabase();
+  const { refresh } = useDatabaseActions();
   const styles = useScreenStyles();
   const localStyles = useSettingsStyles();
   const { colors } = useTheme();
+  const folderSupported = isDeviceFolderBackupSupported();
 
   const [folderUri, setFolderUri] = useState<string | null>(null);
   const [autoBackup, setAutoBackup] = useState(false);
@@ -86,21 +88,21 @@ export default function BackupSettingsScreen() {
   const [cloudAuthPassword, setCloudAuthPassword] = useState('');
   const [cloudAuthBusy, setCloudAuthBusy] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importMode, setImportMode] = useState<RestoreSource>('file');
   const [importConfirmInput, setImportConfirmInput] = useState('');
   const [osScheduleLabel, setOsScheduleLabel] = useState('…');
-  const [ledgerError, setLedgerError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const uri = await getBackupFolderUri();
-      if (uri) {
+      if (uri && folderSupported) {
         try {
           await ensureBackupFolderReady(uri);
         } catch {
           // Folder may be temporarily unavailable; backup actions will surface errors.
         }
       }
-      setFolderUri(uri);
+      setFolderUri(folderSupported ? uri : null);
       setAutoBackup(await isAutoBackupEnabled());
       setBackupPaused(await isAutoBackupPaused());
       setLastBackupAt(await getLastBackupAt());
@@ -110,61 +112,32 @@ export default function BackupSettingsScreen() {
       setLastCloudBackupAt(await getLastCloudBackupAt());
       setCloudBackupError(await getCloudBackupLastError());
       setOsScheduleLabel(await getBackupBackgroundTaskStatusLabel());
-      setLedgerError(getLastLedgerRefreshError());
     } catch (e) {
       Alert.alert('Error', formatSqliteError(e));
     }
-  }, []);
+  }, [folderSupported]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
-  const handlePickFolder = async () => {
-    try {
-      const uri = await pickBackupFolder();
-      if (uri) {
-        setFolderUri(uri);
-        Alert.alert('Success', 'Backup folder set. Daily backups will be saved here.');
-      }
-    } catch (e) {
-      Alert.alert('Error', formatSqliteError(e));
-    }
-  };
-
-  const handleBackup = async () => {
-    if (!folderUri) {
-      Alert.alert('Choose a backup folder', 'Select where backups are saved first.');
-      return;
-    }
-    if (backingUp) return;
-    setBackingUp(true);
-    try {
-      const result = await backupDatabase();
-      setLastBackupAt(await getLastBackupAt());
-      setBackupError(await getBackupLastError());
-      Alert.alert(result.success ? 'Backup Complete' : 'Backup Failed', result.message);
-    } catch (e) {
-      Alert.alert('Backup Failed', formatSqliteError(e));
-    } finally {
-      setBackingUp(false);
-    }
-  };
-
-  const handleExport = async () => {
-    if (exporting) return;
-    setExporting(true);
-    try {
-      const result = await exportDatabase();
-      Alert.alert(result.success ? 'Export Complete' : 'Export Failed', result.message);
-    } catch (e) {
-      Alert.alert('Export Failed', formatSqliteError(e));
-    } finally {
-      setExporting(false);
-    }
+  const refreshCloudStatus = async () => {
+    setCloudBackup(await isCloudBackupEnabled());
+    setCloudEmail(await getCloudUserEmail());
+    setLastCloudBackupAt(await getLastCloudBackupAt());
+    setCloudBackupError(await getCloudBackupLastError());
   };
 
   const canConfirmImport = importConfirmInput.trim().toUpperCase() === IMPORT_CONFIRM_TEXT;
 
-  const openImportModal = () => {
+  const openImportModal = (mode: RestoreSource) => {
+    if (isDbMaintenanceBusy() || isRestoreInProgress()) {
+      Alert.alert('Please wait', 'A backup or restore is already in progress.');
+      return;
+    }
+    setImportMode(mode);
     setImportConfirmInput('');
     setImportModalOpen(true);
   };
@@ -175,66 +148,90 @@ export default function BackupSettingsScreen() {
     setImportConfirmInput('');
   };
 
-  const performRestoreFromFolder = async () => {
-    setRestoring(true);
-    try {
-      const result = await restoreLatestFromBackupFolder();
-      if (result.success) {
-        await clearAllDrafts().catch(() => {});
-        refresh();
-        await load();
-        Alert.alert(
-          'Imported',
-          `${result.message} Previous backup settings were turned back on.`
-        );
-      } else {
-        Alert.alert('Import Failed', result.message);
-      }
-    } catch (e) {
-      Alert.alert('Import Failed', formatSqliteError(e));
-    } finally {
-      setRestoring(false);
-    }
-  };
-
-  const handleRestoreFromFolder = () => {
-    if (!folderUri) {
-      Alert.alert('Choose a backup folder', 'Select where backups are saved first.');
-      return;
-    }
-    if (restoring) return;
+  const afterSuccessfulRestore = async (message: string) => {
+    await clearAllDrafts().catch((err) => console.warn('[backup] clear drafts after restore failed', err));
+    refresh();
+    await load();
     Alert.alert(
-      'Restore from backup folder?',
-      'This replaces ALL current data with the latest backup in your backup folder. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Restore', style: 'destructive', onPress: () => void performRestoreFromFolder() },
-      ]
+      'Restored',
+      `${message} Unsaved form drafts were cleared. The app data has been reloaded. Backup settings were turned back on.`
     );
   };
 
-  const handleRestore = async () => {
+  const handleConfirmRestore = async () => {
     if (!canConfirmImport || restoring) return;
+    if (isDbMaintenanceBusy() || isRestoreInProgress()) {
+      Alert.alert('Please wait', 'A backup or restore is already in progress.');
+      return;
+    }
     setRestoring(true);
     try {
-      const result = await restoreDatabaseFromBackup();
+      const result =
+        importMode === 'folder'
+          ? await restoreLatestFromBackupFolder()
+          : importMode === 'cloud'
+            ? await restoreDatabaseFromCloud()
+            : await restoreDatabaseFromBackup();
       if (result.success) {
-        await clearAllDrafts().catch(() => {});
-        refresh();
         setImportModalOpen(false);
         setImportConfirmInput('');
-        await load();
-        Alert.alert(
-          'Imported',
-          `${result.message} Previous backup settings were turned back on.`
-        );
+        await afterSuccessfulRestore(result.message);
       } else if (result.message !== 'Import cancelled') {
-        Alert.alert('Import Failed', result.message);
+        Alert.alert('Restore failed', result.message);
       }
     } catch (e) {
-      Alert.alert('Import Failed', formatSqliteError(e));
+      Alert.alert('Restore failed', formatSqliteError(e));
     } finally {
       setRestoring(false);
+    }
+  };
+
+  const handlePickFolder = async () => {
+    try {
+      const uri = await pickBackupFolder();
+      if (uri) {
+        setFolderUri(uri);
+        Alert.alert('Folder set', 'Daily device backups will be saved here.');
+      }
+    } catch (e) {
+      Alert.alert('Error', formatSqliteError(e));
+    }
+  };
+
+  const handleBackup = async () => {
+    if (!folderUri) {
+      Alert.alert('Choose a folder', 'Pick where device backups are saved first.');
+      return;
+    }
+    if (backingUp || isDbMaintenanceBusy()) {
+      if (!backingUp) {
+        Alert.alert('Please wait', 'A backup or restore is already in progress.');
+      }
+      return;
+    }
+    setBackingUp(true);
+    try {
+      const result = await backupDatabase();
+      setLastBackupAt(await getLastBackupAt());
+      setBackupError(await getBackupLastError());
+      Alert.alert(result.success ? 'Backup complete' : 'Backup failed', result.message);
+    } catch (e) {
+      Alert.alert('Backup failed', formatSqliteError(e));
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const result = await exportDatabase();
+      Alert.alert(result.success ? 'Export complete' : 'Export failed', result.message);
+    } catch (e) {
+      Alert.alert('Export failed', formatSqliteError(e));
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -242,9 +239,13 @@ export default function BackupSettingsScreen() {
     try {
       if (value && (await isAutoBackupPaused())) {
         Alert.alert(
-          'Restore your data first',
-          'After a reset, use Restore from backup folder, Import backup file, or Restore from cloud below. Auto backup turns back on by itself after a successful restore — you do not need to flip this switch first.'
+          'Restore first',
+          'After a reset, restore your data below. Auto backup turns back on after a successful restore.'
         );
+        return;
+      }
+      if (value && !folderUri) {
+        Alert.alert('Choose a folder', 'Pick a backup folder before turning on daily device backup.');
         return;
       }
       setAutoBackup(value);
@@ -258,8 +259,8 @@ export default function BackupSettingsScreen() {
 
   const handleStartFresh = () => {
     Alert.alert(
-      'Start fresh without restore?',
-      'Keeps the empty database. Auto backup stays off until you turn it on (and have data). Your existing backup files/cloud snapshot are not deleted.',
+      'Start fresh?',
+      'Keeps the empty database. Existing backup files and cloud snapshots are not deleted.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -270,7 +271,7 @@ export default function BackupSettingsScreen() {
               await dismissBackupPauseForFreshStart();
               setBackupPaused(false);
               setOsScheduleLabel(await getBackupBackgroundTaskStatusLabel());
-              Alert.alert('Ready', 'You can enter data and turn backups on when you want.');
+              Alert.alert('Ready', 'Add data, then turn backups on when you want.');
             } catch (e) {
               Alert.alert('Error', formatSqliteError(e));
             }
@@ -292,27 +293,16 @@ export default function BackupSettingsScreen() {
     setCloudAuthPassword('');
   };
 
-  const refreshCloudStatus = async () => {
-    setCloudBackup(await isCloudBackupEnabled());
-    setCloudEmail(await getCloudUserEmail());
-    setLastCloudBackupAt(await getLastCloudBackupAt());
-    setCloudBackupError(await getCloudBackupLastError());
-  };
-
   const finishCloudAuth = async (authResult: { success: boolean; message: string }) => {
     if (!authResult.success) {
       Alert.alert('Sign in failed', authResult.message);
       return;
     }
-    // After reset, do not auto-enable/upload — user should restore first.
     if (await isAutoBackupPaused()) {
       await refreshCloudStatus();
       setCloudAuthModalOpen(false);
       setCloudAuthPassword('');
-      Alert.alert(
-        'Signed in',
-        'Tap “Restore from cloud” to bring your data back. Backups stay paused until restore succeeds.'
-      );
+      Alert.alert('Signed in', 'Tap Restore from cloud to bring your data back.');
       return;
     }
     const upload = await enableCloudBackupAfterSignIn();
@@ -323,8 +313,8 @@ export default function BackupSettingsScreen() {
     Alert.alert(
       upload.success ? 'Cloud backup on' : 'Signed in',
       upload.success
-        ? 'First full backup uploaded. Daily cloud backups will run when you open the app.'
-        : `Signed in, but the first upload failed: ${upload.message}`
+        ? 'First backup uploaded. Daily cloud backups run when you open or leave the app.'
+        : `Signed in, but first upload failed: ${upload.message}`
     );
   };
 
@@ -355,7 +345,7 @@ export default function BackupSettingsScreen() {
   const toggleCloudBackup = async (value: boolean) => {
     if (!cloudConfigured) {
       Alert.alert(
-        'Cloud backup not configured',
+        'Cloud not configured',
         'This build is missing EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY.'
       );
       return;
@@ -364,8 +354,8 @@ export default function BackupSettingsScreen() {
       if (value) {
         if (await isAutoBackupPaused()) {
           Alert.alert(
-            'Restore your data first',
-            'After a reset, restore from folder, file, or cloud below. Cloud backup will turn back on automatically after a successful restore.'
+            'Restore first',
+            'After a reset, restore from folder, file, or cloud. Cloud backup turns back on after restore.'
           );
           return;
         }
@@ -414,40 +404,6 @@ export default function BackupSettingsScreen() {
     }
   };
 
-  const performRestoreFromCloud = async () => {
-    setRestoring(true);
-    try {
-      const result = await restoreDatabaseFromCloud();
-      if (result.success) {
-        await clearAllDrafts().catch(() => {});
-        refresh();
-        await load();
-        Alert.alert(
-          'Imported',
-          `${result.message} Previous backup settings were turned back on.`
-        );
-      } else {
-        Alert.alert('Import failed', result.message);
-      }
-    } catch (e) {
-      Alert.alert('Import failed', formatSqliteError(e));
-    } finally {
-      setRestoring(false);
-    }
-  };
-
-  const handleRestoreFromCloud = () => {
-    if (restoring) return;
-    Alert.alert(
-      'Restore from cloud?',
-      'This replaces ALL current data with your latest cloud backup. This is backup only — not multi-device sync. Last upload wins.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Restore', style: 'destructive', onPress: () => void performRestoreFromCloud() },
-      ]
-    );
-  };
-
   const handleCloudSignOut = async () => {
     try {
       const result = await signOutCloudBackup();
@@ -461,11 +417,11 @@ export default function BackupSettingsScreen() {
   const handleDeleteCloudBackup = () => {
     Alert.alert(
       'Delete cloud backup?',
-      'This permanently removes your cloud backup files. Local data on this device is not erased.',
+      'Removes cloud backup files only. Data on this device is kept.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete cloud data',
+          text: 'Delete',
           style: 'destructive',
           onPress: () => {
             void (async () => {
@@ -487,6 +443,21 @@ export default function BackupSettingsScreen() {
     ? folderUri.split('/').filter(Boolean).slice(-2).join('/')
     : 'Not set';
 
+  const importTitle =
+    importMode === 'folder'
+      ? 'Restore from folder'
+      : importMode === 'cloud'
+        ? 'Restore from cloud'
+        : 'Import backup file';
+  const importBody =
+    importMode === 'folder'
+      ? 'Replaces all data with the latest folder backup. Unsaved form drafts will be cleared and screens will reload.'
+      : importMode === 'cloud'
+        ? 'Replaces all data on this device with your latest cloud snapshot (last backup wins). Unsaved form drafts will be cleared and screens will reload.'
+        : 'Replaces all data with the chosen backup file. Unsaved form drafts will be cleared and screens will reload.';
+  const confirmButtonTitle =
+    importMode === 'file' ? 'Choose file & import' : 'Import & replace data';
+
   return (
     <>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -495,41 +466,33 @@ export default function BackupSettingsScreen() {
             <Text style={[localStyles.rowLabel, { color: colors.danger }]}>
               Backup paused after reset
             </Text>
-            <Text style={localStyles.rowMeta}>
-              Do not turn the backup switches on yet. Restore your data with one of the buttons
-              below — auto/cloud backup will turn back on automatically after a successful restore.
-            </Text>
             <View style={localStyles.buttonStack}>
+              {folderSupported ? (
+                <TouchableOpacity
+                  style={localStyles.outlineBtn}
+                  onPress={() => openImportModal('folder')}
+                  disabled={restoring || !folderUri}
+                  activeOpacity={0.7}
+                >
+                  <Text style={localStyles.outlineBtnText}>Restore from folder</Text>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity
                 style={localStyles.outlineBtn}
-                onPress={handleRestoreFromFolder}
-                disabled={restoring || !folderUri}
-                activeOpacity={0.7}
-              >
-                <Text style={localStyles.outlineBtnText}>
-                  {restoring ? 'Importing…' : 'Restore from backup folder'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={localStyles.outlineBtn}
-                onPress={openImportModal}
+                onPress={() => openImportModal('file')}
                 disabled={restoring}
                 activeOpacity={0.7}
               >
-                <Text style={localStyles.outlineBtnText}>
-                  {restoring ? 'Importing…' : 'Import backup file'}
-                </Text>
+                <Text style={localStyles.outlineBtnText}>Import backup file</Text>
               </TouchableOpacity>
               {cloudConfigured && cloudEmail ? (
                 <TouchableOpacity
                   style={localStyles.outlineBtn}
-                  onPress={handleRestoreFromCloud}
+                  onPress={() => openImportModal('cloud')}
                   disabled={restoring || cloudBackingUp}
                   activeOpacity={0.7}
                 >
-                  <Text style={localStyles.outlineBtnText}>
-                    {restoring ? 'Importing…' : 'Restore from cloud'}
-                  </Text>
+                  <Text style={localStyles.outlineBtnText}>Restore from cloud</Text>
                 </TouchableOpacity>
               ) : null}
               {cloudConfigured && !cloudEmail ? (
@@ -554,106 +517,103 @@ export default function BackupSettingsScreen() {
           </View>
         ) : null}
 
-        <SectionHeader title="On this device" />
-        <View style={localStyles.sectionCard}>
-          <TouchableOpacity style={localStyles.settingsRow} onPress={handlePickFolder} activeOpacity={0.7}>
-            <View style={localStyles.rowStack}>
-              <Text style={localStyles.rowLabel}>Backup folder</Text>
-              <Text style={localStyles.rowMeta} numberOfLines={1}>
-                {folderLabel}
-              </Text>
-            </View>
-            <Text style={localStyles.rowAction}>Change</Text>
-          </TouchableOpacity>
+        {folderSupported ? (
+          <>
+            <SectionHeader title="On this device" />
+            <View style={localStyles.sectionCard}>
+              <TouchableOpacity
+                style={localStyles.settingsRow}
+                onPress={handlePickFolder}
+                activeOpacity={0.7}
+              >
+                <View style={localStyles.rowStack}>
+                  <Text style={localStyles.rowLabel}>Backup folder</Text>
+                  <Text style={localStyles.rowMeta} numberOfLines={1}>
+                    {folderLabel}
+                  </Text>
+                </View>
+                <Text style={localStyles.rowAction}>Choose</Text>
+              </TouchableOpacity>
 
-          <SettingsDivider color={colors.borderLight} />
-
-          <View style={localStyles.settingsRow}>
-            <View style={localStyles.rowStack}>
-              <Text style={localStyles.rowLabel}>Daily auto backup</Text>
-              <Text style={localStyles.rowMeta}>
-                Once a day when you open/leave the app, plus an OS schedule (~daily) · Last:{' '}
-                {formatLastBackupLabel(lastBackupAt)}
-              </Text>
-            </View>
-            <Switch
-              value={autoBackup}
-              onValueChange={toggleAuto}
-              disabled={backupPaused}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor={colors.surface}
-            />
-          </View>
-
-          {backupError && !backupPaused ? (
-            <>
               <SettingsDivider color={colors.borderLight} />
-              <View style={localStyles.rowStack}>
-                <Text style={[localStyles.rowLabel, { color: colors.danger }]}>
-                  Last backup didn’t complete
-                </Text>
-                <Text style={localStyles.rowMeta}>{backupError.message}</Text>
-              </View>
-            </>
-          ) : null}
 
-          {ledgerError && !backupPaused ? (
-            <>
-              <SettingsDivider color={colors.borderLight} />
-              <View style={localStyles.rowStack}>
-                <Text style={[localStyles.rowLabel, { color: colors.danger }]}>
-                  Last ledger refresh didn’t complete
-                </Text>
-                <Text style={localStyles.rowMeta}>{ledgerError}</Text>
+              <View style={localStyles.settingsRow}>
+                <View style={localStyles.rowStack}>
+                  <Text style={localStyles.rowLabel}>Daily auto backup</Text>
+                  <Text style={localStyles.rowMeta}>
+                    Last: {formatLastBackupLabel(lastBackupAt)}
+                  </Text>
+                </View>
+                <ThemedSwitch
+                  value={autoBackup}
+                  onValueChange={toggleAuto}
+                  disabled={backupPaused}
+                />
               </View>
-            </>
-          ) : null}
 
-          {!backupPaused ? (
-            <View style={localStyles.buttonStack}>
-              <TouchableOpacity
-                style={localStyles.outlineBtn}
-                onPress={handleBackup}
-                disabled={backingUp}
-                activeOpacity={0.7}
-              >
-                <Text style={localStyles.outlineBtnText}>
-                  {backingUp ? 'Backing up…' : 'Back up now'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={localStyles.outlineBtn}
-                onPress={handleExport}
-                disabled={exporting}
-                activeOpacity={0.7}
-              >
-                <Text style={localStyles.outlineBtnText}>
-                  {exporting ? 'Exporting…' : 'Export database file'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={localStyles.outlineBtn}
-                onPress={handleRestoreFromFolder}
-                disabled={restoring || !folderUri}
-                activeOpacity={0.7}
-              >
-                <Text style={localStyles.outlineBtnText}>
-                  {restoring ? 'Importing…' : 'Restore from backup folder'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={localStyles.outlineBtn}
-                onPress={openImportModal}
-                disabled={restoring}
-                activeOpacity={0.7}
-              >
-                <Text style={localStyles.outlineBtnText}>
-                  {restoring ? 'Importing…' : 'Import backup file'}
-                </Text>
-              </TouchableOpacity>
+              {backupError && !backupPaused ? (
+                <>
+                  <SettingsDivider color={colors.borderLight} />
+                  <View style={localStyles.rowStack}>
+                    <Text style={[localStyles.rowLabel, { color: colors.danger }]}>
+                      Last device backup failed
+                    </Text>
+                    <Text style={localStyles.rowMeta}>{backupError.message}</Text>
+                  </View>
+                </>
+              ) : null}
+
+              {!backupPaused ? (
+                <View style={localStyles.buttonStack}>
+                  <TouchableOpacity
+                    style={localStyles.outlineBtn}
+                    onPress={handleBackup}
+                    disabled={backingUp}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={localStyles.outlineBtnText}>
+                      {backingUp ? 'Backing up…' : 'Back up now'}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={localStyles.outlineBtn}
+                    onPress={() => openImportModal('folder')}
+                    disabled={restoring || !folderUri}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={localStyles.outlineBtnText}>Restore from folder</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={localStyles.outlineBtn}
+                    onPress={() => openImportModal('file')}
+                    disabled={restoring}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={localStyles.outlineBtnText}>Import backup file</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
             </View>
-          ) : null}
-        </View>
+          </>
+        ) : (
+          <>
+            <SectionHeader title="On this device" />
+            <View style={localStyles.sectionCard}>
+              {!backupPaused ? (
+                <View style={localStyles.buttonStack}>
+                  <TouchableOpacity
+                    style={localStyles.outlineBtn}
+                    onPress={() => openImportModal('file')}
+                    disabled={restoring}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={localStyles.outlineBtnText}>Import backup file</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </View>
+          </>
+        )}
 
         <SectionHeader title="Cloud" />
         <View style={localStyles.sectionCard}>
@@ -662,32 +622,21 @@ export default function BackupSettingsScreen() {
               <Text style={localStyles.rowLabel}>Cloud backup</Text>
               <Text style={localStyles.rowMeta}>
                 {!cloudConfigured
-                  ? 'Not configured on this build'
+                  ? 'Not configured'
                   : cloudEmail
-                    ? `${cloudEmail} · Last: ${formatLastBackupLabel(lastCloudBackupAt)}`
-                    : `Email + password · Last: ${formatLastBackupLabel(lastCloudBackupAt)}`}
+                    ? `${cloudEmail} · ${formatLastBackupLabel(lastCloudBackupAt)}`
+                    : formatLastBackupLabel(lastCloudBackupAt)}
+              </Text>
+              <Text style={[localStyles.rowMeta, { marginTop: 4 }]}>
+                Full database snapshot only — not multi-device sync. Restore replaces all data on this
+                device (last backup wins).
               </Text>
             </View>
-            <Switch
+            <ThemedSwitch
               value={cloudBackup && Boolean(cloudEmail)}
               onValueChange={toggleCloudBackup}
               disabled={!cloudConfigured || backupPaused}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor={colors.surface}
             />
-          </View>
-
-          <Text style={[localStyles.rowMeta, { marginBottom: spacing.sm }]}>
-            Personal backup only — not multi-device sync. Last upload wins.
-            {isCloudOwnerLockEnabled()
-              ? ` Locked to ${getCloudOwnerEmail()}.`
-              : ' Set EXPO_PUBLIC_CLOUD_OWNER_EMAIL in .env to lock this build to your email.'}
-          </Text>
-
-          <SettingsDivider color={colors.borderLight} />
-          <View style={localStyles.rowStack}>
-            <Text style={localStyles.rowLabel}>OS daily schedule</Text>
-            <Text style={localStyles.rowMeta}>{osScheduleLabel}</Text>
           </View>
 
           {cloudBackupError && !backupPaused ? (
@@ -695,7 +644,7 @@ export default function BackupSettingsScreen() {
               <SettingsDivider color={colors.borderLight} />
               <View style={localStyles.rowStack}>
                 <Text style={[localStyles.rowLabel, { color: colors.danger }]}>
-                  Last cloud backup didn’t complete
+                  Last cloud backup failed
                 </Text>
                 <Text style={localStyles.rowMeta}>{cloudBackupError.message}</Text>
               </View>
@@ -710,7 +659,7 @@ export default function BackupSettingsScreen() {
                   onPress={openCloudAuthModal}
                   activeOpacity={0.7}
                 >
-                  <Text style={localStyles.outlineBtnText}>Sign in for cloud backup</Text>
+                  <Text style={localStyles.outlineBtnText}>Sign in</Text>
                 </TouchableOpacity>
               ) : (
                 <>
@@ -721,18 +670,16 @@ export default function BackupSettingsScreen() {
                     activeOpacity={0.7}
                   >
                     <Text style={localStyles.outlineBtnText}>
-                      {cloudBackingUp ? 'Uploading…' : 'Back up to cloud now'}
+                      {cloudBackingUp ? 'Uploading…' : 'Back up now'}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={localStyles.outlineBtn}
-                    onPress={handleRestoreFromCloud}
+                    onPress={() => openImportModal('cloud')}
                     disabled={restoring || cloudBackingUp}
                     activeOpacity={0.7}
                   >
-                    <Text style={localStyles.outlineBtnText}>
-                      {restoring ? 'Importing…' : 'Restore from cloud'}
-                    </Text>
+                    <Text style={localStyles.outlineBtnText}>Restore from cloud</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={localStyles.outlineBtn}
@@ -741,29 +688,45 @@ export default function BackupSettingsScreen() {
                   >
                     <Text style={localStyles.outlineBtnText}>Sign out</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={localStyles.outlineBtn}
-                    onPress={handleDeleteCloudBackup}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[localStyles.outlineBtnText, { color: colors.danger }]}>
-                      Delete cloud backup
-                    </Text>
-                  </TouchableOpacity>
                 </>
               )}
             </View>
           ) : null}
+        </View>
+
+        <SectionHeader title="More" />
+        <View style={localStyles.sectionCard}>
+          <View style={localStyles.buttonStack}>
+            <TouchableOpacity
+              style={localStyles.outlineBtn}
+              onPress={handleExport}
+              disabled={exporting}
+              activeOpacity={0.7}
+            >
+              <Text style={localStyles.outlineBtnText}>
+                {exporting ? 'Exporting…' : 'Export database file'}
+              </Text>
+            </TouchableOpacity>
+            {cloudConfigured && cloudEmail && !backupPaused ? (
+              <TouchableOpacity
+                style={localStyles.dangerBtn}
+                onPress={handleDeleteCloudBackup}
+                activeOpacity={0.7}
+              >
+                <Text style={localStyles.dangerText}>Delete cloud backup</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          <Text style={[localStyles.rowMeta, { marginTop: spacing.sm }]}>{osScheduleLabel}</Text>
         </View>
       </ScrollView>
 
       <Modal visible={importModalOpen} transparent animationType="fade" onRequestClose={closeImportModal}>
         <Pressable style={localStyles.modalBackdrop} onPress={closeImportModal}>
           <Pressable style={localStyles.modalSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={localStyles.modalTitle}>Import backup</Text>
+            <Text style={localStyles.modalTitle}>{importTitle}</Text>
             <Text style={localStyles.modalText}>
-              This replaces all current data with the chosen backup database file (.db). Type{' '}
-              {IMPORT_CONFIRM_TEXT} to confirm.
+              {importBody} Type {IMPORT_CONFIRM_TEXT}.
             </Text>
             <FormInput
               label="Confirmation"
@@ -782,8 +745,8 @@ export default function BackupSettingsScreen() {
               </TouchableOpacity>
               <View style={{ flex: 1 }}>
                 <PrimaryButton
-                  title="Choose file & import"
-                  onPress={handleRestore}
+                  title={confirmButtonTitle}
+                  onPress={handleConfirmRestore}
                   loading={restoring}
                   disabled={!canConfirmImport}
                   variant="danger"
@@ -802,11 +765,11 @@ export default function BackupSettingsScreen() {
       >
         <Pressable style={localStyles.modalBackdrop} onPress={closeCloudAuthModal}>
           <Pressable style={localStyles.modalSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={localStyles.modalTitle}>Cloud backup sign-in</Text>
+            <Text style={localStyles.modalTitle}>Cloud sign-in</Text>
             <Text style={localStyles.modalText}>
               {isCloudOwnerLockEnabled()
-                ? `Sign in as ${getCloudOwnerEmail()} to store a full database backup. Password must be at least ${CLOUD_PASSWORD_MIN_SIGN_IN} characters. Confirm email before the first upload.`
-                : `Sign in with email and password to store a full database backup. Password must be at least ${CLOUD_PASSWORD_MIN_SIGN_IN} characters.`}
+                ? `Sign in as ${getCloudOwnerEmail()}.`
+                : 'Sign in with email and password.'}
             </Text>
             <FormInput
               label="Email"

@@ -21,7 +21,6 @@ import {
   paymentVoucherExists,
   planFifoAllocationsAgainstOpenInvoices,
 } from './paymentVouchers';
-import { normalizeStateToCode, stateCodeFromGstin } from './gst';
 import { getDatabase } from '../db/database';
 import { makeFinancialYearPeriodKey } from '../utils/date';
 import { deferDeleteCacheFile } from '../utils/tempShareFiles';
@@ -35,10 +34,25 @@ import type {
   SaleItem,
 } from '../types';
 
+/** Minimal state helpers for Tally party import (GST math removed). */
+function stateCodeFromGstin(gstin: string | null | undefined): string | null {
+  const cleaned = (gstin ?? '').trim().toUpperCase();
+  if (cleaned.length < 2) return null;
+  const code = cleaned.slice(0, 2);
+  return /^\d{2}$/.test(code) ? code : null;
+}
+
+function normalizeStateToCode(raw: string | null | undefined): string | null {
+  const cleaned = (raw ?? '').trim();
+  if (!cleaned) return null;
+  if (/^\d{2}$/.test(cleaned)) return cleaned;
+  return null;
+}
+
 /**
  * Sample Tally XML for Settings → Share sample.
  * Designed for a clean import: 0 skips, 0 errors on a fresh Hisab DB.
- * Covers: party masters, Tax Invoice, Bill of Supply, stock purchase,
+ * Covers: party masters, Invoice, Bill of Supply, stock purchase,
  * ledger-only purchase, Receipt (Agst Ref + bank/UPI), Payment (Agst Ref),
  * Receipt Advance, Payment on account.
  * No GST rates (avoids requiring business state). No unsupported voucher types.
@@ -930,8 +944,7 @@ export async function importTallyXml(xml: string): Promise<TallyImportResult> {
     }
   }
 
-  // GST invoices need a business state. Infer from the file when Settings is empty
-  // so Tally imports with CGST/SGST do not all fail.
+  // Infer business state from the file when Settings is empty (party state / legacy tax splits).
   if (!(await getBusinessState()) && stateVotes.size > 0) {
     let bestCode = '';
     let bestCount = -1;
@@ -1117,7 +1130,7 @@ export async function importTallyXml(xml: string): Promise<TallyImportResult> {
             product_id: i.product_id,
             qty: i.qty,
             unit_cost: i.unit_cost,
-            gst_rate: i.gst_rate,
+            gst_rate: 0,
             hsn_sac: i.hsn_sac,
           })),
           payments: [],
@@ -1139,7 +1152,7 @@ export async function importTallyXml(xml: string): Promise<TallyImportResult> {
             product_id: i.product_id,
             qty: i.qty,
             unit_price: i.unit_price,
-            gst_rate: invoiceType === 'bos' ? 0 : i.gst_rate,
+            gst_rate: 0,
             hsn_sac: i.hsn_sac,
           })),
           payments: [],

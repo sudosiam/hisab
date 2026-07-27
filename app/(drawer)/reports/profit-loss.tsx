@@ -4,12 +4,10 @@ import {
   Text,
   ScrollView,
   StyleSheet,
-  ActivityIndicator,
   RefreshControl,
   ViewStyle,
   TextStyle,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import {
   getProfitLossReport,
@@ -21,11 +19,14 @@ import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { formatCurrency, formatSignedCurrency } from '../../../src/utils/format';
 import { MoneyText, moneyRowStyles } from '../../../src/components/MoneyText';
 import { ErrorState, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import { ListSkeleton } from '../../../src/components/Skeleton';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { shareProfitLossPdf } from '../../../src/services/reportPdf';
 import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 
 export default function ProfitLossReportScreen() {
   const { refreshKey } = useDatabase();
@@ -61,7 +62,6 @@ export default function ProfitLossReportScreen() {
   const [data, setData] = useState<Awaited<ReturnType<typeof getProfitLossReport>> | null>(null);
   const [comparison, setComparison] = useState<Awaited<ReturnType<typeof getProfitLossComparisonReport>> | null>(null);
   const [expenseRows, setExpenseRows] = useState<Awaited<ReturnType<typeof getExpensesByCategoryReport>>>([]);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [periodLoading, setPeriodLoading] = useState(false);
 
@@ -77,19 +77,12 @@ export default function ProfitLossReportScreen() {
       setData(pl);
       setExpenseRows(categories);
       setComparison(compare);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load report');
     } finally {
       setPeriodLoading(false);
     }
   }, [monthKey, refreshKey]);
 
-  useFocusEffect(
-    useCallback(() => {
-      load();
-    }, [load])
-  );
+  const { booting, error, retry } = useFocusRefresh(load, [monthKey, refreshKey]);
 
   const exportPdf = useCallback(async () => {
     if (!data) return { success: false, message: 'Report not loaded yet.' };
@@ -99,15 +92,15 @@ export default function ProfitLossReportScreen() {
   useReportPdfHeader({ disabled: !data || !!error, onExport: exportPdf });
 
   if (error && !data) {
-    return <ErrorState message={error} onRetry={load} />;
+    return <ErrorState message={error} onRetry={retry} />;
+  }
+
+  if (booting && !data) {
+    return <ListSkeleton />;
   }
 
   if (!data) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <ListSkeleton />;
   }
 
   return (
@@ -119,7 +112,9 @@ export default function ProfitLossReportScreen() {
           refreshing={refreshing}
           onRefresh={() => {
             setRefreshing(true);
-            load().finally(() => setRefreshing(false));
+            load()
+              .catch((e) => alertRefreshFailed(e))
+              .finally(() => setRefreshing(false));
           }}
           colors={[colors.primary]}
           tintColor={colors.primary}
@@ -127,9 +122,6 @@ export default function ProfitLossReportScreen() {
       }
     >
       <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
-      {periodLoading ? (
-        <ActivityIndicator style={{ marginBottom: spacing.sm }} color={colors.primary} />
-      ) : null}
       <View style={[localStyles.card, periodLoading && { opacity: 0.5 }]}>
         <Line localStyles={localStyles} label="Revenue (Sales)" value={data.revenue} />
         <Line localStyles={localStyles} label="Cost of Goods Sold" value={-data.cogs} negative />

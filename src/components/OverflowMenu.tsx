@@ -7,10 +7,12 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
 import { radius, spacing } from '../constants/theme';
+import { HeaderIconButton } from './HeaderIconButton';
 
 export type OverflowAction = {
   label: string;
@@ -21,10 +23,17 @@ export type OverflowAction = {
 interface Props {
   actions: OverflowAction[];
   accessibilityLabel?: string;
+  /** When this is the last (or only) header control. */
+  trailing?: boolean;
 }
 
-export function OverflowMenu({ actions, accessibilityLabel = 'More actions' }: Props) {
+export function OverflowMenu({
+  actions,
+  accessibilityLabel = 'More actions',
+  trailing = true,
+}: Props) {
   const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
 
@@ -36,6 +45,7 @@ export function OverflowMenu({ actions, accessibilityLabel = 'More actions' }: P
 
   const openMenu = useCallback(() => {
     if (actions.length === 0) return;
+    void import('../utils/haptics').then((m) => m.hapticLight());
 
     if (Platform.OS === 'ios') {
       const destructiveIndexes = actions
@@ -64,26 +74,33 @@ export function OverflowMenu({ actions, accessibilityLabel = 'More actions' }: P
 
   return (
     <>
-      <Pressable
+      <HeaderIconButton
+        name="ellipsis-vertical"
+        tintColor={colors.headerText}
         onPress={openMenu}
-        hitSlop={8}
-        accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
-        style={({ pressed }) => [styles.trigger, pressed ? { opacity: 0.65 } : null]}
-      >
-        <Ionicons name="ellipsis-vertical" size={20} color={colors.primary} />
-      </Pressable>
+        trailing={trailing}
+      />
 
       {Platform.OS !== 'ios' ? (
-        <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
           <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-            <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <Pressable
+              style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <View style={styles.grabber} />
               {actions.map((action, index) => (
                 <TouchableOpacity
                   key={`${action.label}-${index}`}
                   style={[styles.option, index < actions.length - 1 && styles.optionBorder]}
-                  onPress={() => runAction(action)}
-                  activeOpacity={0.7}
+                  onPress={() => {
+                    void import('../utils/haptics').then((m) =>
+                      action.destructive ? m.hapticWarning() : m.hapticLight()
+                    );
+                    runAction(action);
+                  }}
+                  activeOpacity={0.75}
                 >
                   <Text
                     style={[
@@ -115,16 +132,9 @@ function createStyles(
   isDark: boolean
 ) {
   return StyleSheet.create({
-    trigger: {
-      width: 40,
-      height: 40,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginRight: 4,
-    },
     backdrop: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.45)',
+      backgroundColor: colors.scrim,
       justifyContent: 'flex-end',
       padding: spacing.md,
     },
@@ -137,6 +147,15 @@ function createStyles(
       overflow: 'hidden',
       borderWidth: isDark ? 1 : 0,
       borderColor: colors.border,
+      paddingTop: spacing.xs,
+    },
+    grabber: {
+      alignSelf: 'center',
+      width: 36,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: colors.border,
+      marginBottom: spacing.xs,
     },
     option: {
       paddingVertical: 14,

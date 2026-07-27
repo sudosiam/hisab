@@ -434,9 +434,7 @@ export interface PurchaseItemInput {
 export interface BusinessProfile {
   business_name: string;
   business_address: string;
-  business_gstin: string;
-  business_state: string;
-  gst_enabled: boolean;
+  business_upi_id: string;
   whatsapp_message_template: string;
 }
 

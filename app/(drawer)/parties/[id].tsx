@@ -5,7 +5,6 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   Alert,
   Linking,
   Platform,
@@ -13,9 +12,12 @@ import {
 import { useLocalSearchParams, useFocusEffect, useRouter, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import {
+  EmptyState,
+  ErrorState,
   FormInput,
   PrimaryButton,
   useScreenStyles,
+  ICON,
 } from '../../../src/components/ui';
 import { StatusBadge } from '../../../src/components/StatusBadge';
 import { StatCard } from '../../../src/components/StatCard';
@@ -33,24 +35,22 @@ import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuar
 import { formatCurrency } from '../../../src/utils/format';
 import { formatDisplayDate, getCurrentMonthKey, getPeriodRange } from '../../../src/utils/date';
 import { formatSqliteError } from '../../../src/db/database';
-import { useDatabase } from '../../../src/context/DatabaseContext';
-import { useGstEnabled } from '../../../src/context/GstContext';
+import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useFinancialYear } from '../../../src/context/FinancialYearContext';
 import { spacing, radius, typography } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import { stateName } from '../../../src/services/gst';
 import type { PartyHistoryItem, PartyStatementLine, PartySummary, PartyType } from '../../../src/types';
 import { MoneyText } from '../../../src/components/MoneyText';
+import { DetailSkeleton } from '../../../src/components/Skeleton';
 
 type Tab = 'statement' | 'history';
 
 export default function PartyDetailScreen() {
-  const gstEnabled = useGstEnabled();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const navigation = useNavigation();
-  const { refresh } = useDatabase();
+  const { refresh } = useDatabaseActions();
   const { fyStartMonth } = useFinancialYear();
   const styles = useScreenStyles();
   const { colors, isDark } = useTheme();
@@ -107,7 +107,7 @@ export default function PartyDetailScreen() {
           justifyContent: 'center',
           gap: spacing.xs,
           paddingVertical: 10,
-          minHeight: 40,
+          minHeight: 44,
           borderRadius: radius.full,
           borderWidth: 0,
           backgroundColor: colors.primaryContainer,
@@ -145,12 +145,6 @@ export default function PartyDetailScreen() {
           textAlign: 'center',
           marginBottom: spacing.sm,
         },
-        kpiRow: {
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: spacing.sm,
-          marginTop: spacing.sm,
-        },
         quickActions: {
           flexDirection: 'row',
           gap: spacing.sm,
@@ -163,10 +157,17 @@ export default function PartyDetailScreen() {
           justifyContent: 'center',
           gap: spacing.xs,
           paddingVertical: 12,
+          minHeight: 44,
           borderRadius: radius.md,
           backgroundColor: colors.primary,
         },
-        quickBtnText: { color: colors.onPrimary, fontWeight: '700', fontSize: 13 },
+        quickBtnText: {
+          color: colors.onPrimary,
+          fontWeight: '700',
+          fontSize: 13,
+          textAlign: 'center',
+          flexShrink: 1,
+        },
         tabRow: {
           flexDirection: 'row',
           marginBottom: spacing.md,
@@ -179,10 +180,12 @@ export default function PartyDetailScreen() {
         tabBtn: {
           flex: 1,
           paddingVertical: 10,
+          minHeight: 44,
           borderRadius: radius.sm,
           alignItems: 'center',
+          justifyContent: 'center',
         },
-        tabBtnActive: { backgroundColor: colors.surface, ...cardSurface(colors, isDark) },
+        tabBtnActive: { backgroundColor: colors.chipActive },
         tabText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
         tabTextActive: { color: colors.primary, fontWeight: '700' },
         sectionCard: {
@@ -290,13 +293,18 @@ export default function PartyDetailScreen() {
           paddingVertical: 10,
           borderRadius: radius.md,
           alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: 44,
           borderWidth: 1,
           borderColor: colors.border,
           backgroundColor: colors.surface,
         },
-        typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-        typeChipText: { fontWeight: '600', color: colors.text },
-        typeChipTextActive: { color: colors.onPrimary },
+        typeChipActive: {
+          backgroundColor: colors.primaryContainer,
+          borderColor: colors.primaryContainer,
+        },
+        typeChipText: { fontWeight: '600', color: colors.text, textAlign: 'center' },
+        typeChipTextActive: { color: colors.onPrimaryContainer, textAlign: 'center' },
         footer: { paddingBottom: spacing.sm, gap: spacing.sm },
         emptyBox: { padding: spacing.xl, alignItems: 'center', gap: spacing.sm },
         emptyText: { color: colors.textSecondary, fontSize: 14, textAlign: 'center' },
@@ -318,8 +326,6 @@ export default function PartyDetailScreen() {
   const [type, setType] = useState<PartyType>('customer');
   const [phone, setPhone] = useState('');
   const [notes, setNotes] = useState('');
-  const [gstin, setGstin] = useState('');
-  const [stateCode, setStateCode] = useState('');
   const [address, setAddress] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -366,8 +372,6 @@ export default function PartyDetailScreen() {
         setType(s.party.type);
         setPhone(s.party.phone ?? '');
         setNotes(s.party.notes ?? '');
-        setGstin(s.party.gstin ?? '');
-        setStateCode(s.party.state ?? '');
         setAddress(s.party.address ?? '');
         setLoading(false);
         const range = getPeriodRange(periodKeyRef.current, fyStartMonthRef.current);
@@ -484,11 +488,9 @@ export default function PartyDetailScreen() {
       type !== party.type ||
       (phone.trim() || '') !== (party.phone ?? '') ||
       (notes.trim() || '') !== (party.notes ?? '') ||
-      (gstin.trim() || '') !== (party.gstin ?? '') ||
-      (stateCode.trim() || '') !== (party.state ?? '') ||
       (address.trim() || '') !== (party.address ?? '')
     );
-  }, [showEdit, summary, name, type, phone, notes, gstin, stateCode, address]);
+  }, [showEdit, summary, name, type, phone, notes, address]);
   useUnsavedChangesGuard(isEditDirty);
 
   const handleSave = async () => {
@@ -504,8 +506,6 @@ export default function PartyDetailScreen() {
         type,
         phone: phone.trim() || undefined,
         notes: notes.trim() || undefined,
-        gstin: gstin.trim() || undefined,
-        state: stateCode.trim() || undefined,
         address: address.trim() || undefined,
       });
       refresh();
@@ -561,29 +561,25 @@ export default function PartyDetailScreen() {
   };
 
   if (rawId === 'index') {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <DetailSkeleton />;
   }
 
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <DetailSkeleton />;
   }
 
-  if (error || !summary) {
+  if (error) {
+    return <ErrorState message={error} onRetry={() => { void load(); }} />;
+  }
+
+  if (!summary) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.cardTitle}>{error ?? 'Party not found'}</Text>
-        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.back()}>
-          <Text style={styles.link}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
+      <EmptyState
+        title="Not found"
+        message="This record is missing or was deleted."
+        actionLabel="Go Back"
+        onAction={() => router.back()}
+      />
     );
   }
 
@@ -626,9 +622,9 @@ export default function PartyDetailScreen() {
             accessibilityRole="button"
             accessibilityLabel={`Call ${party.phone}`}
           >
-            <Ionicons name="call-outline" size={16} color={colors.primary} />
+            <Ionicons name="call-outline" size={ICON.inline} color={colors.primary} />
             <Text style={localStyles.phoneLink}>{party.phone}</Text>
-            <Ionicons name="open-outline" size={14} color={colors.textMuted} />
+            <Ionicons name="open-outline" size={ICON.inline} color={colors.textMuted} />
           </TouchableOpacity>
         ) : null}
         {party.notes ? (
@@ -637,20 +633,8 @@ export default function PartyDetailScreen() {
             <Text style={localStyles.metaText}>{party.notes}</Text>
           </View>
         ) : null}
-        {gstEnabled && party.gstin ? (
-          <View style={localStyles.metaRow}>
-            <Ionicons name="card-outline" size={16} color={colors.textSecondary} />
-            <Text style={localStyles.metaText}>GSTIN: {party.gstin}</Text>
-          </View>
-        ) : null}
-        {gstEnabled && party.state ? (
-          <View style={localStyles.metaRow}>
-            <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
-            <Text style={localStyles.metaText}>
-              State: {stateName(party.state) || party.state}
-            </Text>
-          </View>
-        ) : null}
+        
+        
         {party.address ? (
           <View style={localStyles.metaRow}>
             <Ionicons name="home-outline" size={16} color={colors.textSecondary} />
@@ -682,29 +666,7 @@ export default function PartyDetailScreen() {
           </View>
           <FormInput label="Name" value={name} onChangeText={setName} />
           <FormInput label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-          {gstEnabled ? (
-            <>
-              <FormInput
-                label="GSTIN (optional)"
-                value={gstin}
-                onChangeText={setGstin}
-                placeholder="15-character GSTIN"
-                autoCapitalize="characters"
-              />
-              <FormInput
-                label="State code (optional)"
-                value={stateCode}
-                onChangeText={setStateCode}
-                placeholder="e.g. 27"
-                keyboardType="number-pad"
-                helperText={
-                  stateCode.trim()
-                    ? stateName(stateCode.trim()) || 'Unknown state code'
-                    : '2-digit GST state code'
-                }
-              />
-            </>
-          ) : null}
+          
           <FormInput
             label="Address (optional)"
             value={address}
@@ -728,7 +690,7 @@ export default function PartyDetailScreen() {
             </Text>
           </>
         ) : null}
-        <View style={localStyles.kpiRow}>
+        <View style={styles.detailKpiRow}>
           <StatCard
             label={isCustomer ? 'Receivable' : 'Payable'}
             value={summary.balanceDue}
@@ -803,6 +765,7 @@ export default function PartyDetailScreen() {
           <LedgerTable
             rows={statement}
             emptyText="No transactions in this period."
+            scrollEnabled={false}
           />
         </>
       ) : (
@@ -825,7 +788,7 @@ export default function PartyDetailScreen() {
           ) : (
             history.map((item, index) => {
               const due = item.total_amount - item.paid_amount;
-              const isBos = gstEnabled && item.record_type === 'sale' && item.invoice_type === 'bos';
+              const isBos = item.record_type === 'sale' && item.invoice_type === 'bos';
               return (
                 <TouchableOpacity
                   key={`${item.record_type}-${item.id}`}
@@ -845,9 +808,9 @@ export default function PartyDetailScreen() {
                       <Text style={localStyles.historyInvoice}>{item.invoice_no}</Text>
                       <StatusBadge status={item.status} />
                     </View>
-                    {gstEnabled && item.record_type === 'sale' ? (
+                    {item.record_type === 'sale' ? (
                       <Text style={[localStyles.historyType, isBos && localStyles.historyTypeBos]}>
-                        {isBos ? 'BOS' : 'Tax Invoice'}
+                        {isBos ? 'BOS' : 'Invoice'}
                       </Text>
                     ) : null}
                     <Text style={localStyles.historyMeta}>{formatDisplayDate(item.date)}</Text>

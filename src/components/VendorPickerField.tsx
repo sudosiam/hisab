@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { useDatabase } from '../context/DatabaseContext';
 import { spacing, radius, typography } from '../constants/theme';
+import { FLATLIST_PERF } from '../constants/listPerf';
 import { listPartyNames } from '../services/parties';
 import type { PartyType } from '../types';
 
@@ -184,6 +185,7 @@ export function PartyPickerField({
               keyboardShouldPersistTaps="handled"
               style={styles.list}
               contentContainerStyle={filtered.length === 0 && !showUseQuery ? styles.listEmpty : undefined}
+              {...FLATLIST_PERF}
               ListHeaderComponent={
                 showUseQuery ? (
                   <TouchableOpacity

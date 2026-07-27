@@ -2,15 +2,15 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   Alert,
-  Switch,
 } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
+import { ThemedSwitch } from '../../../src/components/ThemedSwitch';
 import {
+  EmptyState,
+  ErrorState,
   FormInput,
   PrimaryButton,
   SectionHeader,
@@ -18,6 +18,7 @@ import {
   useScreenStyles,
 } from '../../../src/components/ui';
 import { StatCard } from '../../../src/components/StatCard';
+import { DetailSkeleton } from '../../../src/components/Skeleton';
 import { LedgerTable } from '../../../src/components/LedgerTable';
 import {
   deleteAccount,
@@ -29,7 +30,7 @@ import {
 } from '../../../src/services/banking';
 import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { matchesSearch } from '../../../src/utils/search';
-import { useDatabase } from '../../../src/context/DatabaseContext';
+import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
 import { parseRouteId } from '../../../src/utils/route';
@@ -47,7 +48,7 @@ function roundTwo(value: number): number {
 export default function AccountDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { refresh } = useDatabase();
+  const { refresh } = useDatabaseActions();
   const { colors, isDark } = useTheme();
   const styles = useScreenStyles();
   const localStyles = useMemo(
@@ -69,12 +70,6 @@ export default function AccountDetailScreen() {
           borderColor: colors.border,
         },
         badgeText: { fontSize: 11, fontWeight: '600', color: colors.textSecondary },
-        kpiRow: {
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: spacing.sm,
-          marginVertical: spacing.md,
-        },
         actions: {
           flexDirection: 'row',
           paddingHorizontal: spacing.md,
@@ -110,10 +105,15 @@ export default function AccountDetailScreen() {
           marginBottom: spacing.xs,
           borderWidth: 1,
           borderColor: colors.border,
+          minHeight: 44,
+          justifyContent: 'center',
         },
-        chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-        chipText: { color: colors.text, fontSize: 14 },
-        chipTextActive: { color: colors.onPrimary, fontWeight: '600' },
+        chipActive: {
+          backgroundColor: colors.primaryContainer,
+          borderColor: colors.primaryContainer,
+        },
+        chipText: { color: colors.text, fontSize: 14, textAlign: 'center' },
+        chipTextActive: { color: colors.onPrimaryContainer, fontWeight: '600', textAlign: 'center' },
         excludeRow: {
           flexDirection: 'row',
           alignItems: 'center',
@@ -124,7 +124,6 @@ export default function AccountDetailScreen() {
           ...cardSurface(colors, isDark),
         },
         excludeLabel: { fontWeight: '600', fontSize: 14, color: colors.text },
-        excludeHint: { fontSize: 12, color: colors.textSecondary, marginTop: 2, maxWidth: '85%' },
         accountActions: {
           paddingHorizontal: spacing.md,
           gap: spacing.sm,
@@ -253,8 +252,8 @@ export default function AccountDetailScreen() {
     if (!account) return;
     const action = value ? 'Deactivate account' : 'Reactivate account';
     const message = value
-      ? `"${account.name}" will be hidden from new payment pickers and excluded from totals. Existing transaction history stays visible.`
-      : `"${account.name}" will be available for new payments and included in totals again.`;
+      ? `"${account.name}" will be hidden from pickers and totals. History stays visible.`
+      : `"${account.name}" will be available for payments and included in totals again.`;
     Alert.alert(action, message, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -334,21 +333,21 @@ export default function AccountDetailScreen() {
   };
 
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <DetailSkeleton />;
   }
 
-  if (error || !account) {
+  if (error) {
+    return <ErrorState message={error} onRetry={() => { void load(); }} />;
+  }
+
+  if (!account) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.cardTitle}>{error ?? 'Account not found'}</Text>
-        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.back()}>
-          <Text style={styles.link}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
+      <EmptyState
+        title="Not found"
+        message="This record is missing or was deleted."
+        actionLabel="Go Back"
+        onAction={() => router.back()}
+      />
     );
   }
 
@@ -403,7 +402,7 @@ export default function AccountDetailScreen() {
         )}
 
         {!editing ? (
-          <View style={localStyles.kpiRow}>
+          <View style={styles.detailKpiRow}>
             <StatCard label="Balance" value={account.current_balance} color={colors.primary} />
             <StatCard
               label="Money In"
@@ -427,14 +426,10 @@ export default function AccountDetailScreen() {
             <Text style={localStyles.excludeLabel}>
               {isExcluded ? 'Account deactivated' : 'Deactivate this account'}
             </Text>
-            <Text style={localStyles.excludeHint}>
-              Deactivated accounts are hidden from new payment pickers and excluded from totals. History remains visible.
-            </Text>
           </View>
-          <Switch
+          <ThemedSwitch
             value={isExcluded}
             onValueChange={handleExcludeToggle}
-            trackColor={{ false: colors.border, true: colors.primary }}
             accessibilityLabel={isExcluded ? 'Reactivate account' : 'Deactivate account'}
           />
         </View>
@@ -480,23 +475,19 @@ export default function AccountDetailScreen() {
   );
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: spacing.xl }}>
-      {listHeader}
-
-      <Text style={{ marginHorizontal: spacing.md, marginBottom: spacing.xs, fontSize: 12, color: colors.textSecondary }}>
-        Long-press a row to delete a transaction.
-      </Text>
-
-      <View style={{ paddingHorizontal: spacing.md }}>
-        <LedgerTable
-          rows={ledgerRows}
-          emptyText={
-            search.trim() ? 'No transactions match your search.' : 'No transactions for this account'
-          }
-          onRowLongPress={(row) => handleDeleteRow(row.id)}
-          rowActionHint="Long-press to delete"
-        />
-      </View>
-    </ScrollView>
+    <LedgerTable
+      style={styles.container}
+      contentContainerStyle={{ paddingBottom: spacing.xl, paddingHorizontal: spacing.md }}
+      rows={ledgerRows}
+      emptyText={
+        search.trim() ? 'No transactions match your search.' : 'No transactions for this account'
+      }
+      onRowLongPress={(row) => handleDeleteRow(row.id)}
+      ListHeaderComponent={
+        <>
+          <View style={{ marginHorizontal: -spacing.md }}>{listHeader}</View>
+        </>
+      }
+    />
   );
 }

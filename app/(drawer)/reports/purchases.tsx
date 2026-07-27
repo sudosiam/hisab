@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
+import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getPurchaseReport, sumReportAmounts } from '../../../src/services/reports';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -8,15 +8,17 @@ import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { StatusBadge } from '../../../src/components/StatusBadge';
 import { ReportRow } from '../../../src/components/ReportRow';
 import { MoneyText } from '../../../src/components/MoneyText';
-import { ErrorState, useScreenStyles } from '../../../src/components/ui';
+import { ListSkeleton } from '../../../src/components/Skeleton';
+import { ErrorState, EmptyState, useScreenStyles } from '../../../src/components/ui';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { sharePurchaseReportPdf } from '../../../src/services/reportPdf';
 import { formatDisplayDate, isFinancialYearPeriodKey } from '../../../src/utils/date';
-import { formatSqliteError } from '../../../src/db/database';
+import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
-import { FLATLIST_PERF } from '../../../src/constants/listPerf';
+import { FLATLIST_PERF, listCardGetItemLayout } from '../../../src/constants/listPerf';
+import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 
 export default function PurchaseReportScreen() {
   const router = useRouter();
@@ -44,28 +46,24 @@ export default function PurchaseReportScreen() {
   );
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [rows, setRows] = useState<Awaited<ReturnType<typeof getPurchaseReport>>>([]);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [booting, setBooting] = useState(true);
 
   const load = useCallback(async () => {
     void refreshKey;
-    try {
-      setRows(await getPurchaseReport(monthKey));
-      setError(null);
-    } catch (e) {
-      setError(formatSqliteError(e));
-    } finally {
-      setBooting(false);
-    }
+    setRows(await getPurchaseReport(monthKey));
   }, [monthKey, refreshKey]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const { booting, error, retry } = useFocusRefresh(load, [monthKey, refreshKey]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
-    setRefreshing(false);
+    try {
+      await load();
+    } catch (e) {
+      alertRefreshFailed(e);
+    } finally {
+      setRefreshing(false);
+    }
   }, [load]);
 
   const total = sumReportAmounts(rows);
@@ -77,16 +75,12 @@ export default function PurchaseReportScreen() {
 
   useReportPdfHeader({ disabled: !!error, onExport: exportPdf });
 
-  if (error) {
-    return <ErrorState message={error} onRetry={load} />;
+  if (error && rows.length === 0) {
+    return <ErrorState message={error} onRetry={retry} />;
   }
 
-  if (booting) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+  if (booting && rows.length === 0) {
+    return <ListSkeleton />;
   }
 
   return (
@@ -105,7 +99,15 @@ export default function PurchaseReportScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
-        ListEmptyComponent={<Text style={styles.empty}>{emptyLabel}</Text>}
+        ListEmptyComponent={
+          <EmptyState
+            title="No purchases"
+            message={emptyLabel}
+            actionLabel="New Purchase"
+            onAction={() => router.push('/(drawer)/purchases/new' as never)}
+          />
+        }
+        getItemLayout={listCardGetItemLayout}
         {...FLATLIST_PERF}
         renderItem={({ item }) => (
           <ReportRow

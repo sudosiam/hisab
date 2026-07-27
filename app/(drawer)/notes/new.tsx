@@ -1,4 +1,4 @@
-import React, { useDeferredValue, useMemo, useState } from 'react';
+import React, { useDeferredValue, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import {
   FormInput,
@@ -13,26 +14,31 @@ import {
   PrimaryButton,
   DatePickerField,
   SectionHeader,
+  SegmentedControl,
   useScreenStyles,
+  ICON,
 } from '../../../src/components/ui';
 import { CustomerAutocomplete } from '../../../src/components/CustomerAutocomplete';
 import { ProductPicker } from '../../../src/components/ProductPicker';
-import { GstRateChips } from '../../../src/components/GstRateChips';
+import { DraftBanner } from '../../../src/components/DraftBanner';
 import { getProducts, getProductSellPrice } from '../../../src/services/inventory';
 import { createAdjustmentNote } from '../../../src/services/adjustmentNotes';
 import { getPartyByName } from '../../../src/services/parties';
 import { getPurchaseById, getPurchaseItems } from '../../../src/services/purchases';
 import { getSaleById, getSaleItems } from '../../../src/services/sales';
-import { getBusinessState, isTaxInclusivePricing } from '../../../src/services/appSettings';
-import { useGstEnabled } from '../../../src/context/GstContext';
-import { computeGstDocument, resolveStateFromPartyFields } from '../../../src/services/gst';
+import { computeUntaxedDocument } from '../../../src/services/documentTotals';
+import { DRAFT_KEYS, loadDraft, type NoteFormDraft } from '../../../src/services/formDrafts';
+import { useFormDraft } from '../../../src/hooks/useFormDraft';
+import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
-import { formatAmountInput, formatCurrency, parseAmountInput } from '../../../src/utils/format';
+import { formatAmountInput, parseAmountInput } from '../../../src/utils/format';
+import { MoneyText } from '../../../src/components/MoneyText';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
 import { parseRouteId } from '../../../src/utils/route';
-import { spacing, radius } from '../../../src/constants/theme';
+import { alertLoadFailed } from '../../../src/utils/uiFeedback';
+import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import type {
   AdjustmentNoteDirection,
@@ -46,7 +52,6 @@ interface LineItem {
   description: string;
   qty: string;
   unit_price: string;
-  gst_rate: string;
   hsn_sac: string;
 }
 
@@ -59,7 +64,6 @@ function createEmptyLineItem(): LineItem {
     description: '',
     qty: '1',
     unit_price: '',
-    gst_rate: '',
     hsn_sac: '',
   };
 }
@@ -72,6 +76,25 @@ function parseDirectionParam(value: string | string[] | undefined): AdjustmentNo
   return value === 'purchase' ? 'purchase' : 'sale';
 }
 
+function isNoteDraftEmpty(d: NoteFormDraft): boolean {
+  const hasText = d.partyName.trim() || d.reason.trim() || d.notes.trim();
+  if (hasText) return false;
+  if (d.items.length === 0) return true;
+  if (
+    d.items.some(
+      (item) =>
+        item.product_id > 0 ||
+        item.description.trim() ||
+        item.unit_price.trim() ||
+        item.qty !== '1' ||
+        item.hsn_sac.trim()
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export default function NewNoteScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -82,29 +105,19 @@ export default function NewNoteScreen() {
   }>();
   const { refresh, refreshKey } = useDatabase();
   const styles = useScreenStyles();
+
   const { colors, isDark } = useTheme();
 
   const initialKind = parseKindParam(params.kind);
   const initialDirection = parseDirectionParam(params.direction);
   const againstSaleId = parseRouteId(params.againstSaleId);
   const againstPurchaseId = parseRouteId(params.againstPurchaseId);
+  const draftsEnabled = !againstSaleId && !againstPurchaseId;
+  const leaveBypassRef = useRef(false);
 
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        segmentRow: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.sm },
-        segmentChip: {
-          flex: 1,
-          paddingVertical: 8,
-          borderRadius: radius.sm,
-          borderWidth: 1,
-          borderColor: colors.border,
-          alignItems: 'center',
-          backgroundColor: colors.surface,
-        },
-        segmentChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-        segmentText: { fontWeight: '600', color: colors.text, fontSize: 13 },
-        segmentTextActive: { color: colors.onPrimary },
         linkedBanner: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
@@ -121,8 +134,7 @@ export default function NewNoteScreen() {
         itemRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs },
         qtyField: { flex: 0.85 },
         priceField: { flex: 1.1 },
-        removeBtn: { padding: spacing.sm, marginBottom: spacing.md },
-        removeText: { color: colors.danger, fontSize: 16 },
+        removeBtn: { padding: spacing.sm, marginBottom: spacing.md, alignItems: 'center', justifyContent: 'center' },
         totals: {
           ...cardSurface(colors, isDark),
           paddingHorizontal: spacing.md,
@@ -162,13 +174,60 @@ export default function NewNoteScreen() {
   const [items, setItems] = useState<LineItem[]>(() => [createEmptyLineItem()]);
   const [loading, setLoading] = useState(false);
   const [prefillDone, setPrefillDone] = useState(false);
-  const [businessState, setBusinessState] = useState('');
-  const gstEnabled = useGstEnabled();
-  const [taxInclusive, setTaxInclusive] = useState(false);
-  const [partyState, setPartyState] = useState<string | null>(null);
-  const [placeOfSupply, setPlaceOfSupply] = useState<string | null>(null);
   const productsRef = React.useRef<Product[]>([]);
   productsRef.current = products;
+
+  const draftPayload = useMemo<NoteFormDraft>(
+    () => ({
+      noteKind,
+      direction,
+      partyName,
+      date,
+      reason,
+      notes,
+      items,
+    }),
+    [noteKind, direction, partyName, date, reason, notes, items]
+  );
+
+  const { markReady, discardDraft, clearDraftOnSave, hasDraft, noteDraftLoaded } = useFormDraft(
+    DRAFT_KEYS.noteNew,
+    draftPayload,
+    { enabled: draftsEnabled, isEmpty: isNoteDraftEmpty }
+  );
+
+  useUnsavedChangesGuard(
+    draftsEnabled && (!isNoteDraftEmpty(draftPayload) || hasDraft),
+    {
+      bypassRef: leaveBypassRef,
+      message: 'You have an unsaved note draft that will be lost.',
+    }
+  );
+
+  const resetForm = () => {
+    setNoteKind(initialKind);
+    setDirection(initialDirection);
+    setPartyName('');
+    setPartyId(null);
+    setDate(todayISO());
+    setReason('');
+    setNotes('');
+    setItems([createEmptyLineItem()]);
+  };
+
+  const handleDiscardDraft = () => {
+    Alert.alert('Discard draft?', 'Your unsaved note will be cleared.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: async () => {
+          await discardDraft();
+          resetForm();
+        },
+      },
+    ]);
+  };
 
   useFocusEffect(
     React.useCallback(() => {
@@ -178,24 +237,9 @@ export default function NewNoteScreen() {
           productsRef.current = p;
           setProducts(p);
         })
-        .catch(() => {});
+        .catch((e) => alertLoadFailed(e));
     }, [refreshKey])
   );
-
-  React.useEffect(() => {
-    let cancelled = false;
-    Promise.all([getBusinessState(), isTaxInclusivePricing()])
-      .then(([state, inclusive]) => {
-        if (!cancelled) {
-          setBusinessState(state);
-          setTaxInclusive(inclusive);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   React.useEffect(() => {
     if (prefillDone) return;
@@ -213,7 +257,6 @@ export default function NewNoteScreen() {
           setLinkedPurchaseId(null);
           setPartyName(sale.party_name);
           setPartyId(sale.party_id);
-          setPlaceOfSupply(sale.place_of_supply);
           setLinkedInvoiceNo(sale.invoice_no);
           setItems(
             saleItems.map((item) => ({
@@ -222,7 +265,6 @@ export default function NewNoteScreen() {
               description: item.product_name ?? '',
               qty: String(item.qty),
               unit_price: formatAmountInput(item.unit_price),
-              gst_rate: (item.gst_rate ?? 0) > 0 ? formatAmountInput(item.gst_rate ?? 0) : '',
               hsn_sac: item.hsn_sac ?? '',
             }))
           );
@@ -237,7 +279,6 @@ export default function NewNoteScreen() {
           setLinkedSaleId(null);
           setPartyName(purchase.supplier_name);
           setPartyId(purchase.party_id);
-          setPlaceOfSupply(purchase.place_of_supply);
           setLinkedInvoiceNo(purchase.invoice_no);
           setItems(
             purchaseItems.map((item) => ({
@@ -246,42 +287,71 @@ export default function NewNoteScreen() {
               description: item.product_name ?? '',
               qty: String(item.qty),
               unit_price: formatAmountInput(item.unit_cost),
-              gst_rate: (item.gst_rate ?? 0) > 0 ? formatAmountInput(item.gst_rate ?? 0) : '',
               hsn_sac: item.hsn_sac ?? '',
             }))
           );
+        } else if (draftsEnabled) {
+          const draft = await loadDraft<NoteFormDraft>(DRAFT_KEYS.noteNew);
+          if (cancelled) return;
+          if (draft && !isNoteDraftEmpty(draft)) {
+            setNoteKind(draft.noteKind === 'debit' ? 'debit' : 'credit');
+            setDirection(draft.direction === 'purchase' ? 'purchase' : 'sale');
+            setPartyName(draft.partyName || '');
+            setDate(isValidISODate(draft.date) ? draft.date : todayISO());
+            setReason(draft.reason || '');
+            setNotes(draft.notes || '');
+            setItems(
+              draft.items?.length
+                ? draft.items.map((item) => ({
+                    key: item.key || `note-item-${Date.now()}-${++lineItemCounter}`,
+                    product_id: item.product_id || 0,
+                    description: item.description || '',
+                    qty: item.qty || '1',
+                    unit_price: item.unit_price || '',
+                    hsn_sac: item.hsn_sac || '',
+                  }))
+                : [createEmptyLineItem()]
+            );
+            noteDraftLoaded();
+          }
         }
       } catch (e) {
-        if (!cancelled) Alert.alert('Error', formatSqliteError(e));
+        if (!cancelled) alertLoadFailed(e);
       } finally {
-        if (!cancelled) setPrefillDone(true);
+        if (!cancelled) {
+          setPrefillDone(true);
+          markReady();
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [againstSaleId, againstPurchaseId, prefillDone]);
+  }, [
+    againstSaleId,
+    againstPurchaseId,
+    draftsEnabled,
+    prefillDone,
+    markReady,
+    noteDraftLoaded,
+  ]);
 
   React.useEffect(() => {
     let cancelled = false;
     const name = partyName.trim();
     if (!name) {
-      setPartyState(null);
+      setPartyId(null);
       return;
     }
     const partyType = direction === 'sale' ? 'customer' : 'vendor';
     getPartyByName(name, partyType)
       .then((party) => {
         if (cancelled) return;
-        if (party) {
-          setPartyId(party.id);
-          setPartyState(resolveStateFromPartyFields(party.state, party.gstin));
-        } else {
-          setPartyId(null);
-          setPartyState(null);
-        }
+        setPartyId(party?.id ?? null);
       })
-      .catch(() => {});
+      .catch((e) => {
+        if (!cancelled) alertLoadFailed(e);
+      });
     return () => {
       cancelled = true;
     };
@@ -289,29 +359,23 @@ export default function NewNoteScreen() {
 
   const deferredItems = useDeferredValue(items);
 
-  const gstDoc = useMemo(() => {
+  const docTotals = useMemo(() => {
     try {
-      return computeGstDocument({
+      return computeUntaxedDocument({
         lines: deferredItems.map((item) => ({
           qty: parseAmountInput(item.qty) || 0,
           unit_price: parseAmountInput(item.unit_price) || 0,
-          gst_rate: parseAmountInput(item.gst_rate) || 0,
           hsn_sac: item.hsn_sac.trim() || null,
         })),
         discount_amount: 0,
         service_charges: 0,
-        business_state: businessState || null,
-        party_state: partyState,
-        place_of_supply: placeOfSupply ?? undefined,
-        gst_enabled: gstEnabled,
-        tax_inclusive: taxInclusive,
       });
     } catch {
       return null;
     }
-  }, [deferredItems, businessState, partyState, placeOfSupply, gstEnabled, taxInclusive]);
+  }, [deferredItems]);
 
-  const total = gstDoc?.total_amount ?? 0;
+  const total = docTotals?.total_amount ?? 0;
 
   const addItem = () => setItems([...items, createEmptyLineItem()]);
 
@@ -329,8 +393,6 @@ export default function NewNoteScreen() {
         updated[index].unit_price = formatAmountInput(
           direction === 'sale' ? getProductSellPrice(product) : product.avg_cost
         );
-        updated[index].gst_rate =
-          (product.gst_rate ?? 0) > 0 ? formatAmountInput(product.gst_rate ?? 0) : '';
         updated[index].hsn_sac = product.hsn_sac ?? '';
       }
     }
@@ -377,7 +439,6 @@ export default function NewNoteScreen() {
         description: item.description.trim() || null,
         qty,
         unit_price: unitPrice,
-        gst_rate: parseAmountInput(item.gst_rate) || 0,
         hsn_sac: item.hsn_sac.trim() || null,
       });
     }
@@ -396,6 +457,10 @@ export default function NewNoteScreen() {
         notes: notes.trim() || undefined,
         items: parsedItems,
       });
+      leaveBypassRef.current = true;
+      if (draftsEnabled) {
+        await clearDraftOnSave();
+      }
       refresh();
       router.replace(`/(drawer)/notes/${noteId}` as never);
     } catch (e) {
@@ -409,42 +474,34 @@ export default function NewNoteScreen() {
 
   return (
     <FormScreen>
+      <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
+      <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: spacing.sm }}>
+        Adjusts party ledger (AR/AP and revenue/purchases). Does not change stock or the linked
+        invoice due amount — record a stock adjustment or payment separately if needed.
+      </Text>
       <SectionHeader title="Note type" />
-      <View style={localStyles.segmentRow}>
-        {(['credit', 'debit'] as const).map((k) => (
-          <TouchableOpacity
-            key={k}
-            style={[localStyles.segmentChip, noteKind === k && localStyles.segmentChipActive]}
-            onPress={() => setNoteKind(k)}
-          >
-            <Text style={[localStyles.segmentText, noteKind === k && localStyles.segmentTextActive]}>
-              {k === 'credit' ? 'Credit' : 'Debit'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      <SegmentedControl
+        options={[
+          { value: 'credit', label: 'Credit' },
+          { value: 'debit', label: 'Debit' },
+        ]}
+        value={noteKind}
+        onChange={setNoteKind}
+      />
 
       <SectionHeader title="Direction" />
-      <View style={localStyles.segmentRow}>
-        {(['sale', 'purchase'] as const).map((d) => (
-          <TouchableOpacity
-            key={d}
-            style={[
-              localStyles.segmentChip,
-              direction === d && localStyles.segmentChipActive,
-              !!(linkedSaleId || linkedPurchaseId) && localStyles.segmentChip,
-            ]}
-            onPress={() => {
-              if (linkedSaleId || linkedPurchaseId) return;
-              setDirection(d);
-            }}
-            disabled={!!(linkedSaleId || linkedPurchaseId)}
-          >
-            <Text style={[localStyles.segmentText, direction === d && localStyles.segmentTextActive]}>
-              {d === 'sale' ? 'Sales' : 'Purchase'}
-            </Text>
-          </TouchableOpacity>
-        ))}
+      <View
+        style={{ opacity: linkedSaleId || linkedPurchaseId ? 0.5 : 1 }}
+        pointerEvents={linkedSaleId || linkedPurchaseId ? 'none' : 'auto'}
+      >
+        <SegmentedControl
+          options={[
+            { value: 'sale', label: 'Sales' },
+            { value: 'purchase', label: 'Purchase' },
+          ]}
+          value={direction}
+          onChange={setDirection}
+        />
       </View>
 
       {linkedInvoiceNo ? (
@@ -497,52 +554,26 @@ export default function NewNoteScreen() {
                 money
               />
             </View>
-            <TouchableOpacity style={localStyles.removeBtn} onPress={() => removeItem(index)}>
-              <Text style={localStyles.removeText}>✕</Text>
+            <TouchableOpacity
+              style={localStyles.removeBtn}
+              onPress={() => removeItem(index)}
+              accessibilityRole="button"
+              accessibilityLabel="Remove line item"
+            >
+              <Ionicons name="close" size={ICON.inline} color={colors.danger} />
             </TouchableOpacity>
           </View>
-          {gstEnabled ? (
-            <>
-              <GstRateChips
-                value={item.gst_rate}
-                onChange={(v) => updateItem(index, 'gst_rate', v)}
-              />
-              <FormInput
-                label="HSN/SAC"
-                value={item.hsn_sac}
-                onChangeText={(v) => updateItem(index, 'hsn_sac', v)}
-              />
-            </>
-          ) : null}
         </View>
       ))}
       <TouchableOpacity onPress={addItem} style={{ marginBottom: spacing.sm }}>
         <Text style={styles.link}>+ Add item</Text>
       </TouchableOpacity>
 
-      {gstDoc ? (
+      {docTotals ? (
         <View style={localStyles.totals}>
-          {gstEnabled ? (
-            <View style={localStyles.totalRow}>
-              <Text style={localStyles.totalLabel}>Taxable</Text>
-              <Text style={localStyles.totalValue}>{formatCurrency(gstDoc.taxable_amount)}</Text>
-            </View>
-          ) : null}
-          {gstEnabled &&
-          (gstDoc.cgst_amount ?? 0) + (gstDoc.sgst_amount ?? 0) + (gstDoc.igst_amount ?? 0) >
-            0.009 ? (
-            <View style={localStyles.totalRow}>
-              <Text style={localStyles.totalLabel}>Tax</Text>
-              <Text style={localStyles.totalValue}>
-                {formatCurrency(
-                  (gstDoc.cgst_amount ?? 0) + (gstDoc.sgst_amount ?? 0) + (gstDoc.igst_amount ?? 0)
-                )}
-              </Text>
-            </View>
-          ) : null}
           <View style={localStyles.totalRow}>
             <Text style={localStyles.totalLabel}>Total</Text>
-            <Text style={localStyles.grandTotal}>{formatCurrency(total)}</Text>
+            <MoneyText amount={total} size="lg" color={colors.primary} />
           </View>
         </View>
       ) : null}

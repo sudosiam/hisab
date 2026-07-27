@@ -1,12 +1,14 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { View, Text, StyleSheet } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
+  EmptyState,
   ErrorState,
   FormScreen,
   SectionHeader,
 } from '../../../src/components/ui';
 import { MoneyText } from '../../../src/components/MoneyText';
+import { DetailSkeleton } from '../../../src/components/Skeleton';
 import { getPaymentVoucherById } from '../../../src/services/paymentVouchers';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
@@ -32,6 +34,7 @@ function billTypeLabel(type: string): string {
 
 export default function PaymentDetailScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
+  const router = useRouter();
   const { refreshKey } = useDatabase();
   const { colors, isDark } = useTheme();
   const local = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
@@ -57,11 +60,24 @@ export default function PaymentDetailScreen() {
 
   const { booting, error, retry } = useFocusRefresh(load, [refreshKey, voucherId]);
 
-  if (error) return <ErrorState message={error} onRetry={retry} />;
   if (booting && !voucher) {
-    return <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />;
+    return <DetailSkeleton />;
   }
-  if (!voucher) return <ErrorState message="Payment not found" onRetry={retry} />;
+
+  if (error) {
+    return <ErrorState message={error} onRetry={retry} />;
+  }
+
+  if (!voucher) {
+    return (
+      <EmptyState
+        title="Not found"
+        message="This record is missing or was deleted."
+        actionLabel="Go Back"
+        onAction={() => router.back()}
+      />
+    );
+  }
 
   const isIn = voucher.voucher_type === 'receipt';
 
@@ -130,6 +146,12 @@ export default function PaymentDetailScreen() {
           ))}
         </View>
       ) : null}
+
+      <View style={local.infoCard}>
+        <Text style={local.infoText}>
+          This voucher is view-only. To correct it, record a reversing entry.
+        </Text>
+      </View>
     </FormScreen>
   );
 }
@@ -167,6 +189,16 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       fontWeight: '600',
       color: colors.text,
       fontVariant: ['tabular-nums'],
+    },
+    infoCard: {
+      ...cardSurface(colors, isDark),
+      padding: spacing.md,
+      marginBottom: spacing.md,
+    },
+    infoText: {
+      fontSize: 13,
+      color: colors.textMuted,
+      lineHeight: 19,
     },
   });
 }

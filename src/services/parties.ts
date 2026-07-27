@@ -438,8 +438,7 @@ export async function upsertParty(
     [trimmed, type]
   );
   const phoneValue = phone?.trim() || null;
-  const { normalizePartyStateForSave } = await import('./gst');
-  const normalizedState = normalizePartyStateForSave(options?.state, null);
+  const normalizedState = options?.state?.trim().slice(0, 2) || null;
 
   if (existing) {
     if (phoneValue) {
@@ -499,14 +498,7 @@ export async function createParty(params: {
   }
 
   const gstin = params.gstin?.trim().toUpperCase() || null;
-  if (gstin) {
-    const { isValidGstin } = await import('./gst');
-    if (!isValidGstin(gstin)) {
-      throw new Error('Enter a valid 15-character GSTIN');
-    }
-  }
-  const { normalizePartyStateForSave } = await import('./gst');
-  const derivedState = normalizePartyStateForSave(params.state, gstin);
+  const derivedState = params.state?.trim().slice(0, 2) || null;
 
   const result = await db.runAsync(
     'INSERT INTO parties (name, type, phone, notes, gstin, state, address) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -567,14 +559,7 @@ export async function updateParty(
 
   await db.withTransactionAsync(async () => {
     const gstin = params.gstin?.trim().toUpperCase() || null;
-    if (gstin) {
-      const { isValidGstin } = await import('./gst');
-      if (!isValidGstin(gstin)) {
-        throw new Error('Enter a valid 15-character GSTIN');
-      }
-    }
-    const { normalizePartyStateForSave } = await import('./gst');
-    const derivedState = normalizePartyStateForSave(params.state, gstin);
+    const derivedState = params.state?.trim().slice(0, 2) || null;
     await db.runAsync(
       'UPDATE parties SET name = ?, type = ?, phone = ?, notes = ?, gstin = ?, state = ?, address = ? WHERE id = ?',
       [
