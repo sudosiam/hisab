@@ -25,13 +25,20 @@ import {
   ACTIVE_OPACITY,
 } from '../../src/components/ui';
 import { ThemedPressable } from '../../src/components/ThemedPressable';
+import { DashboardTrendPanel } from '../../src/components/DashboardTrendPanel';
 import { getRecentActivitiesGrouped } from '../../src/services/activity';
-import { getDashboardStats, type AccountingBasis } from '../../src/services/dashboard';
+import {
+  getDashboardDailyTrend,
+  getDashboardStats,
+  type AccountingBasis,
+  type DashboardDailyTrend,
+} from '../../src/services/dashboard';
 import { getPeriodSectionTitle } from '../../src/utils/date';
 import { useDatabase } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
 import { useSyncedPeriodKey } from '../../src/hooks/useSyncedPeriodKey';
+import { useFinancialYear } from '../../src/context/FinancialYearContext';
 import { radius, spacing, typography } from '../../src/constants/theme';
 import { cardSurface } from '../../src/constants/shadows';
 import type { GroupedRecentActivity } from '../../src/services/activity';
@@ -44,11 +51,13 @@ export default function DashboardScreen() {
   const router = useRouter();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { refreshKey } = useDatabase();
+  const { fyRevision } = useFinancialYear();
   const { colors, isDark } = useTheme();
   const styles = useScreenStyles();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [debouncedRefreshKey, setDebouncedRefreshKey] = useState(refreshKey);
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [trend, setTrend] = useState<DashboardDailyTrend | null>(null);
   const [activities, setActivities] = useState<GroupedRecentActivity>({
     sales: [],
     purchases: [],
@@ -208,15 +217,22 @@ export default function DashboardScreen() {
   }, [navigation, basis, local, colors.headerText, setAccountingBasis]);
 
   const load = useCallback(async () => {
-    const [data, recent] = await Promise.all([
+    const [data, recent, monthly] = await Promise.all([
       getDashboardStats(monthKey, basis),
       getRecentActivitiesGrouped(5),
+      getDashboardDailyTrend(monthKey, basis),
     ]);
     setStats(data);
     setActivities(recent);
+    setTrend(monthly);
   }, [monthKey, basis]);
 
-  const { booting, error, retry } = useFocusRefresh(load, [debouncedRefreshKey, monthKey, basis]);
+  const { booting, error, retry } = useFocusRefresh(load, [
+    debouncedRefreshKey,
+    monthKey,
+    basis,
+    fyRevision,
+  ]);
 
   const periodTitle =
     basis === 'cash'
@@ -327,6 +343,10 @@ export default function DashboardScreen() {
 
       <View style={local.sectionBlock}>
         <DashboardShortcuts />
+      </View>
+
+      <View style={local.sectionBlock}>
+        <DashboardTrendPanel trend={trend} amountsHidden={amountsHidden} />
       </View>
 
       <View style={local.sectionBlock}>

@@ -1280,55 +1280,93 @@ interface ShortcutItem {
   label: string;
   route: string;
   icon: React.ComponentProps<typeof Ionicons>['name'];
+  colorKey?: keyof Pick<
+    ThemeColors,
+    'primary' | 'success' | 'warning' | 'danger' | 'primaryLight'
+  >;
 }
 
 const FINANCE_SHORTCUTS: ShortcutItem[] = [
-  { label: 'P & L', route: '/(drawer)/reports/profit-loss', icon: 'trending-up-outline' },
-  { label: 'Balance Sheet', route: '/(drawer)/balance-sheet', icon: 'scale-outline' },
-  { label: 'Transfer', route: '/(drawer)/banking/transfer', icon: 'swap-horizontal-outline' },
-  { label: 'Banking', route: '/(drawer)/banking', icon: 'wallet-outline' },
+  { label: 'P & L', route: '/(drawer)/reports/profit-loss', icon: 'trending-up-outline', colorKey: 'success' },
+  { label: 'Balance Sheet', route: '/(drawer)/balance-sheet', icon: 'scale-outline', colorKey: 'primary' },
+  { label: 'Transfer', route: '/(drawer)/banking/transfer', icon: 'swap-horizontal-outline', colorKey: 'warning' },
+  { label: 'Banking', route: '/(drawer)/banking', icon: 'wallet-outline', colorKey: 'primaryLight' },
 ];
 
 const OPS_SHORTCUTS: ShortcutItem[] = [
-  { label: 'New Sale', route: '/(drawer)/sales/new', icon: 'cart-outline' },
-  { label: 'Purchase', route: '/(drawer)/purchases/new', icon: 'bag-handle-outline' },
-  { label: 'Payment', route: '/(drawer)/payments/new', icon: 'cash-outline' },
-  { label: 'Expense', route: '/(drawer)/expense/new', icon: 'receipt-outline' },
+  { label: 'New Sale', route: '/(drawer)/sales/new', icon: 'cart-outline', colorKey: 'primary' },
+  { label: 'Purchase', route: '/(drawer)/purchases/new', icon: 'bag-handle-outline', colorKey: 'warning' },
+  { label: 'Payment', route: '/(drawer)/payments/new', icon: 'cash-outline', colorKey: 'success' },
+  { label: 'Expense', route: '/(drawer)/expense/new', icon: 'receipt-outline', colorKey: 'danger' },
 ];
+
+function shortcutTint(hex: string, isDark: boolean) {
+  return hex.length === 7 ? `${hex}${isDark ? '26' : '14'}` : hex;
+}
 
 function ShortcutRow({
   title,
   items,
   styles,
   colors,
+  isDark,
   router,
 }: {
   title: string;
   items: ShortcutItem[];
   styles: ReturnType<typeof createShortcutStyles>;
   colors: ThemeColors;
+  isDark: boolean;
   router: ReturnType<typeof useRouter>;
 }) {
+  const renderCell = (item: ShortcutItem) => {
+    const accent = colors[item.colorKey ?? 'primary'];
+    return (
+      <ThemedPressable
+        key={item.route}
+        style={styles.cell}
+        onPress={() => router.push(item.route as never)}
+        accessibilityLabel={item.label}
+        accessibilityRole="button"
+      >
+        <View style={[styles.iconBadge, { backgroundColor: shortcutTint(accent, isDark) }]}>
+          <Ionicons name={item.icon} size={14} color={accent} />
+        </View>
+        <Text style={styles.itemLabel} numberOfLines={2}>
+          {item.label}
+        </Text>
+      </ThemedPressable>
+    );
+  };
+
+  const top = items.slice(0, 2);
+  const bottom = items.slice(2, 4);
+
   return (
-    <View style={styles.block}>
-      <Text style={styles.heading}>{title}</Text>
-      <View style={styles.row}>
-        {items.map((item) => (
-          <ThemedPressable
-            key={item.route}
-            style={styles.item}
-            onPress={() => router.push(item.route as never)}
-            accessibilityLabel={item.label}
-            accessibilityRole="button"
-          >
-            <View style={styles.iconWrap}>
-              <Ionicons name={item.icon} size={ICON.inline} color={colors.onPrimaryContainer} />
+    <View style={styles.panel}>
+      <SectionHeader title={title} tight />
+      <View style={styles.matrix}>
+        <View style={styles.matrixRow}>
+          {top.map((item, i) => (
+            <React.Fragment key={item.route}>
+              {i > 0 ? <View style={styles.vRule} /> : null}
+              {renderCell(item)}
+            </React.Fragment>
+          ))}
+        </View>
+        {bottom.length > 0 ? (
+          <>
+            <View style={styles.hRule} />
+            <View style={styles.matrixRow}>
+              {bottom.map((item, i) => (
+                <React.Fragment key={item.route}>
+                  {i > 0 ? <View style={styles.vRule} /> : null}
+                  {renderCell(item)}
+                </React.Fragment>
+              ))}
             </View>
-            <Text style={styles.itemLabel} numberOfLines={1}>
-              {item.label}
-            </Text>
-          </ThemedPressable>
-        ))}
+          </>
+        ) : null}
       </View>
     </View>
   );
@@ -1346,6 +1384,7 @@ export function DashboardShortcuts() {
         items={OPS_SHORTCUTS}
         styles={styles}
         colors={colors}
+        isDark={isDark}
         router={router}
       />
       <ShortcutRow
@@ -1353,6 +1392,7 @@ export function DashboardShortcuts() {
         items={FINANCE_SHORTCUTS}
         styles={styles}
         colors={colors}
+        isDark={isDark}
         router={router}
       />
     </View>
@@ -1362,47 +1402,58 @@ export function DashboardShortcuts() {
 function createShortcutStyles(colors: ThemeColors, isDark: boolean) {
   return StyleSheet.create({
     wrap: {
-      marginTop: spacing.sm,
-      marginBottom: spacing.sm,
       gap: spacing.md,
     },
-    block: {
-      gap: spacing.sm,
+    panel: {
+      ...cardSurface(colors, isDark),
+      padding: spacing.md,
+      gap: spacing.md,
     },
-    heading: {
-      ...typography.section,
-      color: colors.textSecondary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
+    matrix: {
+      borderRadius: radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      overflow: 'hidden',
+      backgroundColor: isDark ? colors.surfaceContainer : colors.surfaceContainerHigh,
     },
-    row: {
+    matrixRow: {
       flexDirection: 'row',
-      gap: spacing.sm,
+      alignItems: 'stretch',
     },
-    item: {
+    vRule: {
+      width: StyleSheet.hairlineWidth,
+      backgroundColor: colors.border,
+      alignSelf: 'stretch',
+    },
+    hRule: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.border,
+    },
+    cell: {
       flex: 1,
       minWidth: 0,
-      alignItems: 'center',
-      justifyContent: 'center',
+      minHeight: 64,
       paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.xs,
-      ...cardSurface(colors, isDark),
-      minHeight: 72,
-      gap: spacing.xs,
+      paddingHorizontal: spacing.sm + 2,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
     },
-    iconWrap: {
-      width: 36,
-      height: 36,
-      borderRadius: radius.full,
-      backgroundColor: colors.primaryContainer,
+    iconBadge: {
+      width: 28,
+      height: 28,
+      borderRadius: radius.sm,
       alignItems: 'center',
       justifyContent: 'center',
+      flexShrink: 0,
     },
     itemLabel: {
       ...typography.micro,
       fontWeight: '600',
+      letterSpacing: 0.2,
       color: colors.text,
-      textAlign: 'center',
+      flex: 1,
+      minWidth: 0,
     },
   });
 }

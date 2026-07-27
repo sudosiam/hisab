@@ -167,16 +167,27 @@ export function DashboardSkeleton() {
           gap: 4,
           justifyContent: 'center',
         },
-        actionRow: { flexDirection: 'row', gap: spacing.sm },
+        actionPanel: {
+          ...cardSurface(colors, isDark),
+          padding: spacing.md,
+          gap: spacing.md,
+        },
+        actionMatrix: {
+          borderRadius: radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
+          overflow: 'hidden',
+          backgroundColor: isDark ? colors.surfaceContainer : colors.surfaceContainerHigh,
+        },
+        actionRow: { flexDirection: 'row', alignItems: 'stretch' },
         action: {
           flex: 1,
-          minHeight: 72,
-          borderRadius: radius.lg,
-          backgroundColor: colors.surfaceContainer,
+          minHeight: 64,
+          paddingVertical: spacing.sm,
+          paddingHorizontal: spacing.sm + 2,
+          flexDirection: 'row',
           alignItems: 'center',
-          justifyContent: 'center',
-          gap: 6,
-          padding: spacing.sm,
+          gap: spacing.sm,
         },
       }),
     [colors, isDark]
@@ -264,23 +275,32 @@ export function DashboardSkeleton() {
             </View>
           </View>
         </View>
-        <SkeletonBar width="24%" height={12} />
-        <View style={styles.actionRow}>
-          <View style={styles.action}>
-            <SkeletonBar width={28} height={28} style={{ borderRadius: 14 }} />
-            <SkeletonBar width="70%" height={8} />
-          </View>
-          <View style={styles.action}>
-            <SkeletonBar width={28} height={28} style={{ borderRadius: 14 }} />
-            <SkeletonBar width="70%" height={8} />
-          </View>
-          <View style={styles.action}>
-            <SkeletonBar width={28} height={28} style={{ borderRadius: 14 }} />
-            <SkeletonBar width="70%" height={8} />
-          </View>
-          <View style={styles.action}>
-            <SkeletonBar width={28} height={28} style={{ borderRadius: 14 }} />
-            <SkeletonBar width="70%" height={8} />
+        <View style={styles.actionPanel}>
+          <SkeletonBar width="24%" height={10} />
+          <View style={styles.actionMatrix}>
+            <View style={styles.actionRow}>
+              <View style={styles.action}>
+                <SkeletonBar width={28} height={28} style={{ borderRadius: radius.sm }} />
+                <SkeletonBar width="55%" height={8} />
+              </View>
+              <View style={styles.vRule} />
+              <View style={styles.action}>
+                <SkeletonBar width={28} height={28} style={{ borderRadius: radius.sm }} />
+                <SkeletonBar width="55%" height={8} />
+              </View>
+            </View>
+            <View style={styles.hRule} />
+            <View style={styles.actionRow}>
+              <View style={styles.action}>
+                <SkeletonBar width={28} height={28} style={{ borderRadius: radius.sm }} />
+                <SkeletonBar width="55%" height={8} />
+              </View>
+              <View style={styles.vRule} />
+              <View style={styles.action}>
+                <SkeletonBar width={28} height={28} style={{ borderRadius: radius.sm }} />
+                <SkeletonBar width="55%" height={8} />
+              </View>
+            </View>
           </View>
         </View>
       </View>

@@ -14,12 +14,14 @@ interface Props {
   data: ChartPoint[];
   variant: 'bar' | 'line';
   height?: number;
+  /** For ~30 day charts — only label every few ticks. */
+  denseLabels?: boolean;
 }
 
 const X_LABEL_HEIGHT = 18;
 const PLOT_PADDING = 6;
 
-export function GrowthChart({ data, variant, height = 140 }: Props) {
+export function GrowthChart({ data, variant, height = 140, denseLabels = false }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors, height), [colors, height]);
   const [plotWidth, setPlotWidth] = useState(0);
@@ -33,6 +35,10 @@ export function GrowthChart({ data, variant, height = 140 }: Props) {
     ...d,
     value: Number.isFinite(d.value) ? d.value : 0,
   }));
+
+  const labelStep = denseLabels && safeData.length > 16 ? Math.ceil(safeData.length / 8) : 1;
+  const showLabel = (index: number) =>
+    index === 0 || index === safeData.length - 1 || index % labelStep === 0;
 
   if (safeData.length === 0) {
     return <Text style={styles.empty}>No data yet</Text>;
@@ -118,7 +124,7 @@ export function GrowthChart({ data, variant, height = 140 }: Props) {
           <View style={styles.xLabelRow}>
             {safeData.map((point, index) => (
               <Text key={`${point.label}-${index}`} style={styles.xLabel} numberOfLines={1}>
-                {point.label}
+                {showLabel(index) ? point.label : ''}
               </Text>
             ))}
           </View>
@@ -176,7 +182,7 @@ export function GrowthChart({ data, variant, height = 140 }: Props) {
                     <View style={{ flex: 1 }} />
                   )}
                 </View>
-                <Text style={styles.xLabel}>{point.label}</Text>
+                <Text style={styles.xLabel}>{showLabel(index) ? point.label : ' '}</Text>
               </View>
             );
           })}
