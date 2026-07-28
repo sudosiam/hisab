@@ -1,8 +1,9 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Alert } from 'react-native';
 import { spacing, radius, typography } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { ThemedPressable } from './ThemedPressable';
+import { isAppUpdatesEnabled, reloadToApplyUpdate } from '../services/appUpdates';
 
 interface Props {
   children: React.ReactNode;
@@ -37,6 +38,12 @@ function ErrorFallback({ error, onReset }: { error: Error; onReset: () => void }
           marginBottom: spacing.lg,
           color: colors.textSecondary,
         },
+        actions: {
+          gap: spacing.sm,
+          alignItems: 'center',
+          width: '100%',
+          maxWidth: 280,
+        },
         btn: {
           paddingHorizontal: spacing.lg,
           paddingVertical: spacing.sm,
@@ -46,6 +53,12 @@ function ErrorFallback({ error, onReset }: { error: Error; onReset: () => void }
           minWidth: 140,
           justifyContent: 'center',
           alignItems: 'center',
+          alignSelf: 'stretch',
+        },
+        btnSecondary: {
+          backgroundColor: colors.surfaceContainerHigh,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
         },
         btnText: {
           ...typography.bodyMedium,
@@ -53,22 +66,51 @@ function ErrorFallback({ error, onReset }: { error: Error; onReset: () => void }
           color: colors.onPrimary,
           textAlign: 'center',
         },
+        btnTextSecondary: {
+          color: colors.text,
+        },
       }),
     [colors]
   );
 
+  const onRestart = () => {
+    if (!isAppUpdatesEnabled()) {
+      onReset();
+      return;
+    }
+    void reloadToApplyUpdate().catch((e) => {
+      Alert.alert(
+        'Could not restart',
+        e instanceof Error ? e.message : 'Try closing and reopening Hisab.'
+      );
+    });
+  };
+
   return (
     <View style={styles.center}>
       <Text style={styles.title}>Something went wrong</Text>
-      <Text style={styles.message}>{error.message}</Text>
-      <ThemedPressable
-        style={styles.btn}
-        onPress={onReset}
-        accessibilityRole="button"
-        accessibilityLabel="Try again"
-      >
-        <Text style={styles.btnText}>Try Again</Text>
-      </ThemedPressable>
+      <Text style={styles.message}>
+        Hisab hit an unexpected error. You can try again, or restart the app.
+      </Text>
+      {__DEV__ ? <Text style={styles.message}>{error.message}</Text> : null}
+      <View style={styles.actions}>
+        <ThemedPressable
+          style={styles.btn}
+          onPress={onReset}
+          accessibilityRole="button"
+          accessibilityLabel="Try again"
+        >
+          <Text style={styles.btnText}>Try again</Text>
+        </ThemedPressable>
+        <ThemedPressable
+          style={[styles.btn, styles.btnSecondary]}
+          onPress={onRestart}
+          accessibilityRole="button"
+          accessibilityLabel="Restart app"
+        >
+          <Text style={[styles.btnText, styles.btnTextSecondary]}>Restart app</Text>
+        </ThemedPressable>
+      </View>
     </View>
   );
 }
@@ -78,6 +120,10 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   static getDerivedStateFromError(error: Error): Pick<State, 'error'> {
     return { error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[ErrorBoundary]', error.message, info.componentStack);
   }
 
   private reset = () => {

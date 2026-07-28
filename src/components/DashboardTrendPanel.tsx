@@ -86,7 +86,7 @@ function buildSeries(trend: DashboardDailyTrend, colors: ReturnType<typeof useTh
     },
     {
       key: 'netProfit',
-      label: 'Profit',
+      label: 'Net profit',
       shortLabel: 'Profit',
       color: colors.success,
       values: trend.days.map((d) => d.netProfit),

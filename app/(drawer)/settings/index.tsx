@@ -119,6 +119,11 @@ export default function SettingsIndexScreen() {
     try {
       const message = await checkDownloadAndReload();
       Alert.alert('App update', message);
+    } catch (e) {
+      Alert.alert(
+        'App update',
+        e instanceof Error ? e.message : 'Could not check for updates.'
+      );
     } finally {
       setCheckingUpdate(false);
     }

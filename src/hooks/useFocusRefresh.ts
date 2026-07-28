@@ -14,12 +14,14 @@ export interface FocusRefreshState {
 /**
  * Reload on focus without blanking the screen when data was already shown.
  * First-load failures surface via `error`; later refresh failures alert.
+ * Overlapping loads are ignored via a generation counter.
  */
 export function useFocusRefresh(loader: () => Promise<void>, deps: unknown[]): FocusRefreshState {
   const [booting, setBooting] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const hasShownData = useRef(false);
   const mountedRef = useRef(true);
+  const loadGenRef = useRef(0);
   const loaderRef = useRef(loader);
   loaderRef.current = loader;
 
@@ -30,17 +32,18 @@ export function useFocusRefresh(loader: () => Promise<void>, deps: unknown[]): F
   }, []);
 
   const run = useCallback((isActive: () => boolean) => {
+    const gen = ++loadGenRef.current;
     if (!hasShownData.current) setBooting(true);
 
     loaderRef
       .current()
       .then(() => {
-        if (!isActive()) return;
+        if (!isActive() || gen !== loadGenRef.current) return;
         hasShownData.current = true;
         setError(null);
       })
       .catch((e) => {
-        if (!isActive()) return;
+        if (!isActive() || gen !== loadGenRef.current) return;
         if (!hasShownData.current) {
           setError(e instanceof Error ? e.message : 'Failed to load');
         } else {
@@ -48,7 +51,7 @@ export function useFocusRefresh(loader: () => Promise<void>, deps: unknown[]): F
         }
       })
       .finally(() => {
-        if (isActive()) setBooting(false);
+        if (isActive() && gen === loadGenRef.current) setBooting(false);
       });
   }, []);
 

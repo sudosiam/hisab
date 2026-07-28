@@ -12,7 +12,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useRouter } from 'expo-router';
 import type { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { formatSqliteError } from '../../src/db/database';
-import { StatCard } from '../../src/components/StatCard';
 import { MonthPicker } from '../../src/components/MonthPicker';
 import { RecentActivityList } from '../../src/components/RecentActivityList';
 import { CalculatorHeaderButton } from '../../src/components/QuickCalculator';
@@ -26,6 +25,7 @@ import {
 } from '../../src/components/ui';
 import { ThemedPressable } from '../../src/components/ThemedPressable';
 import { DashboardTrendPanel } from '../../src/components/DashboardTrendPanel';
+import { AnimatedSection } from '../../src/components/AnimatedPresence';
 import { getRecentActivitiesGrouped } from '../../src/services/activity';
 import {
   getDashboardDailyTrend,
@@ -40,7 +40,6 @@ import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
 import { useSyncedPeriodKey } from '../../src/hooks/useSyncedPeriodKey';
 import { useFinancialYear } from '../../src/context/FinancialYearContext';
 import { radius, spacing, typography } from '../../src/constants/theme';
-import { cardSurface } from '../../src/constants/shadows';
 import type { GroupedRecentActivity } from '../../src/services/activity';
 import type { DashboardStats } from '../../src/types';
 
@@ -52,7 +51,7 @@ export default function DashboardScreen() {
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { refreshKey } = useDatabase();
   const { fyRevision } = useFinancialYear();
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const styles = useScreenStyles();
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [debouncedRefreshKey, setDebouncedRefreshKey] = useState(refreshKey);
@@ -119,46 +118,20 @@ export default function DashboardScreen() {
         sectionBlock: {
           marginBottom: spacing.lg,
         },
-        kpiPanel: {
-          ...cardSurface(colors, isDark),
-          padding: spacing.md,
-          gap: spacing.md,
-        },
-        kpiHeader: {
-          marginBottom: 0,
-        },
-        kpiMatrix: {
-          borderRadius: radius.md,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.border,
-          overflow: 'hidden',
-          backgroundColor: isDark ? colors.surfaceContainer : colors.surfaceContainerHigh,
-        },
-        metricRow: {
-          flexDirection: 'row',
-          alignItems: 'stretch',
-        },
-        kpiVRule: {
-          width: StyleSheet.hairlineWidth,
-          backgroundColor: colors.border,
-          alignSelf: 'stretch',
-        },
-        kpiHRule: {
-          height: StyleSheet.hairlineWidth,
-          backgroundColor: colors.border,
-        },
       }),
-    [colors, isDark]
+    [colors]
   );
 
   useEffect(() => {
     void Promise.all([
       AsyncStorage.getItem(AMOUNTS_HIDDEN_KEY),
       AsyncStorage.getItem(ACCOUNTING_BASIS_KEY),
-    ]).then(([hidden, storedBasis]) => {
-      if (hidden === '1') setAmountsHidden(true);
-      if (storedBasis === 'cash' || storedBasis === 'accrual') setBasis(storedBasis);
-    });
+    ])
+      .then(([hidden, storedBasis]) => {
+        if (hidden === '1') setAmountsHidden(true);
+        if (storedBasis === 'cash' || storedBasis === 'accrual') setBasis(storedBasis);
+      })
+      .catch((err) => console.warn('[dashboard] prefs load failed', err));
   }, []);
 
   useEffect(() => {
@@ -169,14 +142,18 @@ export default function DashboardScreen() {
   const toggleAmountsHidden = useCallback(() => {
     setAmountsHidden((prev) => {
       const next = !prev;
-      AsyncStorage.setItem(AMOUNTS_HIDDEN_KEY, next ? '1' : '0');
+      void AsyncStorage.setItem(AMOUNTS_HIDDEN_KEY, next ? '1' : '0').catch((err) =>
+        console.warn('[dashboard] hide amounts save failed', err)
+      );
       return next;
     });
   }, []);
 
   const setAccountingBasis = useCallback((next: AccountingBasis) => {
     setBasis(next);
-    void AsyncStorage.setItem(ACCOUNTING_BASIS_KEY, next);
+    void AsyncStorage.setItem(ACCOUNTING_BASIS_KEY, next).catch((err) =>
+      console.warn('[dashboard] basis save failed', err)
+    );
   }, []);
 
   useLayoutEffect(() => {
@@ -219,7 +196,7 @@ export default function DashboardScreen() {
   const load = useCallback(async () => {
     const [data, recent, monthly] = await Promise.all([
       getDashboardStats(monthKey, basis),
-      getRecentActivitiesGrouped(5),
+      getRecentActivitiesGrouped(5, monthKey),
       getDashboardDailyTrend(monthKey, basis),
     ]);
     setStats(data);
@@ -265,94 +242,43 @@ export default function DashboardScreen() {
         />
       }
     >
-      <View style={local.periodBlock}>
+      <AnimatedSection index={0} style={local.periodBlock}>
         <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
-      </View>
+      </AnimatedSection>
 
       {stats ? (
-        <View style={local.sectionBlock}>
+        <AnimatedSection index={1} style={local.sectionBlock}>
           <FinanceHero
             stats={stats}
             amountsHidden={amountsHidden}
+            periodLabel={periodTitle}
             onToggleAmountsHidden={toggleAmountsHidden}
+            onProfitPress={() => router.push('/(drawer)/reports/profit-loss' as never)}
+            onRevenuePress={() => router.push('/(drawer)/sales' as never)}
+            onPurchasedPress={() => router.push('/(drawer)/purchases' as never)}
+            onOtherIncomePress={() => router.push('/(drawer)/other-income' as never)}
+            onExpensesPress={() => router.push('/(drawer)/expense' as never)}
             onNetWorthPress={() => router.push('/(drawer)/balance-sheet')}
             onCashPress={() => router.push('/(drawer)/banking' as never)}
             onReceivablePress={() => router.push('/(drawer)/reports/receivables' as never)}
             onPayablePress={() => router.push('/(drawer)/reports/payables' as never)}
             onInventoryPress={() => router.push('/(drawer)/inventory' as never)}
           />
-        </View>
+        </AnimatedSection>
       ) : null}
 
-      <View style={local.sectionBlock}>
-        <View style={local.kpiPanel}>
-          <View style={local.kpiHeader}>
-            <SectionHeader title={periodTitle} tight />
-          </View>
-          <View style={local.kpiMatrix}>
-            <View style={local.metricRow}>
-              <StatCard
-                equal
-                variant="matrix"
-                icon="cart-outline"
-                label="Revenue"
-                value={stats?.sold ?? 0}
-                color={colors.primary}
-                onPress={() => router.push('/(drawer)/sales' as never)}
-                blurred={amountsHidden}
-              />
-              <View style={local.kpiVRule} />
-              <StatCard
-                equal
-                variant="matrix"
-                icon="bag-handle-outline"
-                label="Purchased"
-                value={stats?.purchased ?? 0}
-                color={colors.warning}
-                onPress={() => router.push('/(drawer)/purchases' as never)}
-                blurred={amountsHidden}
-              />
-            </View>
-            <View style={local.kpiHRule} />
-            <View style={local.metricRow}>
-              <StatCard
-                equal
-                variant="matrix"
-                icon="cash-outline"
-                label="Other Income"
-                value={stats?.otherIncome ?? 0}
-                color={colors.success}
-                onPress={() => router.push('/(drawer)/other-income' as never)}
-                blurred={amountsHidden}
-              />
-              <View style={local.kpiVRule} />
-              <StatCard
-                equal
-                variant="matrix"
-                icon="receipt-outline"
-                label="Expenses"
-                value={stats?.expense ?? 0}
-                color={colors.danger}
-                onPress={() => router.push('/(drawer)/expense' as never)}
-                blurred={amountsHidden}
-              />
-            </View>
-          </View>
-        </View>
-      </View>
-
-      <View style={local.sectionBlock}>
+      <AnimatedSection index={2} style={local.sectionBlock}>
         <DashboardShortcuts />
-      </View>
+      </AnimatedSection>
 
-      <View style={local.sectionBlock}>
+      <AnimatedSection index={3} style={local.sectionBlock}>
         <DashboardTrendPanel trend={trend} amountsHidden={amountsHidden} />
-      </View>
+      </AnimatedSection>
 
-      <View style={local.sectionBlock}>
-        <SectionHeader title="Recent activity" tight />
+      <AnimatedSection index={4} style={local.sectionBlock}>
+        <SectionHeader title="Recent in period" tight />
         <RecentActivityList grouped={activities} amountsHidden={amountsHidden} />
-      </View>
+      </AnimatedSection>
     </ScrollView>
   );
 }

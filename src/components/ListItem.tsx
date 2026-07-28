@@ -148,6 +148,7 @@ export const ListCard = memo(function ListCard({
         style={[styles.card, style]}
         onPress={onPress}
         activeOpacity={ROW_ACTIVE_OPACITY}
+        scaleOnPress={false}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
       >

@@ -188,9 +188,14 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     let active = true;
-    void getCloudUserEmail().then((email) => {
-      if (active) setCloudRestoreAvailable(Boolean(email));
-    });
+    void getCloudUserEmail()
+      .then((email) => {
+        if (active) setCloudRestoreAvailable(Boolean(email));
+      })
+      .catch((err) => {
+        console.warn('[boot] cloud email check failed', err);
+        if (active) setCloudRestoreAvailable(false);
+      });
     return () => {
       active = false;
     };
@@ -201,7 +206,24 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
 
     const boot = async (allowRetry: boolean) => {
       try {
-        await getDatabase();
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            reject(
+              new Error(
+                'Opening the database is taking too long. Try again or restore a backup.'
+              )
+            );
+          }, 20000);
+          getDatabase()
+            .then(() => {
+              clearTimeout(timer);
+              resolve();
+            })
+            .catch((err) => {
+              clearTimeout(timer);
+              reject(err);
+            });
+        });
         if (!active) return;
         setReady(true);
         setError(null);

@@ -1,4 +1,5 @@
 import { LayoutAnimation, Platform, UIManager } from 'react-native';
+import { motion } from '../constants/motion';
 
 let androidLayoutAnimationEnabled = false;
 
@@ -9,5 +10,18 @@ export function configureExpandAnimation() {
       androidLayoutAnimationEnabled = true;
     }
   }
-  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+  LayoutAnimation.configureNext({
+    duration: motion.layout,
+    create: {
+      type: LayoutAnimation.Types.easeInEaseOut,
+      property: LayoutAnimation.Properties.opacity,
+    },
+    update: {
+      type: LayoutAnimation.Types.easeInEaseOut,
+    },
+    delete: {
+      type: LayoutAnimation.Types.easeInEaseOut,
+      property: LayoutAnimation.Properties.opacity,
+    },
+  });
 }

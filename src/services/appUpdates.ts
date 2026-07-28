@@ -12,6 +12,7 @@ export type UpdateCheckOutcome =
 const FALLBACK_UPDATE_CHANNEL = 'production';
 
 let checkInFlight: Promise<UpdateCheckOutcome> | null = null;
+let downloadInFlight: Promise<UpdateCheckOutcome> | null = null;
 
 function isExpoGo(): boolean {
   return Constants.appOwnership === 'expo';
@@ -104,18 +105,30 @@ export async function downloadAppUpdate(): Promise<UpdateCheckOutcome> {
   if (!isAppUpdatesEnabled()) {
     return { kind: 'disabled', message: updatesDisabledReason() };
   }
-  try {
-    ensureUpdateChannelHeader();
-    const result = await Updates.fetchUpdateAsync();
-    if (!result.isNew) return { kind: 'upToDate' };
-    return { kind: 'available' };
-  } catch (e) {
-    return { kind: 'error', message: formatUpdateError(e) };
-  }
+  if (downloadInFlight) return downloadInFlight;
+
+  downloadInFlight = (async () => {
+    try {
+      ensureUpdateChannelHeader();
+      const result = await Updates.fetchUpdateAsync();
+      if (!result.isNew) return { kind: 'upToDate' as const };
+      return { kind: 'available' as const };
+    } catch (e) {
+      return { kind: 'error' as const, message: formatUpdateError(e) };
+    } finally {
+      downloadInFlight = null;
+    }
+  })();
+
+  return downloadInFlight;
 }
 
 export async function reloadToApplyUpdate(): Promise<void> {
-  await Updates.reloadAsync();
+  try {
+    await Updates.reloadAsync();
+  } catch (e) {
+    throw new Error(formatUpdateError(e));
+  }
 }
 
 /** Check → download → reload when an update exists. Returns a short status for UI. */
@@ -130,6 +143,10 @@ export async function checkDownloadAndReload(): Promise<string> {
   if (downloaded.kind === 'error') return downloaded.message;
   if (downloaded.kind === 'upToDate') return 'You are on the latest version.';
 
-  await reloadToApplyUpdate();
-  return 'Update installed.';
+  try {
+    await reloadToApplyUpdate();
+    return 'Update installed.';
+  } catch (e) {
+    return e instanceof Error ? e.message : formatUpdateError(e);
+  }
 }

@@ -38,6 +38,29 @@ function activeRouteName(
   return state.routes[index]?.name ?? '';
 }
 
+/** Set by dashboard Recent activity so back returns to the drawer history (Dashboard). */
+export function wantsPopToDrawer(params: unknown): boolean {
+  if (!params || typeof params !== 'object') return false;
+  const value = (params as Record<string, unknown>).popToDrawer;
+  return value === true || value === 1 || value === '1';
+}
+
+function leaveDetailToDrawer(navigation: StackNavigation): void {
+  const parent = navigation.getParent();
+  if (parent?.canGoBack()) {
+    parent.goBack();
+  } else {
+    parent?.navigate('index');
+  }
+  // Reset after leaving so the next drawer open lands on the section list.
+  navigation.dispatch(
+    CommonActions.reset({
+      index: 0,
+      routes: [{ name: LIST_ROUTE }],
+    })
+  );
+}
+
 export function useHeaderScreenOptions() {
   const { colors } = useTheme();
   return {
@@ -57,9 +80,12 @@ export function useHeaderScreenOptions() {
     headerLeftContainerStyle: { paddingLeft: 4 },
     headerBackTitleVisible: false,
     headerShadowVisible: false,
-    // Native-stack transitions (GPU) — snappy without JS-driven animation jank.
-    animation: 'slide_from_right' as const,
-    animationDuration: 260,
+    // iOS: system default is the smoothest. Android: directional slide.
+    animation: (Platform.OS === 'ios' ? 'default' : 'slide_from_right') as
+      | 'default'
+      | 'slide_from_right',
+    animationDuration: 350,
+    animationMatchesGesture: true,
     gestureEnabled: true,
     fullScreenGestureEnabled: true,
     freezeOnBlur: true,
@@ -107,6 +133,12 @@ function handleStackBack(navigation: StackNavigation, route?: RouteProp<ParamLis
 
   const state = readNavState(navigation);
   const stackIndex = state?.index ?? 0;
+  const currentParams = route?.params ?? state?.routes?.[stackIndex]?.params;
+  if (wantsPopToDrawer(currentParams)) {
+    leaveDetailToDrawer(navigation);
+    return;
+  }
+
   const previousRouteName = stackIndex > 0 ? state?.routes?.[stackIndex - 1]?.name : undefined;
 
   // Leaving a form (new/edit) should land on the section list, not the blank form.
@@ -138,6 +170,12 @@ export function stackDetailBeforeRemove(
   if (e.data.action.type !== 'GO_BACK' && e.data.action.type !== 'POP') return;
   const state = readNavState(navigation);
   const stackIndex = state?.index ?? 0;
+  const currentParams = state?.routes?.[stackIndex]?.params;
+  if (wantsPopToDrawer(currentParams)) {
+    e.preventDefault();
+    leaveDetailToDrawer(navigation);
+    return;
+  }
   const previousRouteName = stackIndex > 0 ? state?.routes?.[stackIndex - 1]?.name : undefined;
   if (previousRouteName && FORM_ROUTES.has(previousRouteName)) {
     e.preventDefault();
@@ -177,23 +215,35 @@ export function useStackScreenOptions() {
   return (props: {
     navigation: StackNavigation;
     route?: RouteProp<ParamListBase>;
-  }) => ({
-    ...base,
-    headerLeft: (backProps: React.ComponentProps<typeof HeaderBackButton>) => {
-      const { navigation, route } = props;
-      if (shouldShowDrawerMenu(navigation, route)) {
-        return <DrawerMenuButton tintColor={colors.headerText} />;
-      }
-      return (
-        <HeaderBackButton
-          {...backProps}
-          tintColor={colors.headerText}
-          onPress={() => handleStackBack(navigation, route)}
-        />
-      );
-    },
-    headerRight: () => <CalculatorHeaderButton tintColor={colors.headerText} />,
-  });
+  }) => {
+    const routeName = props.route?.name ?? activeRouteName(props.navigation, props.route);
+    const isForm = FORM_ROUTES.has(routeName);
+
+    return {
+      ...base,
+      // Forms rise from the bottom; detail/list keep the platform slide.
+      animation: (isForm
+        ? 'slide_from_bottom'
+        : Platform.OS === 'ios'
+          ? 'default'
+          : 'slide_from_right') as 'slide_from_bottom' | 'default' | 'slide_from_right',
+      animationDuration: isForm ? 320 : 350,
+      headerLeft: (backProps: React.ComponentProps<typeof HeaderBackButton>) => {
+        const { navigation, route } = props;
+        if (shouldShowDrawerMenu(navigation, route)) {
+          return <DrawerMenuButton tintColor={colors.headerText} />;
+        }
+        return (
+          <HeaderBackButton
+            {...backProps}
+            tintColor={colors.headerText}
+            onPress={() => handleStackBack(navigation, route)}
+          />
+        );
+      },
+      headerRight: () => <CalculatorHeaderButton tintColor={colors.headerText} />,
+    };
+  };
 }
 
 /** Top-level drawer screens (Dashboard, Settings, etc.). */

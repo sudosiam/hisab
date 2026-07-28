@@ -71,7 +71,7 @@ export function FinancialYearProvider({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     if (!dbReady) return;
-    reload().catch(() => {});
+    reload().catch((err) => console.warn('[fy] reload failed', err));
   }, [dbReady, refreshKey, reload]);
 
   useEffect(() => {
@@ -82,7 +82,7 @@ export function FinancialYearProvider({ children }: { children: React.ReactNode 
         const today = new Date().toISOString().slice(0, 10);
         if (lastForegroundDate.current === today) return;
         lastForegroundDate.current = today;
-        reload().catch(() => {});
+        reload().catch((err) => console.warn('[fy] foreground reload failed', err));
       }
     });
 

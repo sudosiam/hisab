@@ -41,7 +41,10 @@ function openActivityDetail(
         state: {
           routes: [
             { name: 'index' },
-            { name: '[id]', params: { id: String(item.refId) } },
+            {
+              name: '[id]',
+              params: { id: String(item.refId), popToDrawer: '1' },
+            },
           ],
           index: 1,
         },
@@ -78,6 +81,7 @@ const ActivityRow = memo(function ActivityRow({
       style={[styles.row, isLast && styles.rowLast]}
       onPress={() => openActivityDetail(navigation, item)}
       activeOpacity={ACTIVE_OPACITY}
+      scaleOnPress={false}
       accessibilityRole="button"
       accessibilityLabel={activityAccessibilityLabel(item)}
     >
@@ -125,7 +129,7 @@ export function RecentActivityList({
     if (!hasAny) {
       return (
         <View style={styles.emptyBox}>
-          <Text style={styles.empty}>No recent activity yet.</Text>
+          <Text style={styles.empty}>No activity in this period.</Text>
         </View>
       );
     }

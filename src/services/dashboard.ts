@@ -94,6 +94,33 @@ export async function getDashboardDailyTrend(
            AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = p.id)
          GROUP BY p.date`;
 
+  // Cash profit must match getPeriodFinancials: cash in − payment-prorated COGS − exp + other.
+  // Accrual uses sale-date COGS. Do not use purchase payments as a COGS substitute.
+  const cogsSql =
+    basis === 'cash'
+      ? `SELECT sp.date as day, COALESCE(SUM(
+           (
+             SELECT COALESCE(SUM(${SALE_LINE_UNIT_COST_SQL} * si.qty), 0)
+             FROM sale_items si
+             JOIN products p ON p.id = si.product_id
+             WHERE si.sale_id = s.id
+           ) * (sp.amount / NULLIF(s.total_amount, 0))
+         ), 0) as total
+         FROM sale_payments sp
+         JOIN sales s ON s.id = sp.sale_id
+         JOIN accounts a ON a.id = sp.account_id
+         WHERE sp.date >= ? AND sp.date <= ?
+           AND COALESCE(a.is_excluded, 0) = 0
+           AND s.total_amount > 0
+         GROUP BY sp.date`
+      : `SELECT s.date as day, COALESCE(SUM(
+           ${SALE_LINE_UNIT_COST_SQL} * si.qty
+         ), 0) as total
+         FROM sale_items si JOIN sales s ON s.id = si.sale_id
+         JOIN products p ON p.id = si.product_id
+         WHERE s.date >= ? AND s.date <= ?
+         GROUP BY s.date`;
+
   const [salesRows, purchaseRows, expenseRows, cogsRows, otherRows] = await Promise.all([
     db.getAllAsync<{ day: string; total: number }>(salesSql, [start, end]),
     db.getAllAsync<{ day: string; total: number }>(purchasesSql, [start, end]),
@@ -105,16 +132,7 @@ export async function getDashboardDailyTrend(
        GROUP BY e.date`,
       [start, end]
     ),
-    db.getAllAsync<{ day: string; total: number }>(
-      `SELECT s.date as day, COALESCE(SUM(
-         ${SALE_LINE_UNIT_COST_SQL} * si.qty
-       ), 0) as total
-       FROM sale_items si JOIN sales s ON s.id = si.sale_id
-       JOIN products p ON p.id = si.product_id
-       WHERE s.date >= ? AND s.date <= ?
-       GROUP BY s.date`,
-      [start, end]
-    ),
+    db.getAllAsync<{ day: string; total: number }>(cogsSql, [start, end]),
     db.getAllAsync<{ day: string; total: number }>(
       `SELECT oi.date as day, COALESCE(SUM(oi.amount), 0) as total
        FROM other_income oi
@@ -137,10 +155,7 @@ export async function getDashboardDailyTrend(
     const expenses = expenseMap.get(date) ?? 0;
     const cogs = cogsMap.get(date) ?? 0;
     const otherIncome = otherMap.get(date) ?? 0;
-    const netProfit =
-      basis === 'cash'
-        ? roundMoney(sales - purchases - expenses + otherIncome)
-        : roundMoney(sales - cogs - expenses + otherIncome);
+    const netProfit = roundMoney(sales - cogs - expenses + otherIncome);
 
     return {
       date,

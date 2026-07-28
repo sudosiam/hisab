@@ -31,7 +31,12 @@ function PendingUpdatePrompt() {
         {
           text: 'Restart now',
           onPress: () => {
-            void reloadToApplyUpdate();
+            void reloadToApplyUpdate().catch((e) => {
+              Alert.alert(
+                'Could not restart',
+                e instanceof Error ? e.message : 'Try closing and reopening Hisab.'
+              );
+            });
           },
         },
       ]
@@ -57,6 +62,8 @@ function ThemedStack() {
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: colors.background },
+        animation: 'fade',
+        animationDuration: 220,
       }}
     />
   );
@@ -72,7 +79,9 @@ export default function RootLayout() {
               <FinancialYearProvider>
                 <ThemedStatusBar />
                 <PendingUpdatePrompt />
-                <ThemedStack />
+                <ErrorBoundary>
+                  <ThemedStack />
+                </ErrorBoundary>
               </FinancialYearProvider>
             </DatabaseProvider>
           </ErrorBoundary>

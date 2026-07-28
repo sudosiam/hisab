@@ -135,6 +135,7 @@ export function StatCard({
         style={cardStyle}
         onPress={onPress}
         activeOpacity={ACTIVE_OPACITY}
+        scaleOnPress={variant !== 'matrix'}
         accessibilityRole="button"
         accessibilityLabel={label}
       >

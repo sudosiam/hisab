@@ -41,12 +41,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         if (stored === 'light' || stored === 'dark' || stored === 'system') {
           setThemeModeState(stored);
         }
-      });
+      })
+      .catch((err) => console.warn('[theme] load failed', err));
   }, []);
 
   const setThemeMode = useCallback((mode: ThemeMode) => {
     setThemeModeState(mode);
-    AsyncStorage.setItem(STORAGE_KEY, mode);
+    void AsyncStorage.setItem(STORAGE_KEY, mode).catch((err) =>
+      console.warn('[theme] save failed', err)
+    );
   }, []);
 
   const isDark =

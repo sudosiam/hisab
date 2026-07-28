@@ -24,6 +24,7 @@ import { StatCard } from './StatCard';
 import type { DashboardStats } from '../types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedPressable, ACTIVE_OPACITY } from './ThemedPressable';
+import { AnimatedScreenBody } from './AnimatedPresence';
 
 export { ThemedPressable, ACTIVE_OPACITY };
 export const ICON = { nav: 20, inline: 18, chevron: 16 } as const;
@@ -299,21 +300,34 @@ function createButtonStyles(colors: ThemeColors, isDark: boolean) {
 export function FinanceHero({
   stats,
   amountsHidden = false,
+  periodLabel,
   onToggleAmountsHidden,
   onNetWorthPress,
   onCashPress,
   onReceivablePress,
   onPayablePress,
   onInventoryPress,
+  onProfitPress,
+  onRevenuePress,
+  onPurchasedPress,
+  onOtherIncomePress,
+  onExpensesPress,
 }: {
   stats: DashboardStats;
   amountsHidden?: boolean;
+  /** Period title for P&L cells, e.g. "This Month · Cash". */
+  periodLabel?: string;
   onToggleAmountsHidden?: () => void;
   onNetWorthPress?: () => void;
   onCashPress?: () => void;
   onReceivablePress?: () => void;
   onPayablePress?: () => void;
   onInventoryPress?: () => void;
+  onProfitPress?: () => void;
+  onRevenuePress?: () => void;
+  onPurchasedPress?: () => void;
+  onOtherIncomePress?: () => void;
+  onExpensesPress?: () => void;
 }) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(
@@ -374,7 +388,7 @@ export function FinanceHero({
     <View style={styles.panel}>
       <View style={styles.header}>
         <View style={styles.headerTitle}>
-          <SectionHeader title="Overview" tight />
+          <SectionHeader title={periodLabel ?? 'This period'} tight />
         </View>
         {onToggleAmountsHidden ? (
           <ThemedPressable
@@ -404,6 +418,7 @@ export function FinanceHero({
             value={stats.netProfit}
             color={netProfitColor}
             valueColor={netProfitColor}
+            onPress={onProfitPress}
             blurred={amountsHidden}
           />
           <View style={styles.vRule} />
@@ -414,10 +429,61 @@ export function FinanceHero({
             label="Gross profit"
             value={stats.grossProfit}
             color={colors.primary}
+            onPress={onProfitPress}
+            blurred={amountsHidden}
+          />
+        </View>
+        <View style={styles.hRule} />
+        <View style={styles.matrixRow}>
+          <StatCard
+            equal
+            variant="matrix"
+            icon="cart-outline"
+            label="Revenue"
+            value={stats.sold}
+            color={colors.primary}
+            onPress={onRevenuePress}
+            blurred={amountsHidden}
+          />
+          <View style={styles.vRule} />
+          <StatCard
+            equal
+            variant="matrix"
+            icon="bag-handle-outline"
+            label="Purchases"
+            value={stats.purchased}
+            color={colors.warning}
+            onPress={onPurchasedPress}
+            blurred={amountsHidden}
+          />
+        </View>
+        <View style={styles.hRule} />
+        <View style={styles.matrixRow}>
+          <StatCard
+            equal
+            variant="matrix"
+            icon="cash-outline"
+            label="Other income"
+            value={stats.otherIncome}
+            color={colors.success}
+            onPress={onOtherIncomePress}
+            blurred={amountsHidden}
+          />
+          <View style={styles.vRule} />
+          <StatCard
+            equal
+            variant="matrix"
+            icon="receipt-outline"
+            label="Expenses"
+            value={stats.expense}
+            color={colors.danger}
+            onPress={onExpensesPress}
             blurred={amountsHidden}
           />
         </View>
       </View>
+
+      <SectionHeader title="Balances now" tight />
 
       <View style={styles.matrix}>
         <StatCard
@@ -595,7 +661,7 @@ export function FormScreen({
         automaticallyAdjustKeyboardInsets={Platform.OS === 'android'}
         showsVerticalScrollIndicator={false}
       >
-        {children}
+        <AnimatedScreenBody>{children}</AnimatedScreenBody>
         <NumericKeyboardAccessory />
       </ScrollView>
     </KeyboardAvoidingView>
@@ -613,7 +679,7 @@ export function ErrorState({
   const { colors } = useTheme();
   const styles = useScreenStyles();
   return (
-    <View style={styles.center}>
+    <AnimatedScreenBody style={styles.center}>
       <Ionicons name="cloud-offline-outline" size={36} color={colors.textMuted} />
       <Text
         style={{
@@ -656,7 +722,7 @@ export function ErrorState({
           </Text>
         </ThemedPressable>
       ) : null}
-    </View>
+    </AnimatedScreenBody>
   );
 }
 
@@ -674,7 +740,7 @@ export function EmptyState({
   const { colors } = useTheme();
   const styles = useScreenStyles();
   return (
-    <View
+    <AnimatedScreenBody
       style={{
         alignItems: 'center',
         paddingHorizontal: spacing.lg,
@@ -731,7 +797,7 @@ export function EmptyState({
           </Text>
         </ThemedPressable>
       ) : null}
-    </View>
+    </AnimatedScreenBody>
   );
 }
 
@@ -1280,93 +1346,64 @@ interface ShortcutItem {
   label: string;
   route: string;
   icon: React.ComponentProps<typeof Ionicons>['name'];
-  colorKey?: keyof Pick<
-    ThemeColors,
-    'primary' | 'success' | 'warning' | 'danger' | 'primaryLight'
-  >;
 }
 
 const FINANCE_SHORTCUTS: ShortcutItem[] = [
-  { label: 'P & L', route: '/(drawer)/reports/profit-loss', icon: 'trending-up-outline', colorKey: 'success' },
-  { label: 'Balance Sheet', route: '/(drawer)/balance-sheet', icon: 'scale-outline', colorKey: 'primary' },
-  { label: 'Transfer', route: '/(drawer)/banking/transfer', icon: 'swap-horizontal-outline', colorKey: 'warning' },
-  { label: 'Banking', route: '/(drawer)/banking', icon: 'wallet-outline', colorKey: 'primaryLight' },
+  { label: 'P & L', route: '/(drawer)/reports/profit-loss', icon: 'trending-up-outline' },
+  { label: 'Balance Sheet', route: '/(drawer)/balance-sheet', icon: 'scale-outline' },
+  { label: 'Transfer', route: '/(drawer)/banking/transfer', icon: 'swap-horizontal-outline' },
+  { label: 'Banking', route: '/(drawer)/banking', icon: 'wallet-outline' },
 ];
 
 const OPS_SHORTCUTS: ShortcutItem[] = [
-  { label: 'New Sale', route: '/(drawer)/sales/new', icon: 'cart-outline', colorKey: 'primary' },
-  { label: 'Purchase', route: '/(drawer)/purchases/new', icon: 'bag-handle-outline', colorKey: 'warning' },
-  { label: 'Payment', route: '/(drawer)/payments/new', icon: 'cash-outline', colorKey: 'success' },
-  { label: 'Expense', route: '/(drawer)/expense/new', icon: 'receipt-outline', colorKey: 'danger' },
+  { label: 'New Sale', route: '/(drawer)/sales/new', icon: 'cart-outline' },
+  { label: 'Purchase', route: '/(drawer)/purchases/new', icon: 'bag-handle-outline' },
+  { label: 'Payment', route: '/(drawer)/payments/new', icon: 'cash-outline' },
+  { label: 'Expense', route: '/(drawer)/expense/new', icon: 'receipt-outline' },
 ];
-
-function shortcutTint(hex: string, isDark: boolean) {
-  return hex.length === 7 ? `${hex}${isDark ? '26' : '14'}` : hex;
-}
 
 function ShortcutRow({
   title,
   items,
   styles,
   colors,
-  isDark,
   router,
 }: {
   title: string;
   items: ShortcutItem[];
   styles: ReturnType<typeof createShortcutStyles>;
   colors: ThemeColors;
-  isDark: boolean;
   router: ReturnType<typeof useRouter>;
 }) {
-  const renderCell = (item: ShortcutItem) => {
-    const accent = colors[item.colorKey ?? 'primary'];
-    return (
-      <ThemedPressable
-        key={item.route}
-        style={styles.cell}
-        onPress={() => router.push(item.route as never)}
-        accessibilityLabel={item.label}
-        accessibilityRole="button"
-      >
-        <View style={[styles.iconBadge, { backgroundColor: shortcutTint(accent, isDark) }]}>
-          <Ionicons name={item.icon} size={14} color={accent} />
-        </View>
-        <Text style={styles.itemLabel} numberOfLines={2}>
-          {item.label}
-        </Text>
-      </ThemedPressable>
-    );
-  };
-
-  const top = items.slice(0, 2);
-  const bottom = items.slice(2, 4);
+  const rows: ShortcutItem[][] = [];
+  for (let i = 0; i < items.length; i += 2) {
+    rows.push(items.slice(i, i + 2));
+  }
 
   return (
-    <View style={styles.panel}>
+    <View style={styles.section}>
       <SectionHeader title={title} tight />
-      <View style={styles.matrix}>
-        <View style={styles.matrixRow}>
-          {top.map((item, i) => (
-            <React.Fragment key={item.route}>
-              {i > 0 ? <View style={styles.vRule} /> : null}
-              {renderCell(item)}
-            </React.Fragment>
-          ))}
-        </View>
-        {bottom.length > 0 ? (
-          <>
-            <View style={styles.hRule} />
-            <View style={styles.matrixRow}>
-              {bottom.map((item, i) => (
-                <React.Fragment key={item.route}>
-                  {i > 0 ? <View style={styles.vRule} /> : null}
-                  {renderCell(item)}
-                </React.Fragment>
-              ))}
-            </View>
-          </>
-        ) : null}
+      <View style={styles.grid}>
+        {rows.map((row) => (
+          <View key={row.map((i) => i.route).join('|')} style={styles.row}>
+            {row.map((item) => (
+              <ThemedPressable
+                key={item.route}
+                style={styles.button}
+                onPress={() => router.push(item.route as never)}
+                activeOpacity={ACTIVE_OPACITY}
+                accessibilityLabel={item.label}
+                accessibilityRole="button"
+              >
+                <Ionicons name={item.icon} size={18} color={colors.textSecondary} />
+                <Text style={styles.itemLabel} numberOfLines={1}>
+                  {item.label}
+                </Text>
+              </ThemedPressable>
+            ))}
+            {row.length === 1 ? <View style={styles.buttonSpacer} /> : null}
+          </View>
+        ))}
       </View>
     </View>
   );
@@ -1384,7 +1421,6 @@ export function DashboardShortcuts() {
         items={OPS_SHORTCUTS}
         styles={styles}
         colors={colors}
-        isDark={isDark}
         router={router}
       />
       <ShortcutRow
@@ -1392,7 +1428,6 @@ export function DashboardShortcuts() {
         items={FINANCE_SHORTCUTS}
         styles={styles}
         colors={colors}
-        isDark={isDark}
         router={router}
       />
     </View>
@@ -1404,56 +1439,39 @@ function createShortcutStyles(colors: ThemeColors, isDark: boolean) {
     wrap: {
       gap: spacing.md,
     },
-    panel: {
-      ...cardSurface(colors, isDark),
-      padding: spacing.md,
-      gap: spacing.md,
-    },
-    matrix: {
-      borderRadius: radius.md,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.border,
-      overflow: 'hidden',
-      backgroundColor: isDark ? colors.surfaceContainer : colors.surfaceContainerHigh,
-    },
-    matrixRow: {
-      flexDirection: 'row',
-      alignItems: 'stretch',
-    },
-    vRule: {
-      width: StyleSheet.hairlineWidth,
-      backgroundColor: colors.border,
-      alignSelf: 'stretch',
-    },
-    hRule: {
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: colors.border,
-    },
-    cell: {
-      flex: 1,
-      minWidth: 0,
-      minHeight: 64,
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.sm + 2,
-      flexDirection: 'row',
-      alignItems: 'center',
+    section: {
       gap: spacing.sm,
     },
-    iconBadge: {
-      width: 28,
-      height: 28,
-      borderRadius: radius.sm,
+    grid: {
+      gap: spacing.sm,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      gap: spacing.sm,
+    },
+    button: {
+      flex: 1,
+      minHeight: 48,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.full,
+      backgroundColor: isDark ? colors.surfaceContainerHigh : colors.surfaceContainer,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      flexShrink: 0,
+      gap: spacing.xs + 2,
+    },
+    buttonSpacer: {
+      flex: 1,
     },
     itemLabel: {
-      ...typography.micro,
+      ...typography.caption,
       fontWeight: '600',
-      letterSpacing: 0.2,
       color: colors.text,
-      flex: 1,
-      minWidth: 0,
+      flexShrink: 1,
     },
   });
 }
