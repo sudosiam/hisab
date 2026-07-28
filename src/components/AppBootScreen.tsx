@@ -39,10 +39,11 @@ export function AppBootScreen() {
           paddingHorizontal: spacing.xl,
         },
         logo: {
-          width: 88,
-          height: 88,
+          width: 96,
+          height: 96,
           borderRadius: radius.lg,
           marginBottom: spacing.md,
+          backgroundColor: '#000000',
         },
         brand: {
           ...typography.display,

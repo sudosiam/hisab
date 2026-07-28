@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ScreenTitle, SectionHeader, ThemeOption, useScreenStyles } from '../../../src/components/ui';
 import { ThemedSwitch } from '../../../src/components/ThemedSwitch';
@@ -13,6 +13,7 @@ import { checkDownloadAndReload } from '../../../src/services/appUpdates';
 import { isHapticsEnabled, setHapticsEnabled } from '../../../src/services/appSettings';
 import { setHapticsEnabledCache } from '../../../src/utils/haptics';
 import { cardSurface } from '../../../src/constants/shadows';
+import { refreshHomeWidgets } from '../../../src/services/widgetSnapshot';
 
 type SettingsItem = {
   title: string;
@@ -94,6 +95,7 @@ export default function SettingsIndexScreen() {
   const { themeMode, setThemeMode } = useTheme();
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [hapticsOn, setHapticsOn] = useState(true);
+  const [refreshingWidgets, setRefreshingWidgets] = useState(false);
 
   useEffect(() => {
     void isHapticsEnabled().then((enabled) => {
@@ -126,6 +128,22 @@ export default function SettingsIndexScreen() {
       );
     } finally {
       setCheckingUpdate(false);
+    }
+  };
+
+  const onRefreshWidgets = async () => {
+    if (refreshingWidgets) return;
+    setRefreshingWidgets(true);
+    try {
+      await refreshHomeWidgets();
+      Alert.alert('Home widgets', 'Widgets refreshed with the latest numbers.');
+    } catch (e) {
+      Alert.alert(
+        'Home widgets',
+        e instanceof Error ? e.message : 'Could not refresh widgets.'
+      );
+    } finally {
+      setRefreshingWidgets(false);
     }
   };
 
@@ -162,6 +180,32 @@ export default function SettingsIndexScreen() {
 
       <SectionHeader title="Backup & Data" />
       <SettingsSection items={DATA_ITEMS} onPress={(route) => router.push(route as never)} />
+
+      {Platform.OS === 'android' ? (
+        <>
+          <SectionHeader title="Home widgets" />
+          <View style={localStyles.sectionCard}>
+            <Text style={[localStyles.aboutLabel, { marginBottom: 8 }]}>
+              Long-press your home screen → Widgets → Hisab. Available: Overview, Period, Daily
+              Trend, and Quick Actions. Needs the production APK (not Expo Go).
+            </Text>
+            <Text style={[localStyles.aboutValue, { marginBottom: 12, opacity: 0.85 }]}>
+              Overview · Period · Daily trend · New Sale / Payment
+            </Text>
+            <TouchableOpacity
+              style={[localStyles.outlineBtn, { opacity: refreshingWidgets ? 0.6 : 1 }]}
+              onPress={() => void onRefreshWidgets()}
+              disabled={refreshingWidgets}
+              accessibilityRole="button"
+              accessibilityLabel="Refresh home widgets"
+            >
+              <Text style={localStyles.outlineBtnText}>
+                {refreshingWidgets ? 'Refreshing…' : 'Refresh home widgets'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      ) : null}
 
       <SectionHeader title="About" />
       <View style={localStyles.sectionCard}>

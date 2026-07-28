@@ -214,6 +214,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       width: 40,
       height: 40,
       borderRadius: radius.md,
+      backgroundColor: '#000000',
     },
     appName: {
       ...typography.title,

@@ -33,6 +33,7 @@ import {
   type AccountingBasis,
   type DashboardDailyTrend,
 } from '../../src/services/dashboard';
+import { refreshHomeWidgets } from '../../src/services/widgetSnapshot';
 import { getPeriodSectionTitle } from '../../src/utils/date';
 import { useDatabase } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -202,6 +203,7 @@ export default function DashboardScreen() {
     setStats(data);
     setActivities(recent);
     setTrend(monthly);
+    void refreshHomeWidgets();
   }, [monthKey, basis]);
 
   const { booting, error, retry } = useFocusRefresh(load, [

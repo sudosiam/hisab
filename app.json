@@ -2,32 +2,32 @@
   "expo": {
     "name": "Hisab",
     "slug": "hisab",
-    "version": "11.1.0",
+    "version": "11.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "hisab",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0B1731"
+      "backgroundColor": "#000000"
     },
-    "backgroundColor": "#0B1731",
+    "backgroundColor": "#000000",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hisab.app",
-      "buildNumber": "39"
+      "buildNumber": "40"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0B1731",
+        "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png",
         "backgroundImage": "./assets/android-icon-background.png"
       },
       "package": "com.hisab.app",
-      "versionCode": 39,
+      "versionCode": 40,
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize"
     },
@@ -41,7 +41,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#0B1731",
+          "backgroundColor": "#000000",
           "image": "./assets/splash-icon.png",
           "imageWidth": 220,
           "resizeMode": "contain",
@@ -75,7 +75,62 @@
         }
       ],
       "expo-build-properties",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "react-native-android-widget",
+        {
+          "widgets": [
+            {
+              "name": "HisabOverview",
+              "label": "Hisab Overview",
+              "description": "Net profit, cash, receivable and payable",
+              "minWidth": "110dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 2,
+              "targetCellHeight": 2,
+              "previewImage": "./assets/widget-preview/overview.png",
+              "updatePeriodMillis": 1800000,
+              "resizeMode": "horizontal|vertical"
+            },
+            {
+              "name": "HisabPeriod",
+              "label": "Hisab Period",
+              "description": "Revenue, purchases, expenses and net profit",
+              "minWidth": "250dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 4,
+              "targetCellHeight": 2,
+              "previewImage": "./assets/widget-preview/period.png",
+              "updatePeriodMillis": 1800000,
+              "resizeMode": "horizontal|vertical"
+            },
+            {
+              "name": "HisabTrend",
+              "label": "Hisab Daily Trend",
+              "description": "Daily sales chart for the current month",
+              "minWidth": "250dp",
+              "minHeight": "180dp",
+              "targetCellWidth": 4,
+              "targetCellHeight": 3,
+              "previewImage": "./assets/widget-preview/trend.png",
+              "updatePeriodMillis": 1800000,
+              "resizeMode": "horizontal|vertical"
+            },
+            {
+              "name": "HisabActions",
+              "label": "Hisab Quick Actions",
+              "description": "New sale and payment shortcuts",
+              "minWidth": "110dp",
+              "minHeight": "40dp",
+              "targetCellWidth": 2,
+              "targetCellHeight": 1,
+              "previewImage": "./assets/widget-preview/actions.png",
+              "updatePeriodMillis": 0,
+              "resizeMode": "horizontal"
+            }
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

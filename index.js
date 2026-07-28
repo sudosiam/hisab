@@ -9,4 +9,10 @@ enableFreeze(true);
 
 // Define OS backup task in global scope before the app boots.
 import './src/services/backupBackgroundTask';
+
+// Android home-screen widgets — must register before expo-router/entry.
+import { registerWidgetTaskHandler } from 'react-native-android-widget';
+import { widgetTaskHandler } from './src/widgets/widgetTaskHandler';
+registerWidgetTaskHandler(widgetTaskHandler);
+
 import 'expo-router/entry';

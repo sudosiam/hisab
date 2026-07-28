@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, AppState, Alert, InteractionManager, Modal, Pressable, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, AppState, Alert, InteractionManager, Modal, Pressable, TouchableOpacity, Platform } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { AppBootScreen } from '../components/AppBootScreen';
 import {
@@ -317,6 +317,17 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
   const refresh = useCallback(() => {
     setRefreshKey((k) => k + 1);
   }, []);
+
+  // Debounced home-widget sync after DB writes settle (Android custom builds only).
+  useEffect(() => {
+    if (!ready || Platform.OS !== 'android' || refreshKey === 0) return;
+    const timer = setTimeout(() => {
+      void import('../services/widgetSnapshot')
+        .then((m) => m.refreshHomeWidgets())
+        .catch((err) => console.warn('[widgets] debounce refresh failed', err));
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [ready, refreshKey]);
 
   const actionsValue = useMemo<DatabaseActionsValue>(
     () => ({ ready, refresh }),
