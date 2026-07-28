@@ -242,11 +242,11 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       flexDirection: 'row',
       alignItems: 'center',
       marginHorizontal: spacing.sm,
-      marginVertical: 2,
+      marginVertical: 1,
       paddingVertical: spacing.sm,
       paddingHorizontal: spacing.sm,
       minHeight: 44,
-      borderRadius: radius.full,
+      borderRadius: radius.md,
       gap: spacing.sm,
     },
     navItemActive: {

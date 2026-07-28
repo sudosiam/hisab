@@ -2,21 +2,21 @@
 
 import type { HexColor } from 'react-native-android-widget';
 
-/** Shared colors for Android home widgets (high contrast on dark navy). */
+/** Shared colors for Android home widgets — cool minimal, muted blue. */
 export const widgetColors = {
-  bg: '#0B1731',
-  surface: '#13233F',
-  border: '#2A3F5C',
-  text: '#F0F4F8',
-  textMuted: '#8AA0B8',
-  primary: '#D6E3F5',
-  success: '#3DDC97',
-  danger: '#F07178',
-  warning: '#E8A54B',
-  bar: '#2C5282',
-  barProfit: '#1B7F4B',
-  button: '#1E3A5F',
-  buttonText: '#D6E3F5',
+  bg: '#0B0D10',
+  surface: '#12151A',
+  border: '#2A2F38',
+  text: '#F3F4F6',
+  textMuted: '#9CA3AF',
+  primary: '#A8C4E8',
+  success: '#4ADE80',
+  danger: '#F87171',
+  warning: '#FBBF24',
+  bar: '#3B5B84',
+  barProfit: '#2F7A4F',
+  button: '#1A2838',
+  buttonText: '#D5E3F4',
 } as const satisfies Record<string, HexColor>;
 
 export const DEEP_LINKS = {

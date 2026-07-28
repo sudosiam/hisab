@@ -72,9 +72,9 @@ export function useHeaderScreenOptions() {
     headerTintColor: colors.headerText,
     headerTitleStyle: {
       fontWeight: '600' as const,
-      fontSize: 17,
+      fontSize: 16,
       color: colors.headerText,
-      letterSpacing: -0.15,
+      letterSpacing: -0.2,
     },
     headerTitleAlign: 'left' as const,
     headerLeftContainerStyle: { paddingLeft: 4 },

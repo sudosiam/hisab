@@ -84,7 +84,7 @@ export default function DashboardScreen() {
         seg: {
           flexDirection: 'row',
           backgroundColor: colors.surfaceContainerHigh,
-          borderRadius: radius.full,
+          borderRadius: radius.md,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: colors.border,
           padding: 2,
@@ -94,7 +94,7 @@ export default function DashboardScreen() {
         opt: {
           paddingHorizontal: 14,
           paddingVertical: 8,
-          borderRadius: radius.full,
+          borderRadius: radius.sm,
           minHeight: 40,
           minWidth: 72,
           justifyContent: 'center',
@@ -105,13 +105,13 @@ export default function DashboardScreen() {
         },
         optText: {
           ...typography.caption,
-          fontWeight: '600',
+          fontWeight: '500',
           color: colors.textSecondary,
           textAlign: 'center',
         },
         optTextActive: {
           color: colors.onPrimaryContainer,
-          fontWeight: '700',
+          fontWeight: '600',
         },
         periodBlock: {
           marginBottom: spacing.sm,

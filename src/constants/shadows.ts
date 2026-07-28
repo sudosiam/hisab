@@ -1,42 +1,25 @@
 import type { ViewStyle } from 'react-native';
+import { StyleSheet } from 'react-native';
 import type { ThemeColors } from './theme';
 import { radius } from './theme';
 
-/** M3 card — soft elevation in light, tonal border in dark. */
-export function cardSurface(colors: ThemeColors, isDark: boolean): ViewStyle {
+/** Cool minimal card — hairline border, no elevation. */
+export function cardSurface(colors: ThemeColors, _isDark: boolean): ViewStyle {
   return {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
-    borderWidth: isDark ? 1 : 0,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
-    ...(isDark
-      ? {}
-      : {
-          shadowColor: colors.shadow,
-          shadowOffset: { width: 0, height: 1 },
-          shadowOpacity: 0.06,
-          shadowRadius: 4,
-          elevation: 1,
-        }),
   };
 }
 
-/** Slightly raised surface (sheets, hero, elevated cards). */
-export function elevatedSurface(colors: ThemeColors, isDark: boolean): ViewStyle {
+/** Slightly raised surface via tonal fill + hairline (no shadow). */
+export function elevatedSurface(colors: ThemeColors, _isDark: boolean): ViewStyle {
   return {
     backgroundColor: colors.surfaceElevated,
     borderRadius: radius.lg,
-    borderWidth: isDark ? 1 : 0,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
-    ...(isDark
-      ? {}
-      : {
-          shadowColor: colors.shadow,
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.08,
-          shadowRadius: 8,
-          elevation: 2,
-        }),
   };
 }
 
@@ -44,13 +27,13 @@ export function primaryShadow(_isDark: boolean): ViewStyle {
   return {};
 }
 
-/** Circular FAB elevation (Material 3). */
+/** Soft FAB elevation — only intentional shadow in the system. */
 export function fabShadow(isDark: boolean, shadowColor: string): ViewStyle {
   return {
     shadowColor,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: isDark ? 0.35 : 0.16,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: isDark ? 0.28 : 0.1,
+    shadowRadius: 6,
+    elevation: 3,
   };
 }

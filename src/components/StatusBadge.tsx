@@ -33,13 +33,13 @@ function createStyles(_colors: ReturnType<typeof useTheme>['colors']) {
     badge: {
       paddingHorizontal: 8,
       paddingVertical: 3,
-      borderRadius: radius.full,
+      borderRadius: radius.sm,
       alignSelf: 'flex-end',
       borderWidth: StyleSheet.hairlineWidth,
     },
     text: {
       fontSize: 11,
-      fontWeight: '700',
+      fontWeight: '600',
       textTransform: 'uppercase',
       letterSpacing: 0.3,
     },

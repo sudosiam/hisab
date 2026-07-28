@@ -28,9 +28,9 @@ export function createListItemStyles(colors: ThemeColors, isDark: boolean) {
     card: {
       ...cardSurface(colors, isDark),
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm + 2,
+      paddingVertical: spacing.sm,
       marginBottom: spacing.sm,
-      minHeight: 56,
+      minHeight: 52,
       justifyContent: 'center',
       // Never clip children — rows grow with wrapped amounts.
       overflow: 'visible',
@@ -51,12 +51,13 @@ export function createListItemStyles(colors: ThemeColors, isDark: boolean) {
       flexGrow: 0,
       flexShrink: 1,
       alignItems: 'flex-end',
-      gap: 4,
+      gap: 2,
     },
     title: {
       ...typography.bodyMedium,
       fontWeight: '600',
       color: colors.text,
+      letterSpacing: -0.15,
     },
     subtitle: {
       ...typography.caption,
@@ -74,7 +75,7 @@ export function createListItemStyles(colors: ThemeColors, isDark: boolean) {
       alignSelf: 'flex-start',
       paddingHorizontal: 6,
       paddingVertical: 2,
-      borderRadius: radius.full,
+      borderRadius: radius.sm,
       backgroundColor: colors.primaryContainer,
       marginTop: 4,
     },
@@ -86,7 +87,7 @@ export function createListItemStyles(colors: ThemeColors, isDark: boolean) {
     },
     pillText: {
       fontSize: 10,
-      fontWeight: '700',
+      fontWeight: '600',
       color: colors.onPrimaryContainer,
       textTransform: 'uppercase',
       letterSpacing: 0.2,
@@ -322,15 +323,15 @@ export const NavListRow = memo(function NavListRow({
         iconWrap: {
           width: 32,
           height: 32,
-          borderRadius: radius.full,
+          borderRadius: radius.md,
           backgroundColor: colors.primaryContainer,
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
         },
         body: { flex: 1, minWidth: 0 },
-        title: { fontSize: 14, fontWeight: '600', color: colors.text },
-        desc: { fontSize: 12, color: colors.textSecondary, marginTop: 1, lineHeight: 16 },
+        title: { ...typography.bodyMedium, fontWeight: '600', color: colors.text, letterSpacing: -0.15 },
+        desc: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
         chevron: { flexShrink: 0 },
       }),
     [colors, isLast]

@@ -1,14 +1,14 @@
 import { Easing, FadeIn, FadeInDown, ReduceMotion } from 'react-native-reanimated';
 
-/** Shared motion language — short, ease-out, reduced-motion aware. */
+/** Shared motion language — quiet, ease-out, reduced-motion aware. */
 export const motion = {
-  pressIn: 90,
-  pressOut: 160,
-  screen: 260,
-  section: 280,
-  stagger: 40,
-  layout: 220,
-  pressScale: 0.98,
+  pressIn: 80,
+  pressOut: 140,
+  screen: 220,
+  section: 240,
+  stagger: 32,
+  layout: 200,
+  pressScale: 0.985,
 } as const;
 
 export const easeOut = Easing.bezier(0.22, 1, 0.36, 1);

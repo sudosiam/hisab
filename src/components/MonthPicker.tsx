@@ -121,7 +121,7 @@ function createStyles(
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      borderRadius: radius.full,
+      borderRadius: radius.md,
       backgroundColor: colors.surfaceContainerHigh,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
@@ -134,7 +134,7 @@ function createStyles(
       height: 40,
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: radius.full,
+      borderRadius: radius.sm,
       backgroundColor: colors.primaryContainer,
     },
     labelWrap: {

@@ -52,16 +52,16 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
     section: { marginBottom: spacing.lg },
     sectionTitle: {
       ...typography.section,
-      color: colors.textSecondary,
+      color: colors.textMuted,
       textTransform: 'uppercase',
       marginBottom: spacing.sm,
     },
     card: {
       ...surface,
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm + 2,
+      paddingVertical: spacing.sm,
       marginBottom: spacing.sm,
-      minHeight: 56,
+      minHeight: 52,
       justifyContent: 'center',
     },
     /** Compact summary / net-worth hero used on finance screens. */
@@ -154,7 +154,7 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
       padding: spacing.md,
       backgroundColor: colors.primaryContainer,
       borderRadius: radius.lg,
-      borderWidth: isDark ? 1 : 0,
+      borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
     },
   });
@@ -233,7 +233,7 @@ function createButtonStyles(colors: ThemeColors, isDark: boolean) {
       backgroundColor: colors.primary,
       paddingVertical: 12,
       paddingHorizontal: spacing.md,
-      borderRadius: radius.full,
+      borderRadius: radius.md,
       alignItems: 'center',
       justifyContent: 'center',
       alignSelf: 'stretch',
@@ -246,7 +246,7 @@ function createButtonStyles(colors: ThemeColors, isDark: boolean) {
       backgroundColor: colors.primaryContainer,
       paddingVertical: 12,
       paddingHorizontal: spacing.md,
-      borderRadius: radius.full,
+      borderRadius: radius.md,
       alignItems: 'center',
       justifyContent: 'center',
       alignSelf: 'stretch',
@@ -254,14 +254,14 @@ function createButtonStyles(colors: ThemeColors, isDark: boolean) {
       maxWidth: '100%',
       minHeight: 44,
       marginVertical: spacing.xs,
-      borderWidth: isDark ? 1 : 0,
+      borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
     },
     danger: {
       backgroundColor: 'transparent',
       paddingVertical: 12,
       paddingHorizontal: spacing.md,
-      borderRadius: radius.full,
+      borderRadius: radius.md,
       alignItems: 'center',
       justifyContent: 'center',
       alignSelf: 'stretch',
@@ -269,7 +269,7 @@ function createButtonStyles(colors: ThemeColors, isDark: boolean) {
       maxWidth: '100%',
       minHeight: 44,
       marginVertical: spacing.xs,
-      borderWidth: 1,
+      borderWidth: StyleSheet.hairlineWidth,
       borderColor: isDark ? colors.danger : colors.danger + '99',
     },
     disabled: { opacity: 0.5 },
@@ -363,7 +363,7 @@ export function FinanceHero({
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: colors.border,
           overflow: 'hidden',
-          backgroundColor: isDark ? colors.surfaceContainer : colors.surfaceContainerHigh,
+          backgroundColor: colors.surfaceContainer,
         },
         matrixRow: {
           flexDirection: 'row',
@@ -702,7 +702,7 @@ export function ErrorState({
           style={{
             paddingHorizontal: spacing.lg,
             paddingVertical: 10,
-            borderRadius: radius.full,
+            borderRadius: radius.md,
             backgroundColor: colors.primary,
             minHeight: 44,
             minWidth: 140,
@@ -776,7 +776,7 @@ export function EmptyState({
             marginTop: spacing.sm,
             paddingHorizontal: spacing.lg,
             paddingVertical: 10,
-            borderRadius: radius.full,
+            borderRadius: radius.md,
             backgroundColor: colors.primary,
             minHeight: 44,
             minWidth: 140,
@@ -811,7 +811,7 @@ function createInputStyles(colors: ThemeColors) {
     },
     input: {
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: 'transparent',
+      borderColor: colors.border,
       borderRadius: radius.md,
       paddingHorizontal: spacing.md,
       paddingVertical: 11,
@@ -911,10 +911,10 @@ export function SearchField({
           paddingHorizontal: spacing.md,
           paddingVertical: 10,
           minHeight: 44,
-          borderRadius: radius.full,
+          borderRadius: radius.md,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: colors.border,
-          backgroundColor: colors.surfaceContainerHigh,
+          backgroundColor: colors.inputBg,
         },
         input: {
           flex: 1,
@@ -963,7 +963,7 @@ function createChipStyles(colors: ThemeColors) {
       minWidth: 0,
       paddingVertical: 8,
       paddingHorizontal: spacing.xs,
-      borderRadius: radius.full,
+      borderRadius: radius.md,
       backgroundColor: colors.chip,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
@@ -973,7 +973,7 @@ function createChipStyles(colors: ThemeColors) {
     },
     chipActive: {
       backgroundColor: colors.chipActive,
-      borderColor: colors.chipActive,
+      borderColor: colors.border,
     },
     chipText: {
       fontSize: 11,
@@ -981,7 +981,7 @@ function createChipStyles(colors: ThemeColors) {
       fontWeight: '500',
       textAlign: 'center',
     },
-    chipTextActive: { color: colors.chipTextActive, fontWeight: '700' },
+    chipTextActive: { color: colors.chipTextActive, fontWeight: '600' },
   });
 }
 
@@ -1052,13 +1052,13 @@ export function SummaryHero({
         },
         label: {
           ...typography.section,
-          color: colors.textSecondary,
+          color: colors.textMuted,
           textTransform: 'uppercase',
           marginBottom: spacing.xs,
         },
         hint: {
           ...typography.caption,
-          color: colors.textSecondary,
+          color: colors.textMuted,
           marginTop: spacing.xs,
           textAlign: 'center',
         },
@@ -1149,11 +1149,11 @@ export function SectionHeader({
     <Text
       style={{
         ...typography.section,
-        color: colors.textSecondary,
+        color: colors.textMuted,
         textTransform: 'uppercase',
         marginBottom: spacing.xs,
         marginTop: tight ? 0 : spacing.md,
-        letterSpacing: 0.5,
+        letterSpacing: 0.4,
       }}
     >
       {title}
@@ -1194,13 +1194,16 @@ function createThemeOptionStyles(colors: ThemeColors) {
       paddingVertical: 10,
       paddingHorizontal: spacing.xs,
       alignItems: 'center',
-      borderRadius: radius.full,
+      borderRadius: radius.md,
       backgroundColor: colors.surfaceContainer,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
       minHeight: 44,
       justifyContent: 'center',
     },
     optionActive: {
       backgroundColor: colors.primaryContainer,
+      borderColor: colors.border,
     },
     optionText: {
       fontSize: 13,
@@ -1208,7 +1211,7 @@ function createThemeOptionStyles(colors: ThemeColors) {
       color: colors.text,
       textAlign: 'center',
     },
-    optionTextActive: { color: colors.onPrimaryContainer, fontWeight: '700' },
+    optionTextActive: { color: colors.onPrimaryContainer, fontWeight: '600' },
   });
 }
 
@@ -1455,7 +1458,7 @@ function createShortcutStyles(colors: ThemeColors, isDark: boolean) {
       minHeight: 48,
       paddingVertical: spacing.sm,
       paddingHorizontal: spacing.md,
-      borderRadius: radius.full,
+      borderRadius: radius.md,
       backgroundColor: isDark ? colors.surfaceContainerHigh : colors.surfaceContainer,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
