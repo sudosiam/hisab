@@ -118,7 +118,7 @@ async function loadTrendPointsForRange(
              FROM sale_items si
              JOIN products p ON p.id = si.product_id
              WHERE si.sale_id = s.id
-           ) * (sp.amount / NULLIF(s.total_amount, 0))
+           ) * (sp.amount * 1.0 / NULLIF(s.total_amount, 0))
          ), 0) as total
          FROM sale_payments sp
          JOIN sales s ON s.id = sp.sale_id

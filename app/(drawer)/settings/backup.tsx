@@ -350,7 +350,7 @@ export default function BackupSettingsScreen() {
   const handleStartFresh = () => {
     Alert.alert(
       'Start fresh?',
-      'Keeps the empty database. Existing backup files and cloud snapshots are not deleted.',
+      'You already have an empty database after reset. This only turns backups back on — it does not Restore from a file/cloud and does not wipe again. Existing backup files stay on disk.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -559,10 +559,10 @@ export default function BackupSettingsScreen() {
         : 'Import backup file';
   const importBody =
     importMode === 'folder'
-      ? 'Replaces all data with the latest folder backup. Unsaved form drafts will be cleared and screens will reload.'
+      ? 'RESTORE only: overwrites this device with the latest folder backup. Does not wipe without a backup file. Drafts clear; screens reload.'
       : importMode === 'cloud'
-        ? 'Replaces all data on this device with your latest cloud snapshot (last backup wins). Unsaved form drafts will be cleared and screens will reload.'
-        : 'Replaces all data with the chosen backup file. Unsaved form drafts will be cleared and screens will reload.';
+        ? 'RESTORE only: overwrites this device with a cloud snapshot (last upload wins; device clocks). Not the same as Reset database. Drafts clear; screens reload.'
+        : 'RESTORE only: overwrites this device with the chosen backup file. Not the same as Start fresh or Reset. Drafts clear; screens reload.';
   const confirmButtonTitle =
     importMode === 'file' ? 'Choose file & import' : 'Import & replace data';
 
@@ -754,9 +754,9 @@ export default function BackupSettingsScreen() {
                     : formatLastBackupLabel(lastCloudBackupAt)}
               </Text>
               <Text style={[localStyles.rowMeta, { marginTop: 4 }]}>
-                Full database snapshot only — not multi-device sync. Restore replaces all data on this
-                device (last backup wins). A notification appears when the daily cloud auto backup
-                completes (native APK).
+                Full database snapshot only — not multi-device sync. “Remote newer” uses device clocks.
+                Restore replaces all data on this device (last upload wins). A notification appears when
+                the daily cloud auto backup completes (native APK).
               </Text>
             </View>
             <ThemedSwitch

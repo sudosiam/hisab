@@ -621,6 +621,9 @@ export async function removeSalePayment(saleId: number, paymentId: number): Prom
       // Orphan payment row: still remove the payment; cash was never linked.
     }
 
+    const { clearAllocationsForSalePayment } = await import('./paymentVouchers');
+    await clearAllocationsForSalePayment(db, paymentId);
+
     await db.runAsync('DELETE FROM sale_payments WHERE id = ?', [paymentId]);
 
     const sale = await db.getFirstAsync<{ total_amount: number }>(
@@ -654,6 +657,9 @@ export async function deleteSale(id: number): Promise<void> {
   const db = await getDatabase();
   const sale = await getSaleById(id);
   if (!sale) throw new Error('Sale not found');
+
+  const { assertSaleNotLinkedToPaymentVoucher } = await import('./paymentVouchers');
+  await assertSaleNotLinkedToPaymentVoucher(db, id);
 
   const items = await getSaleItems(id);
   const productIds = Array.from(new Set(items.map((i) => i.product_id)));

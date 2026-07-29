@@ -96,7 +96,9 @@ export default function DataSettingsScreen() {
           <Pressable style={localStyles.modalSheet} onPress={(e) => e.stopPropagation()}>
             <Text style={localStyles.modalTitle}>Reset database</Text>
             <Text style={localStyles.modalText}>
-              Deletes all local data. Type {RESET_CONFIRM_TEXT} to confirm.
+              Erases every sale, purchase, and account on this device and starts empty books. This is
+              not Restore (which loads a backup) and not Start fresh on Backup (which also turns
+              backups back on). Type {RESET_CONFIRM_TEXT} to confirm.
             </Text>
             <FormInput
               label="Confirmation"

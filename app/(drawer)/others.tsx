@@ -25,7 +25,7 @@ import {
 import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../src/utils/format';
 import { matchesSearch } from '../../src/utils/search';
 import { useTheme } from '../../src/context/ThemeContext';
-import { useDatabaseActions } from '../../src/context/DatabaseContext';
+import { useDatabaseActions, useRefreshKey } from '../../src/context/DatabaseContext';
 import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
 import { useUnsavedChangesGuard } from '../../src/hooks/useUnsavedChangesGuard';
 import { formatSqliteError } from '../../src/db/database';
@@ -45,6 +45,7 @@ export default function OthersScreen() {
   const fabListPadding = useFabListPadding();
   const { colors, isDark } = useTheme();
   const { refresh } = useDatabaseActions();
+  const refreshKey = useRefreshKey();
   const [assets, setAssets] = useState<FixedAsset[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -112,7 +113,7 @@ export default function OthersScreen() {
 
   const { booting, error: loadError, retry } = useFocusRefresh(async () => {
     if (!formOpenRef.current) await load();
-  }, []);
+  }, [refreshKey]);
 
   const total = useMemo(() => assets.reduce((sum, a) => sum + a.value, 0), [assets]);
 

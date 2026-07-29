@@ -56,8 +56,9 @@ export default function BusinessSettingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      load();
-    }, [load])
+      if (profileDirty) return;
+      void load();
+    }, [load, profileDirty])
   );
 
   const saveBusinessNameField = async () => {

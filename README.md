@@ -4,7 +4,16 @@ Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. 
 
 Copyright (c) 2026 Biswa. All rights reserved.
 
-**Current version:** `11.4.0` (Android `versionCode` 42 · schema v29)
+**Current version:** `11.4.1` (Android `versionCode` 43 · schema v29)
+
+## What's new in 11.4.1
+
+- Cash-basis COGS: real division for partial payments (no silent ₹0 COGS)
+- Fractional stock qty preserved through purchase WAC / recompute / sales
+- Payment voucher: friendly block on invoice delete; clear allocations when removing a payment
+- Idempotent v29 paise migration markers; friendlier SQLite error messages
+- Edit save no longer prompts Discard; settings/detail reload races tightened
+- Dashboard/settings polish from 11.4.0 retained
 
 ## What's new in 11.4.0
 
@@ -112,8 +121,8 @@ Copy into `releases/` for handoff (APKs are gitignored):
 
 ```powershell
 New-Item -ItemType Directory -Force releases | Out-Null
-Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-11.4.0.apk" -Force
-adb install -r "releases\hisab-11.4.0.apk"
+Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-11.4.1.apk" -Force
+adb install -r "releases\hisab-11.4.1.apk"
 ```
 
 ## Build APK (EAS cloud)

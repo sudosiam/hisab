@@ -355,6 +355,13 @@ function parseRate(raw: string): number {
   return toPaise(Math.abs(parseSignedAmount(raw)));
 }
 
+/** Plain GST percentage from Tally (e.g. "5" → 5). Do not use parseRate/toPaise here. */
+function parseGstPercent(raw: string): number {
+  const n = Math.abs(parseSignedAmount(raw));
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
+}
+
 function isYes(raw: string): boolean {
   return raw.trim().toLowerCase() === 'yes';
 }
@@ -801,7 +808,8 @@ async function buildItemsFromInventory(inventory: string[]) {
     const rate = parseRate(extractTag(line, 'RATE'));
     const amount = Math.abs(parseMoneyAmount(extractTag(line, 'AMOUNT')));
     const hsn = extractTag(line, 'GSTOVRDNHSNCODE');
-    const gstRate = parseRate(extractTag(line, 'GSTOVRDNTAXRATE'));
+    // Product master may store %, but document creates force gst_rate: 0 (v28 teardown).
+    const gstRate = parseGstPercent(extractTag(line, 'GSTOVRDNTAXRATE'));
     if (!itemName || qty <= 0) continue;
     const unitPrice = rate > 0 ? rate : amount / qty;
     if (!(unitPrice > 0)) continue;

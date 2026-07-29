@@ -172,23 +172,27 @@ export default function AccountDetailScreen() {
     setIsExcluded(!!a.is_excluded);
   };
 
+  const loadGenRef = React.useRef(0);
   const load = useCallback(async () => {
     if (!accountId) {
       setError('Invalid account');
       setLoading(false);
       return;
     }
+    const gen = ++loadGenRef.current;
     try {
       const [a, t] = await Promise.all([getAccountById(accountId), getTransactions(accountId)]);
+      if (gen !== loadGenRef.current) return;
       setAccount(a);
       setTransactions(t);
       if (a) fillForm(a);
       setError(a ? null : 'Account not found');
     } catch (e) {
+      if (gen !== loadGenRef.current) return;
       setError(formatSqliteError(e));
       setAccount(null);
     } finally {
-      setLoading(false);
+      if (gen === loadGenRef.current) setLoading(false);
     }
   }, [accountId]);
 
@@ -465,7 +469,9 @@ export default function AccountDetailScreen() {
       </View>
 
       <SectionHeader title="Account Ledger" />
-
+      <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: spacing.sm }}>
+        Tap a transaction to delete it (long-press also works).
+      </Text>
       <SearchField
         value={search}
         onChangeText={setSearch}
@@ -482,6 +488,7 @@ export default function AccountDetailScreen() {
       emptyText={
         search.trim() ? 'No transactions match your search.' : 'No transactions for this account'
       }
+      onRowPress={(row) => handleDeleteRow(row.id)}
       onRowLongPress={(row) => handleDeleteRow(row.id)}
       ListHeaderComponent={
         <>

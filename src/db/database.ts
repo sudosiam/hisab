@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { waitForDatabaseAccess } from '../services/dbMaintenance';
-import { PAID_TOLERANCE_PAISE, roundMoney } from '../utils/money';
+import { PAID_TOLERANCE_PAISE, roundMoney, roundQty } from '../utils/money';
 
 export const DB_NAME = 'hisab.db';
 const SCHEMA_VERSION = 29;
@@ -271,12 +271,27 @@ export async function checkpointDatabase(options?: { strict?: boolean }): Promis
 }
 
 export function formatSqliteError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-      .replace(/^Call to function '(NativeDatabase\.\w+|ExpoSQLite\.\w+)' has been rejected\.\s*→ Caused by:\s*/i, '')
-      .trim();
+  if (!(error instanceof Error)) return 'Unknown database error';
+  const cleaned = error.message
+    .replace(
+      /^Call to function '(NativeDatabase\.\w+|ExpoSQLite\.\w+)' has been rejected\.\s*→ Caused by:\s*/i,
+      ''
+    )
+    .trim();
+  const lower = cleaned.toLowerCase();
+  if (lower.includes('foreign key')) {
+    return 'This record is linked to a Receipt or Payment voucher. Delete or unlink that voucher first.';
   }
-  return 'Unknown database error';
+  if (lower.includes('unique')) {
+    if (lower.includes('invoice_no')) {
+      return 'That invoice number is already in use. Choose a different number.';
+    }
+    if (lower.includes('purchase_no')) {
+      return 'That purchase number is already in use. Choose a different number.';
+    }
+    return 'That record already exists.';
+  }
+  return cleaned || 'Unknown database error';
 }
 
 async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
@@ -399,8 +414,36 @@ async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Pr
   }
 }
 
-/** Scale legacy rupee REAL amounts to integer paise (×100) for schema v29. */
+const MONEY_PAISE_V29_TABLES_KEY = 'money_paise_v29_tables';
+
+/** Scale legacy rupee REAL amounts to integer paise (×100) for schema v29.
+ * Per-table markers make this resume-safe if the process dies mid-migration
+ * (DDL auto-commits; schema_version is only bumped after this function returns). */
 async function migrateMoneyColumnsToIntegerPaise(db: SQLite.SQLiteDatabase): Promise<void> {
+  const doneRaw = await db.getFirstAsync<{ value: string }>(
+    `SELECT value FROM settings WHERE key = ?`,
+    [MONEY_PAISE_V29_TABLES_KEY]
+  );
+  let doneTables = new Set<string>();
+  if (doneRaw?.value) {
+    try {
+      const parsed = JSON.parse(doneRaw.value) as unknown;
+      if (Array.isArray(parsed)) {
+        doneTables = new Set(parsed.filter((t): t is string => typeof t === 'string'));
+      }
+    } catch {
+      doneTables = new Set();
+    }
+  }
+
+  const markTableDone = async (table: string) => {
+    doneTables.add(table);
+    await db.runAsync(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, [
+      MONEY_PAISE_V29_TABLES_KEY,
+      JSON.stringify([...doneTables]),
+    ]);
+  };
+
   const updates: { table: string; columns: string[] }[] = [
     { table: 'accounts', columns: ['opening_balance', 'current_balance'] },
     { table: 'products', columns: ['opening_cost', 'avg_cost', 'sell_price'] },
@@ -477,17 +520,25 @@ async function migrateMoneyColumnsToIntegerPaise(db: SQLite.SQLiteDatabase): Pro
   ];
 
   for (const { table, columns } of updates) {
+    if (doneTables.has(table)) continue;
     const exists = await db.getFirstAsync<{ name: string }>(
       `SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
       [table]
     );
-    if (!exists) continue;
+    if (!exists) {
+      await markTableDone(table);
+      continue;
+    }
     const info = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
     const names = new Set(info.map((c) => c.name));
     const present = columns.filter((c) => names.has(c));
-    if (present.length === 0) continue;
+    if (present.length === 0) {
+      await markTableDone(table);
+      continue;
+    }
     const assignments = present.map((c) => `${c} = CAST(ROUND(COALESCE(${c}, 0) * 100) AS INTEGER)`);
     await db.runAsync(`UPDATE ${table} SET ${assignments.join(', ')}`);
+    await markTableDone(table);
   }
 }
 
@@ -2213,7 +2264,7 @@ export async function updateWeightedAvgCost(
   );
   if (!product) return;
 
-  const newQty = roundMoney(product.current_qty + purchaseQty);
+  const newQty = roundQty(product.current_qty + purchaseQty);
   const newAvg =
     newQty > 0
       ? roundMoney(
@@ -2251,9 +2302,9 @@ export async function recomputeProductStock(
     [productId]
   );
 
-  const inflowQty = inflow?.qty ?? 0;
+  const inflowQty = roundQty(inflow?.qty ?? 0);
   const avgCost = inflowQty > 0 ? roundMoney((inflow?.cost ?? 0) / inflowQty) : 0;
-  const currentQty = roundMoney(all?.qty ?? 0);
+  const currentQty = roundQty(all?.qty ?? 0);
 
   await db.runAsync('UPDATE products SET current_qty = ?, avg_cost = ? WHERE id = ?', [
     currentQty,
@@ -2282,10 +2333,8 @@ export async function reduceInventory(
     unitCost = recomputed.avgCost;
   }
 
-  await db.runAsync('UPDATE products SET current_qty = ROUND(current_qty - ?, 2) WHERE id = ?', [
-    roundMoney(qty),
-    productId,
-  ]);
+  const nextQty = roundQty(product.current_qty - qty);
+  await db.runAsync('UPDATE products SET current_qty = ? WHERE id = ?', [nextQty, productId]);
   return unitCost;
 }
 

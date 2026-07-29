@@ -24,6 +24,12 @@ export function roundMoney(value: number): number {
   return Math.round(value);
 }
 
+/** Round inventory quantities to 2 decimal places (kg/L/etc). Never use roundMoney for qty. */
+export function roundQty(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(value * 100) / 100;
+}
+
 export function addMoney(...values: number[]): number {
   return roundMoney(values.reduce((sum, v) => sum + (Number.isFinite(v) ? v : 0), 0));
 }

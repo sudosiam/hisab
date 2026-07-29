@@ -224,6 +224,7 @@ export default function NewPurchaseScreen() {
         onPress: async () => {
           await discardDraft();
           await resetForm();
+          leaveBypassRef.current = true;
         },
       },
     ]);

@@ -8,6 +8,10 @@ import {
 import { useLocalSearchParams, useFocusEffect, useRouter, useNavigation } from 'expo-router';
 import type { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { getSaleById, getSaleItems, getSalePayments, addSalePayment, removeSalePayment, deleteSale } from '../../../src/services/sales';
+import {
+  getVoucherLabelsForSalePayments,
+  getVoucherLinkForSale,
+} from '../../../src/services/paymentVouchers';
 import { calculateSaleCogs, calculateSaleGrossProfit } from '../../../src/services/financials';
 import { formatSqliteError } from '../../../src/db/database';
 import { getSelectableAccounts } from '../../../src/services/banking';
@@ -170,6 +174,9 @@ export default function SaleDetailScreen() {
   const [sale, setSale] = useState<Sale | null>(null);
   const [items, setItems] = useState<SaleItem[]>([]);
   const [payments, setPayments] = useState<SalePayment[]>([]);
+  const [paymentVoucherLabels, setPaymentVoucherLabels] = useState<Map<number, string>>(
+    () => new Map()
+  );
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [payAmount, setPayAmount] = useState('');
   const [payDate, setPayDate] = useState(todayISO());
@@ -181,22 +188,29 @@ export default function SaleDetailScreen() {
   const saleId = useMemo(() => parseRouteId(id), [id]);
 
   const hasLoadedRef = React.useRef(false);
+  const loadGenRef = React.useRef(0);
+  const payAmountRef = React.useRef(payAmount);
+  payAmountRef.current = payAmount;
   const load = useCallback(async () => {
     if (!saleId) {
       setError('Invalid sale');
       setLoading(false);
       return;
     }
+    const gen = ++loadGenRef.current;
     try {
-      const [s, i, p, a] = await Promise.all([
+      const [s, i, p, a, voucherLabels] = await Promise.all([
         getSaleById(saleId),
         getSaleItems(saleId),
         getSalePayments(saleId),
         getSelectableAccounts(),
+        getVoucherLabelsForSalePayments(saleId),
       ]);
+      if (gen !== loadGenRef.current) return;
       setSale(s);
       setItems(i);
       setPayments(p);
+      setPaymentVoucherLabels(voucherLabels);
       setAccounts(a);
       if (a.length > 0) setSelectedAccount(a[0].id);
       if (s && !hasLoadedRef.current) {
@@ -207,15 +221,20 @@ export default function SaleDetailScreen() {
       }
       setError(s ? null : 'Sale not found');
     } catch (e) {
+      if (gen !== loadGenRef.current) return;
       setError(formatSqliteError(e));
       setSale(null);
     } finally {
-      setLoading(false);
+      if (gen === loadGenRef.current) setLoading(false);
     }
   }, [saleId]);
 
   useFocusEffect(
     useCallback(() => {
+      // Skip background refresh while the user is mid-payment entry.
+      if (hasLoadedRef.current && payAmountRef.current.trim() !== '') {
+        return;
+      }
       if (!hasLoadedRef.current) {
         setLoading(true);
       }
@@ -267,49 +286,68 @@ export default function SaleDetailScreen() {
 
   const handleRemovePayment = (payment: SalePayment) => {
     if (!sale || removingPaymentId !== null) return;
-    Alert.alert(
-      'Remove Payment',
-      `Remove ${formatCurrency(payment.amount)} from ${payment.account_name}? The invoice due will increase.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            setRemovingPaymentId(payment.id);
-            try {
-              await removeSalePayment(sale.id, payment.id);
-              refresh();
-              await load();
-            } catch (e) {
-              Alert.alert('Error', e instanceof Error ? e.message : 'Could not remove payment');
-            } finally {
-              setRemovingPaymentId(null);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handleDelete = useCallback(() => {
-    if (!sale) return;
-    Alert.alert('Delete Sale', `Delete ${sale.invoice_no}? Stock and payments will be reversed.`, [
+    const voucherLabel = paymentVoucherLabels.get(payment.id);
+    const base = `Remove ${formatCurrency(payment.amount)} from ${payment.account_name}? The invoice due will increase.`;
+    const message = voucherLabel
+      ? `${base}\n\nThis clears the link on voucher ${voucherLabel}.`
+      : base;
+    Alert.alert('Remove Payment', message, [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Delete',
+        text: 'Remove',
         style: 'destructive',
         onPress: async () => {
+          setRemovingPaymentId(payment.id);
           try {
-            await deleteSale(sale.id);
+            await removeSalePayment(sale.id, payment.id);
             refresh();
-            router.dismissTo('/(drawer)/sales');
+            await load();
           } catch (e) {
-            Alert.alert('Error', formatSqliteError(e));
+            Alert.alert('Error', e instanceof Error ? e.message : 'Could not remove payment');
+          } finally {
+            setRemovingPaymentId(null);
           }
         },
       },
     ]);
+  };
+
+  const handleDelete = useCallback(() => {
+    if (!sale) return;
+    void (async () => {
+      try {
+        const link = await getVoucherLinkForSale(sale.id);
+        if (link) {
+          Alert.alert(
+            'Cannot delete',
+            `Linked to ${link.label}. Delete or unlink that voucher first.`
+          );
+          return;
+        }
+        Alert.alert(
+          'Delete Sale',
+          `Delete ${sale.invoice_no}? Stock and payments will be reversed.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await deleteSale(sale.id);
+                  refresh();
+                  router.dismissTo('/(drawer)/sales');
+                } catch (e) {
+                  Alert.alert('Error', formatSqliteError(e));
+                }
+              },
+            },
+          ]
+        );
+      } catch (e) {
+        Alert.alert('Error', formatSqliteError(e));
+      }
+    })();
   }, [sale, refresh, router]);
 
   const handlePreviewPdf = useCallback(async () => {
@@ -559,7 +597,12 @@ export default function SaleDetailScreen() {
                   <Text style={localStyles.itemName} numberOfLines={1}>
                     {p.account_name}
                   </Text>
-                  <Text style={localStyles.itemMeta}>{formatDisplayDate(p.date)}</Text>
+                  <Text style={localStyles.itemMeta}>
+                    {formatDisplayDate(p.date)}
+                    {paymentVoucherLabels.has(p.id)
+                      ? ` · ${paymentVoucherLabels.get(p.id)}`
+                      : ''}
+                  </Text>
                 </View>
                 <MoneyText amount={p.amount} size="md" style={{ textAlign: 'right' }} />
                 <ThemedPressable

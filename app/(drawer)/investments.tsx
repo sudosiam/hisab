@@ -13,7 +13,7 @@ import { getInvestmentInfo, setOwnerInvestment } from '../../src/services/invest
 import { formatSqliteError } from '../../src/db/database';
 import { formatAmountInput, parseMoneyInput } from '../../src/utils/format';
 import { DetailSkeleton } from '../../src/components/Skeleton';
-import { useDatabaseActions } from '../../src/context/DatabaseContext';
+import { useDatabaseActions, useRefreshKey } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useUnsavedChangesGuard } from '../../src/hooks/useUnsavedChangesGuard';
 import { spacing, typography } from '../../src/constants/theme';
@@ -39,6 +39,7 @@ function formatUpdatedAt(iso: string | null): string | null {
 
 export default function InvestmentsScreen() {
   const { refresh } = useDatabaseActions();
+  const refreshKey = useRefreshKey();
   const { colors, isDark } = useTheme();
   const localStyles = useMemo(
     () =>
@@ -93,8 +94,9 @@ export default function InvestmentsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      load();
-    }, [load])
+      void refreshKey;
+      void load();
+    }, [load, refreshKey])
   );
 
   const handleAmountChange = (value: string) => {

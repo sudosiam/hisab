@@ -289,6 +289,7 @@ export default function NewSaleScreen() {
         onPress: async () => {
           await discardDraft();
           await resetForm(products);
+          leaveBypassRef.current = true;
         },
       },
     ]);

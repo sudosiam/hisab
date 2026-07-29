@@ -15,6 +15,10 @@ import {
   removePurchasePayment,
   deletePurchase,
 } from '../../../src/services/purchases';
+import {
+  getVoucherLabelsForPurchasePayments,
+  getVoucherLinkForPurchase,
+} from '../../../src/services/paymentVouchers';
 import { formatSqliteError } from '../../../src/db/database';
 import { getPaymentAccounts } from '../../../src/services/banking';
 import { StatusBadge } from '../../../src/components/StatusBadge';
@@ -176,6 +180,9 @@ export default function PurchaseDetailScreen() {
   const [purchase, setPurchase] = useState<Purchase | null>(null);
   const [items, setItems] = useState<PurchaseItem[]>([]);
   const [payments, setPayments] = useState<PurchasePayment[]>([]);
+  const [paymentVoucherLabels, setPaymentVoucherLabels] = useState<Map<number, string>>(
+    () => new Map()
+  );
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [payAmount, setPayAmount] = useState('');
   const [payDate, setPayDate] = useState(todayISO());
@@ -187,22 +194,29 @@ export default function PurchaseDetailScreen() {
   const purchaseId = useMemo(() => parseRouteId(id), [id]);
 
   const hasLoadedRef = React.useRef(false);
+  const loadGenRef = React.useRef(0);
+  const payAmountRef = React.useRef(payAmount);
+  payAmountRef.current = payAmount;
   const load = useCallback(async () => {
     if (!purchaseId) {
       setError('Invalid purchase');
       setLoading(false);
       return;
     }
+    const gen = ++loadGenRef.current;
     try {
-      const [p, i, pay, a] = await Promise.all([
+      const [p, i, pay, a, voucherLabels] = await Promise.all([
         getPurchaseById(purchaseId),
         getPurchaseItems(purchaseId),
         getPurchasePayments(purchaseId),
         getPaymentAccounts(),
+        getVoucherLabelsForPurchasePayments(purchaseId),
       ]);
+      if (gen !== loadGenRef.current) return;
       setPurchase(p);
       setItems(i);
       setPayments(pay);
+      setPaymentVoucherLabels(voucherLabels);
       setAccounts(a);
       if (a.length > 0) setSelectedAccount(a[0].id);
       if (p && !hasLoadedRef.current) {
@@ -213,15 +227,19 @@ export default function PurchaseDetailScreen() {
       }
       setError(p ? null : 'Purchase not found');
     } catch (e) {
+      if (gen !== loadGenRef.current) return;
       setError(formatSqliteError(e));
       setPurchase(null);
     } finally {
-      setLoading(false);
+      if (gen === loadGenRef.current) setLoading(false);
     }
   }, [purchaseId]);
 
   useFocusEffect(
     useCallback(() => {
+      if (hasLoadedRef.current && payAmountRef.current.trim() !== '') {
+        return;
+      }
       if (!hasLoadedRef.current) {
         setLoading(true);
       }
@@ -267,53 +285,68 @@ export default function PurchaseDetailScreen() {
 
   const handleRemovePayment = (payment: PurchasePayment) => {
     if (!purchase || removingPaymentId !== null) return;
-    Alert.alert(
-      'Remove Payment',
-      `Remove ${formatCurrency(payment.amount)} from ${payment.account_name}? The invoice due will increase.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            setRemovingPaymentId(payment.id);
-            try {
-              await removePurchasePayment(purchase.id, payment.id);
-              refresh();
-              await load();
-            } catch (e) {
-              Alert.alert('Error', e instanceof Error ? e.message : 'Could not remove payment');
-            } finally {
-              setRemovingPaymentId(null);
-            }
-          },
+    const voucherLabel = paymentVoucherLabels.get(payment.id);
+    const base = `Remove ${formatCurrency(payment.amount)} from ${payment.account_name}? The invoice due will increase.`;
+    const message = voucherLabel
+      ? `${base}\n\nThis clears the link on voucher ${voucherLabel}.`
+      : base;
+    Alert.alert('Remove Payment', message, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          setRemovingPaymentId(payment.id);
+          try {
+            await removePurchasePayment(purchase.id, payment.id);
+            refresh();
+            await load();
+          } catch (e) {
+            Alert.alert('Error', e instanceof Error ? e.message : 'Could not remove payment');
+          } finally {
+            setRemovingPaymentId(null);
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const handleDelete = useCallback(() => {
     if (!purchase) return;
-    Alert.alert(
-      'Delete Purchase',
-      `Delete ${purchase.invoice_no}? Stock will be restored and payments reversed.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deletePurchase(purchase.id);
-              refresh();
-              router.dismissTo('/(drawer)/purchases');
-            } catch (e) {
-              Alert.alert('Error', formatSqliteError(e));
-            }
-          },
-        },
-      ]
-    );
+    void (async () => {
+      try {
+        const link = await getVoucherLinkForPurchase(purchase.id);
+        if (link) {
+          Alert.alert(
+            'Cannot delete',
+            `Linked to ${link.label}. Delete or unlink that voucher first.`
+          );
+          return;
+        }
+        Alert.alert(
+          'Delete Purchase',
+          `Delete ${purchase.invoice_no}? Stock will be restored and payments reversed.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await deletePurchase(purchase.id);
+                  refresh();
+                  router.dismissTo('/(drawer)/purchases');
+                } catch (e) {
+                  Alert.alert('Error', formatSqliteError(e));
+                }
+              },
+            },
+          ]
+        );
+      } catch (e) {
+        Alert.alert('Error', formatSqliteError(e));
+      }
+    })();
   }, [purchase, refresh, router]);
 
   const handlePreviewPdf = useCallback(async () => {
@@ -520,7 +553,12 @@ export default function PurchaseDetailScreen() {
                   <Text style={localStyles.itemName} numberOfLines={1}>
                     {p.account_name}
                   </Text>
-                  <Text style={localStyles.itemMeta}>{formatDisplayDate(p.date)}</Text>
+                  <Text style={localStyles.itemMeta}>
+                    {formatDisplayDate(p.date)}
+                    {paymentVoucherLabels.get(p.id)
+                      ? ` · ${paymentVoucherLabels.get(p.id)}`
+                      : ''}
+                  </Text>
                 </View>
                 <MoneyText amount={p.amount} size="md" style={{ textAlign: 'right' }} />
                 <ThemedPressable

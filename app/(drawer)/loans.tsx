@@ -21,7 +21,7 @@ import { addLoan, deleteLoan, getLoans, updateLoan } from '../../src/services/lo
 import { formatAmountInput, formatCurrency, parseAmountInput, parsePositiveAmount, parseMoneyInput } from '../../src/utils/format';
 import { matchesSearch } from '../../src/utils/search';
 import { isValidISODate } from '../../src/utils/date';
-import { useDatabaseActions } from '../../src/context/DatabaseContext';
+import { useDatabaseActions, useRefreshKey } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
 import { useUnsavedChangesGuard } from '../../src/hooks/useUnsavedChangesGuard';
@@ -45,6 +45,7 @@ export default function LoansScreen() {
   const fabListPadding = useFabListPadding();
   const { colors, isDark } = useTheme();
   const { refresh } = useDatabaseActions();
+  const refreshKey = useRefreshKey();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -128,7 +129,7 @@ export default function LoansScreen() {
     async () => {
       if (!formOpenRef.current) await load();
     },
-    []
+    [refreshKey]
   );
 
   const totalOutstanding = useMemo(

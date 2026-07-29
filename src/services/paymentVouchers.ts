@@ -1078,3 +1078,145 @@ export async function getOrphanInvoicePayments(options?: {
     return a.id < b.id ? 1 : -1;
   });
 }
+
+type SqliteDb = Awaited<ReturnType<typeof getDatabase>>;
+
+export type VoucherLinkInfo = { voucher_no: string; voucher_type: string; label: string };
+
+function voucherLabel(row: { voucher_no: string; voucher_type: string }): string {
+  const kind = row.voucher_type === 'receipt' ? 'Receipt' : 'Payment';
+  return `${kind} ${row.voucher_no}`;
+}
+
+/** Non-throwing peek used by delete dialogs before confirming. */
+export async function getVoucherLinkForSale(saleId: number): Promise<VoucherLinkInfo | null> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{ voucher_no: string; voucher_type: string }>(
+    `SELECT v.voucher_no, v.voucher_type
+     FROM payment_voucher_allocations a
+     JOIN payment_vouchers v ON v.id = a.voucher_id
+     WHERE a.sale_id = ?
+     LIMIT 1`,
+    [saleId]
+  );
+  if (!row) return null;
+  return { ...row, label: voucherLabel(row) };
+}
+
+export async function getVoucherLinkForPurchase(
+  purchaseId: number
+): Promise<VoucherLinkInfo | null> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{ voucher_no: string; voucher_type: string }>(
+    `SELECT v.voucher_no, v.voucher_type
+     FROM payment_voucher_allocations a
+     JOIN payment_vouchers v ON v.id = a.voucher_id
+     WHERE a.purchase_id = ?
+     LIMIT 1`,
+    [purchaseId]
+  );
+  if (!row) return null;
+  return { ...row, label: voucherLabel(row) };
+}
+
+/** Map sale_payment_id → "Receipt RCPT-001" for detail UI badges. */
+export async function getVoucherLabelsForSalePayments(
+  saleId: number
+): Promise<Map<number, string>> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{
+    sale_payment_id: number;
+    voucher_no: string;
+    voucher_type: string;
+  }>(
+    `SELECT a.sale_payment_id, v.voucher_no, v.voucher_type
+     FROM payment_voucher_allocations a
+     JOIN payment_vouchers v ON v.id = a.voucher_id
+     WHERE a.sale_id = ? AND a.sale_payment_id IS NOT NULL`,
+    [saleId]
+  );
+  const map = new Map<number, string>();
+  for (const row of rows) {
+    if (row.sale_payment_id != null) map.set(row.sale_payment_id, voucherLabel(row));
+  }
+  return map;
+}
+
+export async function getVoucherLabelsForPurchasePayments(
+  purchaseId: number
+): Promise<Map<number, string>> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{
+    purchase_payment_id: number;
+    voucher_no: string;
+    voucher_type: string;
+  }>(
+    `SELECT a.purchase_payment_id, v.voucher_no, v.voucher_type
+     FROM payment_voucher_allocations a
+     JOIN payment_vouchers v ON v.id = a.voucher_id
+     WHERE a.purchase_id = ? AND a.purchase_payment_id IS NOT NULL`,
+    [purchaseId]
+  );
+  const map = new Map<number, string>();
+  for (const row of rows) {
+    if (row.purchase_payment_id != null) {
+      map.set(row.purchase_payment_id, voucherLabel(row));
+    }
+  }
+  return map;
+}
+
+/** Block invoice delete when a Receipt/Payment voucher still allocates to it. */
+export async function assertSaleNotLinkedToPaymentVoucher(
+  db: SqliteDb,
+  saleId: number
+): Promise<void> {
+  const row = await db.getFirstAsync<{ voucher_no: string; voucher_type: string }>(
+    `SELECT v.voucher_no, v.voucher_type
+     FROM payment_voucher_allocations a
+     JOIN payment_vouchers v ON v.id = a.voucher_id
+     WHERE a.sale_id = ?
+     LIMIT 1`,
+    [saleId]
+  );
+  if (!row) return;
+  throw new Error(
+    `This invoice is linked to ${voucherLabel(row)}. Delete or unlink that voucher first.`
+  );
+}
+
+export async function assertPurchaseNotLinkedToPaymentVoucher(
+  db: SqliteDb,
+  purchaseId: number
+): Promise<void> {
+  const row = await db.getFirstAsync<{ voucher_no: string; voucher_type: string }>(
+    `SELECT v.voucher_no, v.voucher_type
+     FROM payment_voucher_allocations a
+     JOIN payment_vouchers v ON v.id = a.voucher_id
+     WHERE a.purchase_id = ?
+     LIMIT 1`,
+    [purchaseId]
+  );
+  if (!row) return;
+  throw new Error(
+    `This bill is linked to ${voucherLabel(row)}. Delete or unlink that voucher first.`
+  );
+}
+
+export async function clearAllocationsForSalePayment(
+  db: SqliteDb,
+  salePaymentId: number
+): Promise<void> {
+  await db.runAsync(`DELETE FROM payment_voucher_allocations WHERE sale_payment_id = ?`, [
+    salePaymentId,
+  ]);
+}
+
+export async function clearAllocationsForPurchasePayment(
+  db: SqliteDb,
+  purchasePaymentId: number
+): Promise<void> {
+  await db.runAsync(`DELETE FROM payment_voucher_allocations WHERE purchase_payment_id = ?`, [
+    purchasePaymentId,
+  ]);
+}

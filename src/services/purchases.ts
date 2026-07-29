@@ -577,6 +577,9 @@ export async function removePurchasePayment(purchaseId: number, paymentId: numbe
       // Orphan payment row: still remove the payment; cash was never linked.
     }
 
+    const { clearAllocationsForPurchasePayment } = await import('./paymentVouchers');
+    await clearAllocationsForPurchasePayment(db, paymentId);
+
     await db.runAsync('DELETE FROM purchase_payments WHERE id = ?', [paymentId]);
 
     const purchase = await db.getFirstAsync<{ total_amount: number }>(
@@ -610,6 +613,9 @@ export async function deletePurchase(id: number): Promise<void> {
   const db = await getDatabase();
   const purchase = await getPurchaseById(id);
   if (!purchase) throw new Error('Purchase not found');
+
+  const { assertPurchaseNotLinkedToPaymentVoucher } = await import('./paymentVouchers');
+  await assertPurchaseNotLinkedToPaymentVoucher(db, id);
 
   const items = await getPurchaseItems(id);
   const productIds = Array.from(new Set(items.map((i) => i.product_id)));

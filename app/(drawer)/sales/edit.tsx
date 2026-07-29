@@ -142,6 +142,7 @@ export default function EditSaleScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const savedSnapshotRef = useRef<string | null>(null);
+  const leaveBypassRef = useRef(false);
   const productsRef = useRef<Product[]>([]);
   productsRef.current = products;
 
@@ -302,7 +303,7 @@ export default function EditSaleScreen() {
   );
   const isDirty =
     savedSnapshotRef.current !== null && formSnapshot !== savedSnapshotRef.current;
-  useUnsavedChangesGuard(isDirty);
+  useUnsavedChangesGuard(isDirty, { bypassRef: leaveBypassRef });
 
   const addItem = () => {
     setItems([...items, createEmptyLineItem()]);
@@ -406,6 +407,7 @@ export default function EditSaleScreen() {
           });
           refresh();
           savedSnapshotRef.current = formSnapshot;
+          leaveBypassRef.current = true;
           router.back();
         },
         sale.id

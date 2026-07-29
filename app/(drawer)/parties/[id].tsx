@@ -343,6 +343,7 @@ export default function PartyDetailScreen() {
   periodKeyRef.current = periodKey;
   const fyStartMonthRef = React.useRef(fyStartMonth);
   fyStartMonthRef.current = fyStartMonth;
+  const loadGenRef = React.useRef(0);
 
   useEffect(() => {
     if (rawId === 'index') {
@@ -359,8 +360,10 @@ export default function PartyDetailScreen() {
       return;
     }
 
+    const gen = ++loadGenRef.current;
     try {
       const s = await getPartySummary(partyId);
+      if (gen !== loadGenRef.current) return;
       setSummary(s);
       setStatement([]);
       setHistory([]);
@@ -380,6 +383,7 @@ export default function PartyDetailScreen() {
           getPartyStatementInRange(partyId, range.start, range.end),
           getPartyHistory(partyId),
         ]);
+        if (gen !== loadGenRef.current) return;
         setOpeningBalance(st.openingBalance);
         setClosingBalance(st.closingBalance);
         setStatement(st.lines);
@@ -387,10 +391,11 @@ export default function PartyDetailScreen() {
         setHistory(h.filter((item) => item.date >= range.start && item.date <= range.end));
       }
     } catch (e) {
+      if (gen !== loadGenRef.current) return;
       setError(formatSqliteError(e));
       setSummary(null);
     } finally {
-      setLoading(false);
+      if (gen === loadGenRef.current) setLoading(false);
     }
   }, [partyId, rawId]);
 

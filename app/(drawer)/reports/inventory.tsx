@@ -99,7 +99,8 @@ export default function InventoryReportScreen() {
         getItemLayout={listCardGetItemLayout}
         {...FLATLIST_PERF}
         renderItem={({ item }) => {
-          const sell = item.sell_price > 0 ? item.sell_price : item.avg_cost * 1.2;
+          const sellLabel =
+            item.sell_price > 0 ? formatCurrency(item.sell_price) : '—';
           return (
             <ReportRow
               style={localStyles.row}
@@ -117,7 +118,7 @@ export default function InventoryReportScreen() {
                 Cost {formatCurrency(item.avg_cost)}
               </Text>
               <Text style={localStyles.meta} numberOfLines={2}>
-                Sell {formatCurrency(sell)}
+                Sell {sellLabel}
               </Text>
             </ReportRow>
           );
