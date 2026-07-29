@@ -3,6 +3,7 @@ import { formatIndianMoney } from '../utils/format';
 import { isValidISODate, parseISODate } from '../utils/date';
 import { roundMoney } from '../utils/money';
 import { getBusinessName } from './appSettings';
+import { escapeHtml } from './reportPdfCore';
 import type { PartyStatementLine, PartyType } from '../types';
 
 export interface PartyStatementPdfInput {
@@ -14,14 +15,6 @@ export interface PartyStatementPdfInput {
   openingBalance: number;
   closingBalance: number;
   lines: PartyStatementLine[];
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 function safeFilePart(text: string): string {

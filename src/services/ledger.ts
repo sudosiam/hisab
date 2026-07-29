@@ -1465,7 +1465,7 @@ export async function verifyLedgerBalance(): Promise<{
   const totalCredit = roundMoney(row?.total_credit ?? 0);
   const difference = roundMoney(Math.abs(totalDebit - totalCredit));
   return {
-    balanced: difference < 0.02,
+    balanced: difference === 0,
     totalDebit,
     totalCredit,
     difference,

@@ -124,7 +124,7 @@ export async function shareTrialBalancePdf(data: {
   totalDebit: number;
   totalCredit: number;
 }) {
-  const balanced = Math.abs(data.totalDebit - data.totalCredit) < 0.02;
+  const balanced = Math.abs(data.totalDebit - data.totalCredit) === 0;
   const body =
     buildLedgerTableHtml(
       data.rows.map((row) => ({

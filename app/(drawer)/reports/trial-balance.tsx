@@ -78,7 +78,7 @@ export default function TrialBalanceReportScreen() {
     return <ListSkeleton />;
   }
 
-  const balanced = data ? Math.abs(data.totalDebit - data.totalCredit) < 0.02 : false;
+  const balanced = data ? Math.abs(data.totalDebit - data.totalCredit) === 0 : false;
 
   return (
     <LedgerTable

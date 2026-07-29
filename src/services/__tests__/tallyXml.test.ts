@@ -1,4 +1,10 @@
-import { __tallyXmlTestUtils, TALLY_SAMPLE_XML, formatTallyImportSummary } from '../tallyXml';
+import {
+  __tallyXmlTestUtils,
+  TALLY_SAMPLE_XML,
+  TALLY_IMPORT_MAX_CHARS,
+  formatTallyImportSummary,
+  importTallyXml,
+} from '../tallyXml';
 import type { TallyImportResult } from '../tallyXml';
 
 const {
@@ -100,5 +106,10 @@ describe('tallyXml helpers', () => {
     expect(text).toContain('Skipped: 65');
     expect(text).toContain('51 Receipts not supported');
     expect(text).toContain('2 Purchases: duplicate voucher number');
+  });
+
+  it('rejects oversized XML before parsing', async () => {
+    const huge = 'x'.repeat(TALLY_IMPORT_MAX_CHARS + 1);
+    await expect(importTallyXml(huge)).rejects.toThrow(/too large \(max 10 MB\)/i);
   });
 });

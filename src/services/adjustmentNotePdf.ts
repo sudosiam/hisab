@@ -10,15 +10,8 @@ import { formatCurrency } from '../utils/format';
 import { formatDisplayDate } from '../utils/date';
 import { deferDeleteCacheFile } from '../utils/tempShareFiles';
 import { savePdfToDevice } from '../utils/pdfExport';
+import { escapeHtml } from './reportPdfCore';
 import type { AdjustmentNoteKind } from '../types';
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 function money(n: number): string {
   return formatCurrency(n);

@@ -34,6 +34,9 @@ import type {
   SaleItem,
 } from '../types';
 
+/** Reject pathological / multi-10MB Tally dumps before regex parsing. */
+export const TALLY_IMPORT_MAX_CHARS = 10 * 1024 * 1024;
+
 /** Minimal state helpers for Tally party import (GST math removed). */
 function stateCodeFromGstin(gstin: string | null | undefined): string | null {
   const cleaned = (gstin ?? '').trim().toUpperCase();
@@ -905,6 +908,9 @@ function parseBillAllocations(ledgerBlocks: string[], partyName: string) {
 }
 
 export async function importTallyXml(xml: string): Promise<TallyImportResult> {
+  if (xml.length > TALLY_IMPORT_MAX_CHARS) {
+    throw new Error('Tally file is too large (max 10 MB).');
+  }
   const skipMap = new Map<string, number>();
   const result: TallyImportResult = {
     partiesCreated: 0,
@@ -1235,7 +1241,11 @@ export async function pickAndImportTallyXml(): Promise<TallyImportResult> {
   if (picked.canceled || !picked.assets?.[0]?.uri) {
     throw new Error('Import cancelled');
   }
-  const xml = await FileSystem.readAsStringAsync(picked.assets[0].uri, {
+  const asset = picked.assets[0];
+  if (typeof asset.size === 'number' && asset.size > TALLY_IMPORT_MAX_CHARS) {
+    throw new Error('Tally file is too large (max 10 MB).');
+  }
+  const xml = await FileSystem.readAsStringAsync(asset.uri, {
     encoding: FileSystem.EncodingType.UTF8,
   });
   return importTallyXml(xml);
