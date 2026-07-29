@@ -8,7 +8,6 @@ import {
   Alert,
   TextInput,
   ScrollView,
-  FlatList,
   ActivityIndicator,
   Modal,
 } from 'react-native';
@@ -422,13 +421,12 @@ export function ProductPicker({
               placeholder="Search products..."
               placeholderTextColor={colors.textMuted}
             />
-            <FlatList
-              data={filteredProducts}
+            <ScrollView
               style={{ maxHeight: 220 }}
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
-              keyExtractor={(item) => String(item.id)}
-              ListEmptyComponent={
+            >
+              {filteredProducts.length === 0 ? (
                 <View style={styles.emptyWrap}>
                   <Text style={styles.empty}>
                     {products.length === 0
@@ -441,29 +439,31 @@ export function ProductPicker({
                     <Text style={styles.emptyLink}>Create new product</Text>
                   </TouchableOpacity>
                 </View>
-              }
-              renderItem={({ item }) => {
-                const meta = productMeta(item, variant);
-                return (
-                  <TouchableOpacity
-                    style={[styles.option, item.id === value && styles.optionActive]}
-                    onPress={() => selectProduct(item)}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.optionText}>{item.name}</Text>
-                      <Text style={[styles.meta, meta.negative && { color: colors.danger }]}>
-                        {categoryFilter === 'All categories'
-                          ? `${categoryLabel(item)} · ${meta.text}`
-                          : meta.text}
-                      </Text>
-                    </View>
-                    {item.id === value ? (
-                      <Ionicons name="checkmark" size={18} color={colors.primary} />
-                    ) : null}
-                  </TouchableOpacity>
-                );
-              }}
-            />
+              ) : (
+                filteredProducts.map((item) => {
+                  const meta = productMeta(item, variant);
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[styles.option, item.id === value && styles.optionActive]}
+                      onPress={() => selectProduct(item)}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.optionText}>{item.name}</Text>
+                        <Text style={[styles.meta, meta.negative && { color: colors.danger }]}>
+                          {categoryFilter === 'All categories'
+                            ? `${categoryLabel(item)} · ${meta.text}`
+                            : meta.text}
+                        </Text>
+                      </View>
+                      {item.id === value ? (
+                        <Ionicons name="checkmark" size={18} color={colors.primary} />
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
             {saving ? (
               <View style={styles.savingOverlay}>
                 <ActivityIndicator color={colors.primary} />

@@ -252,9 +252,26 @@ export function LedgerTable({
     [rows.length, footerRows?.length, emptyText, styles]
   );
 
+  // Embedded in a parent ScrollView — never mount FlatList (VirtualizedList warning).
+  if (!scrollEnabled) {
+    return (
+      <View style={[styles.listEmbedded, style]}>
+        {listHeader}
+        {rows.length === 0
+          ? empty
+          : rows.map((item, index) => (
+              <React.Fragment key={keyExtractor(item)}>
+                {renderItem({ item, index })}
+              </React.Fragment>
+            ))}
+        {listFooter}
+      </View>
+    );
+  }
+
   return (
     <FlatList
-      style={[scrollEnabled ? styles.list : styles.listEmbedded, style]}
+      style={[styles.list, style]}
       contentContainerStyle={[styles.listContent, contentContainerStyle]}
       data={rows}
       keyExtractor={keyExtractor}
@@ -264,13 +281,9 @@ export function LedgerTable({
       ListFooterComponent={listFooter}
       ListEmptyComponent={empty}
       refreshControl={refreshControl}
-      scrollEnabled={scrollEnabled}
+      scrollEnabled
       keyboardShouldPersistTaps={keyboardShouldPersistTaps}
       {...FLATLIST_PERF}
-      // Nested (non-scrolling) tables must expand; windowing only when we own scroll.
-      {...(scrollEnabled
-        ? {}
-        : { initialNumToRender: rows.length || 1, windowSize: Math.max(1, rows.length) })}
     />
   );
 }
