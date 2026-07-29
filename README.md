@@ -4,7 +4,12 @@ Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. 
 
 Copyright (c) 2026 Biswa. All rights reserved.
 
-**Current version:** `11.4.2` (Android `versionCode` 44 · schema v29)
+**Current version:** `11.4.3` (Android `versionCode` 45 · schema v29)
+
+## What's new in 11.4.3
+
+- New Purchase: import multiple bills from a simple Hisab XML file
+- Settings → Tally XML: share purchase-import sample (Hisab format, not Tally)
 
 ## What's new in 11.4.2
 
@@ -130,8 +135,8 @@ Copy into `releases/` for handoff (APKs are gitignored):
 
 ```powershell
 New-Item -ItemType Directory -Force releases | Out-Null
-Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-11.4.2.apk" -Force
-adb install -r "releases\hisab-11.4.2.apk"
+Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-11.4.3.apk" -Force
+adb install -r "releases\hisab-11.4.3.apk"
 ```
 
 ## Build APK (EAS cloud)

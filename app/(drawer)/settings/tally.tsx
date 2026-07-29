@@ -1,21 +1,25 @@
 import React, { useState } from 'react';
-import { Alert, ScrollView, View } from 'react-native';
+import { Alert, ScrollView, Text, View } from 'react-native';
 import { PrimaryButton, useScreenStyles } from '../../../src/components/ui';
 import { useSettingsStyles } from '../../../src/components/settings/settingsUi';
 import { useDatabaseActions } from '../../../src/context/DatabaseContext';
+import { useTheme } from '../../../src/context/ThemeContext';
 import { formatSqliteError } from '../../../src/db/database';
+import { spacing, typography } from '../../../src/constants/theme';
 import {
   exportTallyXmlAndShare,
   formatTallyImportSummary,
   pickAndImportTallyXml,
   shareTallySampleXml,
 } from '../../../src/services/tallyXml';
+import { sharePurchaseImportSampleXml } from '../../../src/services/purchaseXmlImport';
 
 export default function TallySettingsScreen() {
   const styles = useScreenStyles();
   const localStyles = useSettingsStyles();
+  const { colors } = useTheme();
   const { refresh } = useDatabaseActions();
-  const [busy, setBusy] = useState<'export' | 'import' | 'sample' | null>(null);
+  const [busy, setBusy] = useState<'export' | 'import' | 'sample' | 'purchaseSample' | null>(null);
 
   const onExport = async () => {
     if (busy) return;
@@ -61,6 +65,18 @@ export default function TallySettingsScreen() {
     }
   };
 
+  const onPurchaseSample = async () => {
+    if (busy) return;
+    setBusy('purchaseSample');
+    try {
+      await sharePurchaseImportSampleXml();
+    } catch (e) {
+      Alert.alert('Sample failed', formatSqliteError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={[localStyles.sectionCard, { gap: 10 }]}>
@@ -82,6 +98,21 @@ export default function TallySettingsScreen() {
           onPress={onSample}
           loading={busy === 'sample'}
           disabled={!!busy && busy !== 'sample'}
+          variant="secondary"
+        />
+      </View>
+
+      <View style={[localStyles.sectionCard, { gap: 10, marginTop: spacing.md }]}>
+        <Text style={{ ...typography.caption, color: colors.textSecondary }}>
+          Hisab purchase import (New Purchase → Import purchases XML). Not a Tally file.
+        </Text>
+        <PrimaryButton
+          title={
+            busy === 'purchaseSample' ? 'Sharing…' : 'Share purchase import sample (Hisab XML)'
+          }
+          onPress={onPurchaseSample}
+          loading={busy === 'purchaseSample'}
+          disabled={!!busy && busy !== 'purchaseSample'}
           variant="secondary"
         />
       </View>

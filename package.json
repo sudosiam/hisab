@@ -1,6 +1,6 @@
 {
   "name": "hisab",
-  "version": "11.4.2",
+  "version": "11.4.3",
   "main": "index.js",
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

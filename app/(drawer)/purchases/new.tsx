@@ -24,6 +24,10 @@ import { DraftBanner } from '../../../src/components/DraftBanner';
 import { getProducts } from '../../../src/services/inventory';
 import { getPaymentAccounts } from '../../../src/services/banking';
 import { createPurchase } from '../../../src/services/purchases';
+import {
+  formatPurchaseImportSummary,
+  pickAndImportPurchasesXml,
+} from '../../../src/services/purchaseXmlImport';
 import { getNextPurchaseInvoiceNo } from '../../../src/services/invoiceNumbers';
 import { getPartyByName } from '../../../src/services/parties';
 import {
@@ -167,6 +171,7 @@ export default function NewPurchaseScreen() {
   const [items, setItems] = useState<LineItem[]>(() => [createEmptyLineItem()]);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [advanceCredit, setAdvanceCredit] = useState(0);
   const [applyAdvance, setApplyAdvance] = useState(false);
@@ -418,6 +423,27 @@ export default function NewPurchaseScreen() {
     if (fieldErrors.items) setFieldErrors((e) => ({ ...e, items: undefined }));
   };
 
+  const handleImportXml = async () => {
+    if (loading || importing) return;
+    setImporting(true);
+    try {
+      const result = await pickAndImportPurchasesXml();
+      refresh();
+      Alert.alert('Import complete', formatPurchaseImportSummary(result), [
+        {
+          text: 'OK',
+          onPress: () => router.dismissTo('/(drawer)/purchases'),
+        },
+      ]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.toLowerCase().includes('cancel')) return;
+      Alert.alert('Import failed', formatSqliteError(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const handleSave = async () => {
     if (loading) return;
 
@@ -527,6 +553,13 @@ export default function NewPurchaseScreen() {
     <FormScreen
       stickyFooter={<DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />}
     >
+      <PrimaryButton
+        title={importing ? 'Importing…' : 'Import purchases XML'}
+        onPress={handleImportXml}
+        loading={importing}
+        disabled={loading || importing}
+        variant="secondary"
+      />
       <FormInput
         label="Purchase No"
         value={invoiceNo}
@@ -665,7 +698,7 @@ export default function NewPurchaseScreen() {
         title="Save Purchase"
         onPress={handleSave}
         loading={loading}
-        disabled={isOverpaid}
+        disabled={isOverpaid || importing}
       />
     </FormScreen>
   );
