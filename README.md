@@ -4,7 +4,14 @@ Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. 
 
 Copyright (c) 2026 Biswa. All rights reserved.
 
-**Current version:** `11.4.1` (Android `versionCode` 43 · schema v29)
+**Current version:** `11.4.2` (Android `versionCode` 44 · schema v29)
+
+## What's new in 11.4.2
+
+- v29 paise migration: each table's scale UPDATE + done marker is one transaction (no double-scale crash window)
+- SecureStore auth session write failures now warn when falling back to AsyncStorage
+- Trial balance / ledger "balanced" uses exact paise equality (no leftover 0.02 float tolerance)
+- Shared PDF `escapeHtml` via `reportPdfCore`; Tally import rejects files over 10 MB
 
 ## What's new in 11.4.1
 
@@ -13,6 +20,8 @@ Copyright (c) 2026 Biswa. All rights reserved.
 - Payment voucher: friendly block on invoice delete; clear allocations when removing a payment
 - Idempotent v29 paise migration markers; friendlier SQLite error messages
 - Edit save no longer prompts Discard; settings/detail reload races tightened
+- Honest delete/remove dialogs for voucher-linked invoices; payment row voucher tags
+- Inventory report shows `Sell —` when no sell price (no invented 1.2× markup)
 - Dashboard/settings polish from 11.4.0 retained
 
 ## What's new in 11.4.0
@@ -121,8 +130,8 @@ Copy into `releases/` for handoff (APKs are gitignored):
 
 ```powershell
 New-Item -ItemType Directory -Force releases | Out-Null
-Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-11.4.1.apk" -Force
-adb install -r "releases\hisab-11.4.1.apk"
+Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-11.4.2.apk" -Force
+adb install -r "releases\hisab-11.4.2.apk"
 ```
 
 ## Build APK (EAS cloud)
