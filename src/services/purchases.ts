@@ -115,6 +115,17 @@ export async function getPurchaseById(id: number): Promise<Purchase | null> {
   return db.getFirstAsync<Purchase>('SELECT * FROM purchases WHERE id = ?', [id]);
 }
 
+/** Label-only GST flag — does not change amounts or ledger. */
+export async function setPurchaseGstFlag(purchaseId: number, isGst: boolean): Promise<void> {
+  const db = await getDatabase();
+  const existing = await db.getFirstAsync<{ id: number }>(
+    'SELECT id FROM purchases WHERE id = ?',
+    [purchaseId]
+  );
+  if (!existing) throw new Error('Purchase not found');
+  await db.runAsync('UPDATE purchases SET is_gst = ? WHERE id = ?', [isGst ? 1 : 0, purchaseId]);
+}
+
 export async function getPurchaseItems(purchaseId: number): Promise<PurchaseItem[]> {
   const db = await getDatabase();
   return db.getAllAsync<PurchaseItem>(
@@ -142,6 +153,8 @@ export async function createPurchase(params: {
   payments: PaymentInput[];
   discount_amount?: number;
   is_reverse_charge?: boolean;
+  /** Label-only GST flag; does not change amounts. */
+  is_gst?: boolean;
   notes?: string;
   vendor_invoice_no?: string;
   invoice_no?: string;
@@ -174,8 +187,8 @@ export async function createPurchase(params: {
       `INSERT INTO purchases (
          invoice_no, party_id, supplier_name, vendor_invoice_no, date, subtotal, discount_amount,
          taxable_amount, cgst_amount, sgst_amount, igst_amount, is_inter_state, place_of_supply,
-         is_reverse_charge, total_amount, paid_amount, status, notes
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         is_reverse_charge, is_gst, total_amount, paid_amount, status, notes
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         invoiceNo,
         partyId,
@@ -191,6 +204,7 @@ export async function createPurchase(params: {
         0,
         null,
         0,
+        params.is_gst ? 1 : 0,
         totalAmount,
         paidAmount,
         status,

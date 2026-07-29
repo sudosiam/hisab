@@ -167,6 +167,8 @@ export interface Purchase {
   is_inter_state: number;
   place_of_supply: string | null;
   is_reverse_charge?: number;
+  /** Label-only: 1 = GST purchase, 0 = Non-GST (no tax math). */
+  is_gst?: number;
   total_amount: number;
   paid_amount: number;
   status: PaymentStatus;

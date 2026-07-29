@@ -3,7 +3,7 @@ import { waitForDatabaseAccess } from '../services/dbMaintenance';
 import { PAID_TOLERANCE_PAISE, roundMoney, roundQty } from '../utils/money';
 
 export const DB_NAME = 'hisab.db';
-const SCHEMA_VERSION = 29;
+const SCHEMA_VERSION = 30;
 
 /** Removes the legacy attachment media folder left over from the removed attachments feature. */
 async function clearLegacyMediaFolder(): Promise<void> {
@@ -1153,6 +1153,8 @@ async function ensureGstColumns(db: SQLite.SQLiteDatabase): Promise<void> {
     { name: 'igst_amount', ddl: 'igst_amount INTEGER NOT NULL DEFAULT 0' },
     { name: 'is_inter_state', ddl: 'is_inter_state INTEGER NOT NULL DEFAULT 0' },
     { name: 'is_reverse_charge', ddl: 'is_reverse_charge INTEGER NOT NULL DEFAULT 0' },
+    // Label-only GST flag (no tax math) — schema v30
+    { name: 'is_gst', ddl: 'is_gst INTEGER NOT NULL DEFAULT 0' },
   ]);
 
   await addMissingColumns(db, 'purchase_items', [
@@ -1945,6 +1947,7 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       is_inter_state INTEGER NOT NULL DEFAULT 0,
       place_of_supply TEXT,
       is_reverse_charge INTEGER NOT NULL DEFAULT 0,
+      is_gst INTEGER NOT NULL DEFAULT 0,
       total_amount INTEGER NOT NULL DEFAULT 0,
       paid_amount INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'unpaid',

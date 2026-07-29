@@ -4,12 +4,13 @@ Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. 
 
 Copyright (c) 2026 Biswa. All rights reserved.
 
-**Current version:** `11.4.3` (Android `versionCode` 45 · schema v29)
+**Current version:** `11.4.3` (Android `versionCode` 45 · schema v30)
 
 ## What's new in 11.4.3
 
 - New Purchase: import multiple bills from a simple Hisab XML file
 - Settings → Tally XML: share purchase-import sample (Hisab format, not Tally)
+- Purchases: GST / Non-GST label badge on the list; on/off toggle on detail (label only, no tax math)
 
 ## What's new in 11.4.2
 
@@ -89,7 +90,7 @@ Copyright (c) 2026 Biswa. All rights reserved.
 ## Features
 
 - Drawer — Home · Trading (Sales, Purchases, Inventory, Adjustments) · Cash & parties · Books · Capital · App
-- SQLite local-first storage (schema v29)
+- SQLite local-first storage (schema v30)
 - Split payments, negative stock allowed, weighted-average COGS
 - Reports — P&L, cash flow, trial balance, GL, day book, receivables/payables, party ledgers (PDF)
 - Financial year settings with period sync across screens
@@ -184,7 +185,7 @@ Cloud backup is a full-database snapshot (last upload wins). Prefer local SAF fo
 ## Tech stack
 
 - Expo SDK 54 / React Native 0.81 / expo-router
-- expo-sqlite (schema v29)
+- expo-sqlite (schema v30)
 - expo-print / expo-sharing / react-native-share
 - Jest + `better-sqlite3` integration harness
 

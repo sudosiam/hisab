@@ -14,7 +14,9 @@ import {
   addPurchasePayment,
   removePurchasePayment,
   deletePurchase,
+  setPurchaseGstFlag,
 } from '../../../src/services/purchases';
+import { ThemedSwitch } from '../../../src/components/ThemedSwitch';
 import {
   getVoucherLabelsForPurchasePayments,
   getVoucherLinkForPurchase,
@@ -99,6 +101,27 @@ export default function PurchaseDetailScreen() {
           color: colors.textSecondary,
           flex: 1,
           minWidth: 0,
+        },
+        gstRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: spacing.sm,
+          marginTop: spacing.xs,
+          paddingTop: spacing.sm,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.border,
+        },
+        gstLabel: {
+          ...typography.bodyMedium,
+          color: colors.text,
+          flex: 1,
+          minWidth: 0,
+        },
+        gstHint: {
+          ...typography.caption,
+          color: colors.textMuted,
+          marginTop: 2,
         },
         meta: {
           ...typography.caption,
@@ -190,6 +213,7 @@ export default function PurchaseDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [removingPaymentId, setRemovingPaymentId] = useState<number | null>(null);
+  const [gstSaving, setGstSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const purchaseId = useMemo(() => parseRouteId(id), [id]);
 
@@ -280,6 +304,22 @@ export default function PurchaseDetailScreen() {
       Alert.alert('Error', e instanceof Error ? e.message : 'Payment failed');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleGstToggle = async (value: boolean) => {
+    if (!purchase || gstSaving) return;
+    const previous = !!purchase.is_gst;
+    setPurchase({ ...purchase, is_gst: value ? 1 : 0 });
+    setGstSaving(true);
+    try {
+      await setPurchaseGstFlag(purchase.id, value);
+      refresh();
+    } catch (e) {
+      setPurchase({ ...purchase, is_gst: previous ? 1 : 0 });
+      Alert.alert('Error', formatSqliteError(e));
+    } finally {
+      setGstSaving(false);
     }
   };
 
@@ -473,6 +513,18 @@ export default function PurchaseDetailScreen() {
               {formatCurrency(purchase.discount_amount)}
             </Text>
           ) : null}
+          <View style={localStyles.gstRow}>
+            <View style={{ flex: 1, minWidth: 0, marginRight: spacing.sm }}>
+              <Text style={localStyles.gstLabel}>GST purchase</Text>
+              <Text style={localStyles.gstHint}>Label only — does not change amounts</Text>
+            </View>
+            <ThemedSwitch
+              value={!!purchase.is_gst}
+              onValueChange={(v) => void handleGstToggle(v)}
+              disabled={gstSaving}
+              accessibilityLabel="GST purchase"
+            />
+          </View>
         </View>
 
         <View style={localStyles.matrix}>

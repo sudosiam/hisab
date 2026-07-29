@@ -89,10 +89,12 @@ export default function PurchasesListScreen() {
           title={item.invoice_no}
           subtitle={`${item.supplier_name} · ${formatDisplayDate(item.date)}`}
           amount={item.total_amount}
+          pill={item.is_gst ? 'GST' : 'Non-GST'}
+          pillTone={item.is_gst ? 'default' : 'muted'}
           badge={<StatusBadge status={item.status} />}
           dueAmount={due}
           onPress={() => router.push(`/(drawer)/purchases/${item.id}`)}
-          accessibilityLabel={`Purchase ${item.invoice_no}`}
+          accessibilityLabel={`Purchase ${item.invoice_no}${item.is_gst ? ', GST' : ', Non-GST'}`}
         />
       );
     },
