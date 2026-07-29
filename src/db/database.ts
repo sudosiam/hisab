@@ -418,7 +418,9 @@ const MONEY_PAISE_V29_TABLES_KEY = 'money_paise_v29_tables';
 
 /** Scale legacy rupee REAL amounts to integer paise (×100) for schema v29.
  * Per-table markers make this resume-safe if the process dies mid-migration
- * (DDL auto-commits; schema_version is only bumped after this function returns). */
+ * (schema_version is only bumped after this function returns).
+ * Each table's UPDATE + marker is one transaction — pure DML, safe to wrap
+ * (unlike DDL migrations that can implicitly commit). */
 async function migrateMoneyColumnsToIntegerPaise(db: SQLite.SQLiteDatabase): Promise<void> {
   const doneRaw = await db.getFirstAsync<{ value: string }>(
     `SELECT value FROM settings WHERE key = ?`,
@@ -436,12 +438,16 @@ async function migrateMoneyColumnsToIntegerPaise(db: SQLite.SQLiteDatabase): Pro
     }
   }
 
-  const markTableDone = async (table: string) => {
-    doneTables.add(table);
+  const persistDoneTables = async (tables: Set<string>) => {
     await db.runAsync(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, [
       MONEY_PAISE_V29_TABLES_KEY,
-      JSON.stringify([...doneTables]),
+      JSON.stringify([...tables]),
     ]);
+  };
+
+  const markTableDone = async (table: string) => {
+    doneTables.add(table);
+    await persistDoneTables(doneTables);
   };
 
   const updates: { table: string; columns: string[] }[] = [
@@ -537,8 +543,15 @@ async function migrateMoneyColumnsToIntegerPaise(db: SQLite.SQLiteDatabase): Pro
       continue;
     }
     const assignments = present.map((c) => `${c} = CAST(ROUND(COALESCE(${c}, 0) * 100) AS INTEGER)`);
-    await db.runAsync(`UPDATE ${table} SET ${assignments.join(', ')}`);
-    await markTableDone(table);
+    // Atomic with marker so a crash cannot leave scaled data unmarked
+    // (which would ×100 again on the next launch).
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(`UPDATE ${table} SET ${assignments.join(', ')}`);
+      const next = new Set(doneTables);
+      next.add(table);
+      await persistDoneTables(next);
+    });
+    doneTables.add(table);
   }
 }
 

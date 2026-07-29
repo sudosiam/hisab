@@ -34,7 +34,13 @@ async function setSecure(key: string, value: string): Promise<boolean> {
   try {
     await SecureStore.setItemAsync(key, value);
     return true;
-  } catch {
+  } catch (err) {
+    // Size limits / keystore quirks — fall back to AsyncStorage, but surface it.
+    console.warn(
+      '[supabaseAuthStorage] SecureStore.setItemAsync failed; falling back to AsyncStorage',
+      key,
+      err
+    );
     return false;
   }
 }
@@ -69,6 +75,10 @@ export const supabaseAuthStorage: AuthStorage = {
         }
         return;
       }
+      console.warn(
+        '[supabaseAuthStorage] session stored in AsyncStorage after SecureStore write failure',
+        key
+      );
     }
     await AsyncStorage.setItem(key, value);
   },
