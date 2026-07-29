@@ -365,8 +365,9 @@ export default function NewPaymentScreen() {
   };
 
   return (
-    <FormScreen>
-      <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
+    <FormScreen
+      stickyFooter={<DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />}
+    >
       <SegmentedControl
         options={[
           { value: 'receipt', label: 'Money In (Receipt)' },

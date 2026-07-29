@@ -4,20 +4,30 @@ import { getPeriodFinancials, type AccountingBasis, SALE_LINE_UNIT_COST_SQL } fr
 import { getBalanceSheet } from './banking';
 import { roundMoney } from '../utils/money';
 import { resolvePeriodRange } from '../utils/period';
+import { getFinancialYearStartMonth } from './appSettings';
 import {
+  fiscalMonthShortLabel,
+  formatFinancialYearShortLabel,
+  getCurrentMonthKey,
+  getFiscalYearMonthKeysForStartYear,
   getMonthRange,
   isAllPeriodKey,
   isFinancialYearPeriodKey,
   monthKeyToLabel,
+  parseFinancialYearPeriodKey,
+  shiftMonth,
 } from '../utils/date';
 import { eachDayOfInterval, format, parse } from 'date-fns';
 import type { DashboardStats } from '../types';
 
 export type { AccountingBasis };
 
+export type DashboardTrendGranularity = 'day' | 'month';
+
 export interface DashboardDayTrend {
+  /** ISO date (day) or yyyy-MM (month). */
   date: string;
-  /** Day-of-month label, e.g. "1", "12". */
+  /** Day-of-month or month short label. */
   shortLabel: string;
   sales: number;
   purchases: number;
@@ -25,17 +35,20 @@ export interface DashboardDayTrend {
   netProfit: number;
 }
 
-export interface DashboardDailyTrend {
-  /** False when period is FY / all — chart needs a single month. */
+/** @deprecated Prefer DashboardTrend — alias kept for callers. */
+export type DashboardDailyTrend = DashboardTrend;
+
+export interface DashboardTrend {
   available: boolean;
+  granularity: DashboardTrendGranularity;
   periodLabel: string;
   days: DashboardDayTrend[];
 }
 
-function totalsByDay(rows: { day: string; total: number }[]): Map<string, number> {
+function totalsByKey(rows: { key: string; total: number }[]): Map<string, number> {
   const map = new Map<string, number>();
   for (const row of rows) {
-    map.set(row.day, roundMoney(row.total ?? 0));
+    map.set(row.key, roundMoney(row.total ?? 0));
   }
   return map;
 }
@@ -48,57 +61,58 @@ function daysInMonthKey(monthKey: string): string[] {
   }).map((d) => format(d, 'yyyy-MM-dd'));
 }
 
-/** Daily Sales / Purchases / Expenses / Profit for the selected calendar month. */
-export async function getDashboardDailyTrend(
-  periodKey: string,
-  basis: AccountingBasis = 'accrual'
-): Promise<DashboardDailyTrend> {
-  if (isAllPeriodKey(periodKey) || isFinancialYearPeriodKey(periodKey)) {
-    return {
-      available: false,
-      periodLabel: isAllPeriodKey(periodKey) ? 'All time' : 'Financial year',
-      days: [],
-    };
+function lastTwelveCalendarMonthKeys(asOfKey = getCurrentMonthKey()): string[] {
+  const keys: string[] = [];
+  for (let i = 11; i >= 0; i -= 1) {
+    keys.push(shiftMonth(asOfKey, -i));
   }
+  return keys;
+}
 
-  const monthKey = periodKey;
-  const days = daysInMonthKey(monthKey);
-  const { start, end } = getMonthRange(monthKey);
+async function loadTrendPointsForRange(
+  keys: string[],
+  keyExpr: 'day' | 'month',
+  start: string,
+  end: string,
+  basis: AccountingBasis
+): Promise<DashboardDayTrend[]> {
   const db = await getDatabase();
+  const selectKey =
+    keyExpr === 'day'
+      ? (tableAlias: string, dateCol: string) => `${tableAlias}.${dateCol} as key`
+      : (tableAlias: string, dateCol: string) => `substr(${tableAlias}.${dateCol}, 1, 7) as key`;
 
   const salesSql =
     basis === 'cash'
-      ? `SELECT sp.date as day, COALESCE(SUM(sp.amount), 0) as total
+      ? `SELECT ${selectKey('sp', 'date')}, COALESCE(SUM(sp.amount), 0) as total
          FROM sale_payments sp
          JOIN accounts a ON a.id = sp.account_id
          WHERE sp.date >= ? AND sp.date <= ?
            AND COALESCE(a.is_excluded, 0) = 0
-         GROUP BY sp.date`
-      : `SELECT s.date as day, COALESCE(SUM(s.total_amount), 0) as total
+         GROUP BY key`
+      : `SELECT ${selectKey('s', 'date')}, COALESCE(SUM(s.total_amount), 0) as total
          FROM sales s
          WHERE s.date >= ? AND s.date <= ?
            AND EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id)
-         GROUP BY s.date`;
+         GROUP BY key`;
 
   const purchasesSql =
     basis === 'cash'
-      ? `SELECT pp.date as day, COALESCE(SUM(pp.amount), 0) as total
+      ? `SELECT ${selectKey('pp', 'date')}, COALESCE(SUM(pp.amount), 0) as total
          FROM purchase_payments pp
          JOIN accounts a ON a.id = pp.account_id
          WHERE pp.date >= ? AND pp.date <= ?
            AND COALESCE(a.is_excluded, 0) = 0
-         GROUP BY pp.date`
-      : `SELECT p.date as day, COALESCE(SUM(p.total_amount), 0) as total
+         GROUP BY key`
+      : `SELECT ${selectKey('p', 'date')}, COALESCE(SUM(p.total_amount), 0) as total
          FROM purchases p
          WHERE p.date >= ? AND p.date <= ?
            AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = p.id)
-         GROUP BY p.date`;
+         GROUP BY key`;
 
-  // Cash profit must match getPeriodFinancials: cash in − payment-prorated COGS − exp + other.
-  // Accrual uses sale-date COGS. Do not use purchase payments as a COGS substitute.
   const cogsSql =
     basis === 'cash'
-      ? `SELECT sp.date as day, COALESCE(SUM(
+      ? `SELECT ${selectKey('sp', 'date')}, COALESCE(SUM(
            (
              SELECT COALESCE(SUM(${SALE_LINE_UNIT_COST_SQL} * si.qty), 0)
              FROM sale_items si
@@ -112,65 +126,119 @@ export async function getDashboardDailyTrend(
          WHERE sp.date >= ? AND sp.date <= ?
            AND COALESCE(a.is_excluded, 0) = 0
            AND s.total_amount > 0
-         GROUP BY sp.date`
-      : `SELECT s.date as day, COALESCE(SUM(
+         GROUP BY key`
+      : `SELECT substr(s.date, 1, ${keyExpr === 'day' ? 10 : 7}) as key, COALESCE(SUM(
            ${SALE_LINE_UNIT_COST_SQL} * si.qty
          ), 0) as total
          FROM sale_items si JOIN sales s ON s.id = si.sale_id
          JOIN products p ON p.id = si.product_id
          WHERE s.date >= ? AND s.date <= ?
-         GROUP BY s.date`;
+         GROUP BY key`;
 
   const [salesRows, purchaseRows, expenseRows, cogsRows, otherRows] = await Promise.all([
-    db.getAllAsync<{ day: string; total: number }>(salesSql, [start, end]),
-    db.getAllAsync<{ day: string; total: number }>(purchasesSql, [start, end]),
-    db.getAllAsync<{ day: string; total: number }>(
-      `SELECT e.date as day, COALESCE(SUM(e.amount), 0) as total
+    db.getAllAsync<{ key: string; total: number }>(salesSql, [start, end]),
+    db.getAllAsync<{ key: string; total: number }>(purchasesSql, [start, end]),
+    db.getAllAsync<{ key: string; total: number }>(
+      `SELECT ${selectKey('e', 'date')}, COALESCE(SUM(e.amount), 0) as total
        FROM expenses e
        JOIN accounts a ON a.id = e.account_id
        WHERE e.date >= ? AND e.date <= ? AND COALESCE(a.is_excluded, 0) = 0
-       GROUP BY e.date`,
+       GROUP BY key`,
       [start, end]
     ),
-    db.getAllAsync<{ day: string; total: number }>(cogsSql, [start, end]),
-    db.getAllAsync<{ day: string; total: number }>(
-      `SELECT oi.date as day, COALESCE(SUM(oi.amount), 0) as total
+    db.getAllAsync<{ key: string; total: number }>(cogsSql, [start, end]),
+    db.getAllAsync<{ key: string; total: number }>(
+      `SELECT ${selectKey('oi', 'date')}, COALESCE(SUM(oi.amount), 0) as total
        FROM other_income oi
        JOIN accounts a ON a.id = oi.account_id
        WHERE oi.date >= ? AND oi.date <= ? AND COALESCE(a.is_excluded, 0) = 0
-       GROUP BY oi.date`,
+       GROUP BY key`,
       [start, end]
     ),
   ]);
 
-  const salesMap = totalsByDay(salesRows);
-  const purchaseMap = totalsByDay(purchaseRows);
-  const expenseMap = totalsByDay(expenseRows);
-  const cogsMap = totalsByDay(cogsRows);
-  const otherMap = totalsByDay(otherRows);
+  const salesMap = totalsByKey(salesRows);
+  const purchaseMap = totalsByKey(purchaseRows);
+  const expenseMap = totalsByKey(expenseRows);
+  const cogsMap = totalsByKey(cogsRows);
+  const otherMap = totalsByKey(otherRows);
 
-  const dayRows: DashboardDayTrend[] = days.map((date) => {
-    const sales = salesMap.get(date) ?? 0;
-    const purchases = purchaseMap.get(date) ?? 0;
-    const expenses = expenseMap.get(date) ?? 0;
-    const cogs = cogsMap.get(date) ?? 0;
-    const otherIncome = otherMap.get(date) ?? 0;
+  return keys.map((key) => {
+    const sales = salesMap.get(key) ?? 0;
+    const purchases = purchaseMap.get(key) ?? 0;
+    const expenses = expenseMap.get(key) ?? 0;
+    const cogs = cogsMap.get(key) ?? 0;
+    const otherIncome = otherMap.get(key) ?? 0;
     const netProfit = roundMoney(sales - cogs - expenses + otherIncome);
+    const shortLabel =
+      keyExpr === 'day'
+        ? String(parseInt(key.slice(8, 10), 10))
+        : fiscalMonthShortLabel(key);
 
     return {
-      date,
-      shortLabel: String(parseInt(date.slice(8, 10), 10)),
+      date: key,
+      shortLabel,
       sales,
       purchases,
       expenses,
       netProfit,
     };
   });
+}
+
+/** Sales / Purchases / Expenses / Profit trend for the selected period. */
+export async function getDashboardDailyTrend(
+  periodKey: string,
+  basis: AccountingBasis = 'accrual'
+): Promise<DashboardTrend> {
+  return getDashboardTrend(periodKey, basis);
+}
+
+export async function getDashboardTrend(
+  periodKey: string,
+  basis: AccountingBasis = 'accrual'
+): Promise<DashboardTrend> {
+  if (isAllPeriodKey(periodKey)) {
+    const monthKeys = lastTwelveCalendarMonthKeys();
+    const { start } = getMonthRange(monthKeys[0]);
+    const { end } = getMonthRange(monthKeys[monthKeys.length - 1]);
+    const days = await loadTrendPointsForRange(monthKeys, 'month', start, end, basis);
+    return {
+      available: true,
+      granularity: 'month',
+      periodLabel: 'Last 12 months',
+      days,
+    };
+  }
+
+  if (isFinancialYearPeriodKey(periodKey)) {
+    const fyStartYear = parseFinancialYearPeriodKey(periodKey);
+    if (fyStartYear == null) {
+      return { available: false, granularity: 'month', periodLabel: 'Financial year', days: [] };
+    }
+    const fyStartMonth = await getFinancialYearStartMonth();
+    const monthKeys = getFiscalYearMonthKeysForStartYear(fyStartYear, fyStartMonth);
+    const { start } = getMonthRange(monthKeys[0]);
+    const { end } = getMonthRange(monthKeys[monthKeys.length - 1]);
+    const days = await loadTrendPointsForRange(monthKeys, 'month', start, end, basis);
+    return {
+      available: true,
+      granularity: 'month',
+      periodLabel: `FY ${formatFinancialYearShortLabel(fyStartYear)}`,
+      days,
+    };
+  }
+
+  const monthKey = periodKey;
+  const dayKeys = daysInMonthKey(monthKey);
+  const { start, end } = getMonthRange(monthKey);
+  const days = await loadTrendPointsForRange(dayKeys, 'day', start, end, basis);
 
   return {
     available: true,
+    granularity: 'day',
     periodLabel: monthKeyToLabel(monthKey),
-    days: dayRows,
+    days,
   };
 }
 

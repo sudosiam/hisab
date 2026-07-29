@@ -42,7 +42,10 @@ export interface GrowthMonthRow {
 export interface GrowthReport {
   snapshot: GrowthSnapshot;
   months: GrowthMonthRow[];
+  /** Prior FY months aligned by fiscal month index (same length as `months`). */
+  priorMonths: GrowthMonthRow[];
   financialYearRangeLabel: string;
+  priorFinancialYearRangeLabel: string;
 }
 
 function totalsByMonth(rows: { month_key: string; total: number }[]): Map<string, number> {
@@ -178,7 +181,11 @@ export async function getGrowthReport(asOf: Date = new Date()): Promise<GrowthRe
   };
 
   const monthKeys = getFiscalYearMonthKeysForStartYear(fyStartYear, fyStartMonth);
-  const financialsByMonth = await getFiscalYearFinancialsByMonth(monthKeys);
+  const priorMonthKeys = getFiscalYearMonthKeysForStartYear(fyStartYear - 1, fyStartMonth);
+  const [financialsByMonth, priorFinancialsByMonth] = await Promise.all([
+    getFiscalYearFinancialsByMonth(monthKeys),
+    getFiscalYearFinancialsByMonth(priorMonthKeys),
+  ]);
   let cumulative = 0;
   const months: GrowthMonthRow[] = [];
 
@@ -211,9 +218,42 @@ export async function getGrowthReport(asOf: Date = new Date()): Promise<GrowthRe
     });
   }
 
+  let priorCumulative = 0;
+  const priorMonths: GrowthMonthRow[] = [];
+  for (const monthKey of priorMonthKeys) {
+    const fin = priorFinancialsByMonth.get(monthKey) ?? {
+      revenue: 0,
+      cogs: 0,
+      operatingExpenses: 0,
+      otherIncome: 0,
+      netProfit: 0,
+    };
+    priorCumulative = addMoney(priorCumulative, fin.netProfit);
+    const hasActivity =
+      fin.revenue > 0 ||
+      fin.cogs > 0 ||
+      fin.operatingExpenses > 0 ||
+      fin.otherIncome > 0;
+
+    priorMonths.push({
+      monthKey,
+      label: fiscalMonthLongLabel(monthKey),
+      shortLabel: fiscalMonthShortLabel(monthKey),
+      netProfit: fin.netProfit,
+      revenue: fin.revenue,
+      cogs: fin.cogs,
+      operatingExpenses: fin.operatingExpenses,
+      otherIncome: fin.otherIncome,
+      cumulativeSurplus: roundMoney(priorCumulative),
+      hasActivity,
+    });
+  }
+
   return {
     snapshot,
     months,
+    priorMonths,
     financialYearRangeLabel: formatFinancialYearShortLabel(fyStartYear),
+    priorFinancialYearRangeLabel: formatFinancialYearShortLabel(fyStartYear - 1),
   };
 }

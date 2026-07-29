@@ -9,6 +9,7 @@ import type {
 import { monthKeyToLabel } from '../utils/date';
 import { formatPercent, formatSignedCurrency } from '../utils/format';
 import {
+  buildHtmlBarChart,
   buildLedgerTableHtml,
   buildLinesSection,
   buildTableHtml,
@@ -357,7 +358,12 @@ export async function shareExpenseCategoriesPdf(
   total: number
 ) {
   const period = monthKeyToLabel(periodKey);
-  const body = buildTableHtml(
+  const body =
+    (rows.length > 0
+      ? '<div class="section-title">Mix</div>' +
+        buildHtmlBarChart(rows.map((row) => ({ label: row.category, value: row.total })))
+      : '') +
+    buildTableHtml(
     [
       { key: 'category', label: 'Category' },
       { key: 'count', label: 'Entries', align: 'center', width: '64px' },
@@ -433,7 +439,10 @@ export async function shareGrowthReportPdf(data: GrowthReport) {
       { label: 'Ahead / Behind', value: formatSignedCurrency(snap.aheadBehind) },
       { label: 'Return on Investment', value: formatPercent(snap.returnOnInvestment) },
     ]) +
-    '<div class="section-title">Monthly Performance</div>';
+    '<div class="section-title">Monthly Performance</div>' +
+    buildHtmlBarChart(
+      data.months.map((row) => ({ label: row.shortLabel, value: Math.max(0, row.netProfit) }))
+    );
 
   body += buildTableHtml(
     [

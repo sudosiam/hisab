@@ -16,12 +16,22 @@ interface Props {
   height?: number;
   /** For ~30 day charts — only label every few ticks. */
   denseLabels?: boolean;
+  /** Optional prior-period series (dashed overlay). */
+  priorData?: ChartPoint[];
+  priorLabel?: string;
 }
 
 const X_LABEL_HEIGHT = 18;
 const PLOT_PADDING = 6;
 
-export function GrowthChart({ data, variant, height = 140, denseLabels = false }: Props) {
+export function GrowthChart({
+  data,
+  variant,
+  height = 140,
+  denseLabels = false,
+  priorData,
+  priorLabel = 'Prior FY',
+}: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors, height), [colors, height]);
   const [plotWidth, setPlotWidth] = useState(0);
@@ -35,6 +45,10 @@ export function GrowthChart({ data, variant, height = 140, denseLabels = false }
     ...d,
     value: Number.isFinite(d.value) ? d.value : 0,
   }));
+  const safePrior = (priorData ?? []).map((d) => ({
+    ...d,
+    value: Number.isFinite(d.value) ? d.value : 0,
+  }));
 
   const labelStep = denseLabels && safeData.length > 16 ? Math.ceil(safeData.length / 8) : 1;
   const showLabel = (index: number) =>
@@ -44,7 +58,10 @@ export function GrowthChart({ data, variant, height = 140, denseLabels = false }
     return <Text style={styles.empty}>No data yet</Text>;
   }
 
-  const values = safeData.map((d) => d.value);
+  const values = [
+    ...safeData.map((d) => d.value),
+    ...safePrior.map((d) => d.value),
+  ];
   const maxAbs = Math.max(...values.map((v) => Math.abs(v)), 1);
   const maxPositive = Math.max(...values.filter((v) => v >= 0), 0);
   const maxNegative = Math.max(...values.filter((v) => v < 0).map((v) => Math.abs(v)), 0);
@@ -56,13 +73,13 @@ export function GrowthChart({ data, variant, height = 140, denseLabels = false }
     const lineMin = Math.min(...values, 0);
     const range = Math.max(lineMax - lineMin, 1);
 
-    const points =
-      plotWidth > 0 && safeData.length > 0
-        ? safeData.map((point, index) => {
+    const buildPoints = (series: ChartPoint[]) =>
+      plotWidth > 0 && series.length > 0
+        ? series.map((point, index) => {
             const x =
-              safeData.length === 1
+              series.length === 1
                 ? plotWidth / 2
-                : PLOT_PADDING + (index / (safeData.length - 1)) * (plotWidth - PLOT_PADDING * 2);
+                : PLOT_PADDING + (index / (series.length - 1)) * (plotWidth - PLOT_PADDING * 2);
             const y =
               PLOT_PADDING +
               (plotHeight - PLOT_PADDING * 2) * (1 - (point.value - lineMin) / range);
@@ -70,7 +87,10 @@ export function GrowthChart({ data, variant, height = 140, denseLabels = false }
           })
         : [];
 
+    const points = buildPoints(safeData);
+    const priorPoints = buildPoints(safePrior);
     const polylinePoints = points.map((p) => `${p.x},${p.y}`).join(' ');
+    const priorPolyline = priorPoints.map((p) => `${p.x},${p.y}`).join(' ');
 
     return (
       <View style={styles.wrap}>
@@ -97,6 +117,17 @@ export function GrowthChart({ data, variant, height = 140, denseLabels = false }
                   stroke={colors.border}
                   strokeWidth={1}
                 />
+                {priorPoints.length > 1 && priorPolyline.length > 0 ? (
+                  <Polyline
+                    points={priorPolyline}
+                    fill="none"
+                    stroke={colors.textMuted}
+                    strokeWidth={2}
+                    strokeDasharray="5 4"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                ) : null}
                 {points.length > 1 && polylinePoints.length > 0 ? (
                   <Polyline
                     points={polylinePoints}
@@ -121,6 +152,9 @@ export function GrowthChart({ data, variant, height = 140, denseLabels = false }
               </Svg>
             ) : null}
           </View>
+          {safePrior.length > 0 ? (
+            <Text style={styles.priorHint}>{priorLabel} (dashed)</Text>
+          ) : null}
           <View style={styles.xLabelRow}>
             {safeData.map((point, index) => (
               <Text key={`${point.label}-${index}`} style={styles.xLabel} numberOfLines={1}>
@@ -150,34 +184,53 @@ export function GrowthChart({ data, variant, height = 140, denseLabels = false }
           {safeData.map((point, index) => {
             const magnitude = (Math.abs(point.value) / maxAbs) * (halfHeight - 6);
             const isPositive = point.value >= 0;
+            const prior = safePrior[index];
+            const priorMag =
+              prior != null ? (Math.abs(prior.value) / maxAbs) * (halfHeight - 6) : 0;
             return (
               <View key={`${point.label}-${index}`} style={styles.barColumn}>
                 <View style={styles.barHalf}>
                   {isPositive ? (
-                    <View
-                      style={[
-                        styles.bar,
-                        {
-                          height: Math.max(magnitude, point.value !== 0 ? 4 : 0),
-                          backgroundColor: colors.success,
-                        },
-                      ]}
-                    />
+                    <View style={styles.barStack}>
+                      {prior != null && prior.value >= 0 ? (
+                        <View
+                          style={[
+                            styles.barPrior,
+                            {
+                              height: Math.max(priorMag, prior.value !== 0 ? 3 : 0),
+                              backgroundColor: colors.textMuted,
+                              opacity: 0.35,
+                            },
+                          ]}
+                        />
+                      ) : null}
+                      <View
+                        style={[
+                          styles.bar,
+                          {
+                            height: Math.max(magnitude, point.value !== 0 ? 4 : 0),
+                            backgroundColor: colors.success,
+                          },
+                        ]}
+                      />
+                    </View>
                   ) : (
                     <View style={{ flex: 1 }} />
                   )}
                 </View>
                 <View style={styles.barHalf}>
                   {!isPositive ? (
-                    <View
-                      style={[
-                        styles.bar,
-                        {
-                          height: Math.max(magnitude, point.value !== 0 ? 4 : 0),
-                          backgroundColor: colors.danger,
-                        },
-                      ]}
-                    />
+                    <View style={styles.barStack}>
+                      <View
+                        style={[
+                          styles.bar,
+                          {
+                            height: Math.max(magnitude, point.value !== 0 ? 4 : 0),
+                            backgroundColor: colors.danger,
+                          },
+                        ]}
+                      />
+                    </View>
                   ) : (
                     <View style={{ flex: 1 }} />
                   )}
@@ -187,6 +240,9 @@ export function GrowthChart({ data, variant, height = 140, denseLabels = false }
             );
           })}
         </View>
+        {safePrior.length > 0 ? (
+          <Text style={styles.priorHint}>{priorLabel} (muted bars)</Text>
+        ) : null}
       </View>
     </View>
   );
@@ -244,6 +300,26 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors'], height: num
       width: '65%',
       borderRadius: radius.sm,
       minHeight: 0,
+    },
+    barPrior: {
+      width: '40%',
+      borderRadius: radius.sm,
+      minHeight: 0,
+      position: 'absolute',
+      bottom: 0,
+      alignSelf: 'center',
+    },
+    barStack: {
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      flex: 1,
+    },
+    priorHint: {
+      fontSize: 10,
+      color: colors.textMuted,
+      marginTop: 4,
+      textAlign: 'right',
     },
     xLabel: {
       flex: 1,

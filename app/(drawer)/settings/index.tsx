@@ -37,6 +37,11 @@ const BUSINESS_ITEMS: SettingsItem[] = [
     route: '/(drawer)/settings/invoicing',
     icon: 'document-text-outline',
   },
+  {
+    title: 'Dashboard',
+    route: '/(drawer)/settings/dashboard',
+    icon: 'grid-outline',
+  },
 ];
 
 const DATA_ITEMS: SettingsItem[] = [
@@ -44,6 +49,11 @@ const DATA_ITEMS: SettingsItem[] = [
     title: 'Backup',
     route: '/(drawer)/settings/backup',
     icon: 'cloud-upload-outline',
+  },
+  {
+    title: 'Reminders',
+    route: '/(drawer)/settings/reminders',
+    icon: 'notifications-outline',
   },
   {
     title: 'Tally XML',

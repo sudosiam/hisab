@@ -22,7 +22,8 @@ const ROW_ACTIVE_OPACITY = 0.75;
 export type LedgerRow = Pick<
   PartyStatementLine,
   'id' | 'date' | 'description' | 'debit' | 'credit' | 'balance'
->;
+> &
+  Partial<Pick<PartyStatementLine, 'reference_type' | 'reference_id'>>;
 
 /** Compact ledger row height for getItemLayout (padding + line). */
 export const LEDGER_ROW_HEIGHT = 36;

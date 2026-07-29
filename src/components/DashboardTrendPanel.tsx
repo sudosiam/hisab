@@ -5,10 +5,11 @@ import { cardSurface } from '../constants/shadows';
 import { spacing, typography } from '../constants/theme';
 import { MultiLineTrendChart } from './MultiLineTrendChart';
 import { SectionHeader } from './ui';
-import type { DashboardDailyTrend } from '../services/dashboard';
+import type { DashboardTrend } from '../services/dashboard';
+import { fiscalMonthLongLabel } from '../utils/date';
 
 interface Props {
-  trend: DashboardDailyTrend | null;
+  trend: DashboardTrend | null;
   amountsHidden?: boolean;
 }
 
@@ -18,11 +19,22 @@ export function DashboardTrendPanel({ trend, amountsHidden = false }: Props) {
 
   const chart = useMemo(() => {
     if (!trend?.available) {
-      return { labels: [] as string[], series: [] as ReturnType<typeof buildSeries> };
+      return {
+        labels: [] as string[],
+        series: [] as ReturnType<typeof buildSeries>,
+        selectedLabels: [] as string[],
+      };
     }
     return {
       labels: trend.days.map((d) => d.shortLabel),
       series: buildSeries(trend, colors),
+      selectedLabels: trend.days.map((d) =>
+        trend.granularity === 'day'
+          ? `Day ${d.shortLabel}`
+          : d.date.length === 7
+            ? fiscalMonthLongLabel(d.date)
+            : d.shortLabel
+      ),
     };
   }, [trend, colors]);
 
@@ -35,11 +47,13 @@ export function DashboardTrendPanel({ trend, amountsHidden = false }: Props) {
     [trend]
   );
 
+  const title = trend?.granularity === 'month' ? 'Monthly trend' : 'Daily trend';
+
   return (
     <View style={styles.panel}>
       <View style={styles.header}>
         <View style={styles.headerTitle}>
-          <SectionHeader title="Daily trend" tight />
+          <SectionHeader title={title} tight />
         </View>
         {trend?.periodLabel ? <Text style={styles.periodLabel}>{trend.periodLabel}</Text> : null}
       </View>
@@ -49,17 +63,25 @@ export function DashboardTrendPanel({ trend, amountsHidden = false }: Props) {
       ) : !trend ? (
         <Text style={styles.placeholder}>Loading…</Text>
       ) : !trend.available ? (
-        <Text style={styles.placeholder}>Pick a month to see daily lines.</Text>
+        <Text style={styles.placeholder}>No trend for this period</Text>
       ) : !hasAnyActivity ? (
-        <Text style={styles.placeholder}>No activity this month</Text>
+        <Text style={styles.placeholder}>
+          {trend.granularity === 'month' ? 'No activity in this period' : 'No activity this month'}
+        </Text>
       ) : (
-        <MultiLineTrendChart labels={chart.labels} series={chart.series} height={180} />
+        <MultiLineTrendChart
+          labels={chart.labels}
+          series={chart.series}
+          height={180}
+          pointLabel={trend.granularity === 'month' ? 'Month' : 'Day'}
+          selectedLabels={chart.selectedLabels}
+        />
       )}
     </View>
   );
 }
 
-function buildSeries(trend: DashboardDailyTrend, colors: ReturnType<typeof useTheme>['colors']) {
+function buildSeries(trend: DashboardTrend, colors: ReturnType<typeof useTheme>['colors']) {
   return [
     {
       key: 'sales',

@@ -605,9 +605,9 @@ export default function NewSaleScreen() {
   };
 
   return (
-    <FormScreen>
-      <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
-
+    <FormScreen
+      stickyFooter={<DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />}
+    >
       <View style={localStyles.headerStrip}>
         <SegmentedControl
           options={[

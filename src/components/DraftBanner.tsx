@@ -1,16 +1,18 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
-import { spacing, radius } from '../constants/theme';
-import { configureExpandAnimation } from '../utils/layoutAnimation';
+import { spacing, radius, typography } from '../constants/theme';
 
 interface Props {
   visible: boolean;
   onDiscard: () => void;
 }
 
+/** Floating footer chip — does not insert into ScrollView (avoids shoving the form down). */
 export function DraftBanner({ visible, onDiscard }: Props) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -22,35 +24,42 @@ export function DraftBanner({ visible, onDiscard }: Props) {
           borderRadius: radius.full,
           paddingVertical: spacing.sm,
           paddingHorizontal: spacing.md,
-          marginBottom: spacing.md,
-          minHeight: 44,
-          borderWidth: 0,
+          marginHorizontal: spacing.md,
+          marginBottom: Math.max(insets.bottom, spacing.sm),
+          minHeight: 40,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
+          ...(isDark
+            ? {}
+            : {
+                shadowColor: '#000',
+                shadowOpacity: 0.08,
+                shadowRadius: 8,
+                shadowOffset: { width: 0, height: 2 },
+                elevation: 3,
+              }),
         },
         text: {
           flex: 1,
-          fontSize: 12,
+          ...typography.caption,
           color: colors.onPrimaryContainer,
           marginRight: spacing.sm,
-          fontWeight: '500',
+          fontWeight: '600',
         },
         discard: {
-          fontSize: 12,
+          ...typography.caption,
           fontWeight: '700',
           color: colors.danger,
         },
       }),
-    [colors]
+    [colors, isDark, insets.bottom]
   );
-
-  useEffect(() => {
-    configureExpandAnimation();
-  }, [visible]);
 
   if (!visible) return null;
 
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.text}>Draft saved automatically</Text>
+    <View style={styles.wrap} pointerEvents="box-none">
+      <Text style={styles.text}>Draft saved</Text>
       <TouchableOpacity
         onPress={onDiscard}
         hitSlop={8}

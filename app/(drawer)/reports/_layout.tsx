@@ -1,11 +1,14 @@
 import { Stack } from 'expo-router';
-import { useStackScreenOptions } from '../../../src/navigation/screenOptions';
+import {
+  stackScreenListeners,
+  useStackScreenOptions,
+} from '../../../src/navigation/screenOptions';
 
 export default function ReportsLayout() {
   const screenOptions = useStackScreenOptions();
 
   return (
-    <Stack screenOptions={screenOptions}>
+    <Stack screenOptions={screenOptions} screenListeners={stackScreenListeners}>
       <Stack.Screen name="index" options={{ title: 'Reports' }} />
       <Stack.Screen name="sales" options={{ title: 'Sales Report' }} />
       <Stack.Screen name="purchases" options={{ title: 'Purchase Report' }} />

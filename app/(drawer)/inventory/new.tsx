@@ -160,8 +160,9 @@ export default function NewProductScreen() {
   };
 
   return (
-    <FormScreen>
-      <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
+    <FormScreen
+      stickyFooter={<DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />}
+    >
       <FormInput label="Product Name" value={name} onChangeText={setName} />
       <CategoryPicker value={category} onChange={setCategory} />
       <FormInput label="SKU (optional)" value={sku} onChangeText={setSku} />

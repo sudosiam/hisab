@@ -32,7 +32,7 @@ const CLOUD_RECONCILE_FAIL_KEY = '@hisab_cloud_reconcile_failures';
 const CLOUD_BACKGROUND_MIN_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const CLOUD_RECONCILE_MAX_FAILURES = 3;
 
-export const CLOUD_RETENTION_DAYS = 7;
+export const CLOUD_RETENTION_DAYS = 30;
 /** Personal / single-owner builds: same floor for sign-in and sign-up. */
 export const CLOUD_PASSWORD_MIN_SIGN_IN = 10;
 /** New accounts require a strong password (full books leave the device). */
@@ -368,6 +368,98 @@ async function upsertCloudBackupMetadata(
   );
 }
 
+export interface CloudBackupSnapshot {
+  fileName: string;
+  dateKey: string | null;
+  isLatest: boolean;
+  updatedAt: string | null;
+  byteSize: number | null;
+}
+
+/** List dated cloud objects plus latest metadata for restore picker. */
+export async function listCloudBackupSnapshots(): Promise<{
+  success: boolean;
+  snapshots: CloudBackupSnapshot[];
+  message?: string;
+}> {
+  const supabase = getSupabaseClient();
+  const session = await getCloudSession();
+  if (!supabase) {
+    return { success: false, snapshots: [], message: 'Cloud backup is not configured on this build.' };
+  }
+  if (!session?.user?.id) {
+    return { success: false, snapshots: [], message: 'Sign in to list cloud backups.' };
+  }
+
+  const userId = session.user.id;
+  const { data, error } = await supabase.storage.from(CLOUD_BACKUP_BUCKET).list(userId, {
+    limit: 100,
+    sortBy: { column: 'name', order: 'desc' },
+  });
+  if (error) {
+    return { success: false, snapshots: [], message: error.message };
+  }
+
+  const meta = await supabase
+    .from('cloud_backups')
+    .select('updated_at, byte_size, schema_version')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const snapshots: CloudBackupSnapshot[] = [];
+  for (const item of data ?? []) {
+    const name = item.name;
+    if (!name) continue;
+    const dated = name.match(/^hisab-backup-(\d{4}-\d{2}-\d{2})\.db$/);
+    const isLatest = name === CLOUD_LATEST_OBJECT;
+    if (!dated && !isLatest) continue;
+    snapshots.push({
+      fileName: name,
+      dateKey: dated?.[1] ?? null,
+      isLatest,
+      updatedAt: item.updated_at ?? (isLatest ? meta.data?.updated_at ?? null : null),
+      byteSize: item.metadata?.size ?? (isLatest ? meta.data?.byte_size ?? null : null),
+    });
+  }
+
+  snapshots.sort((a, b) => {
+    if (a.isLatest && !b.isLatest) return -1;
+    if (!a.isLatest && b.isLatest) return 1;
+    return (b.dateKey ?? '').localeCompare(a.dateKey ?? '');
+  });
+
+  return { success: true, snapshots };
+}
+
+/** Remote latest metadata timestamp (ISO), if available. */
+export async function getRemoteCloudUpdatedAt(): Promise<string | null> {
+  const supabase = getSupabaseClient();
+  const session = await getCloudSession();
+  if (!supabase || !session?.user?.id) return null;
+  const { data } = await supabase
+    .from('cloud_backups')
+    .select('updated_at')
+    .eq('user_id', session.user.id)
+    .maybeSingle();
+  return data?.updated_at ?? null;
+}
+
+/**
+ * True when remote cloud snapshot is newer than the last successful local upload.
+ * Used to block accidental overwrite (last-upload-wins protection).
+ */
+export async function isRemoteCloudNewerThanLocal(): Promise<boolean> {
+  const remote = await getRemoteCloudUpdatedAt();
+  const local = await getLastCloudBackupAt();
+  if (!remote) return false;
+  if (!local) return true;
+  const remoteMs = Date.parse(remote);
+  const localMs = Date.parse(local);
+  if (!Number.isFinite(remoteMs)) return false;
+  if (!Number.isFinite(localMs)) return true;
+  return remoteMs > localMs + 2000;
+}
+
 async function pruneOldCloudDatedBackups(userId: string): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) return;
@@ -401,8 +493,10 @@ export async function cloudLatestBackupExists(): Promise<boolean> {
   return Boolean(data?.signedUrl) && !error;
 }
 
-/** Download latest cloud snapshot to cache; returns a local file URI. */
-export async function downloadLatestCloudBackupToCache(): Promise<{
+/** Download a named cloud snapshot (latest or dated) to cache. */
+export async function downloadCloudBackupToCache(
+  fileName: string = CLOUD_LATEST_OBJECT
+): Promise<{
   success: boolean;
   uri?: string;
   message: string;
@@ -416,7 +510,7 @@ export async function downloadLatestCloudBackupToCache(): Promise<{
     return { success: false, message: 'Sign in to restore from cloud.' };
   }
 
-  const path = objectPath(session.user.id, CLOUD_LATEST_OBJECT);
+  const path = objectPath(session.user.id, fileName);
   const { data: signed, error: signError } = await supabase.storage
     .from(CLOUD_BACKUP_BUCKET)
     .createSignedUrl(path, 120);
@@ -434,6 +528,15 @@ export async function downloadLatestCloudBackupToCache(): Promise<{
     return { success: false, message: `Cloud download failed (HTTP ${download.status}).` };
   }
   return { success: true, uri: download.uri, message: 'Downloaded.' };
+}
+
+/** Download latest cloud snapshot to cache; returns a local file URI. */
+export async function downloadLatestCloudBackupToCache(): Promise<{
+  success: boolean;
+  uri?: string;
+  message: string;
+}> {
+  return downloadCloudBackupToCache(CLOUD_LATEST_OBJECT);
 }
 
 // --- Upload / restore ------------------------------------------------------
@@ -511,9 +614,25 @@ async function uploadCloudBackupLocked(): Promise<{ success: boolean; message: s
 }
 
 /** Manual or first-enable full upload of the local SQLite file. */
-export async function uploadCloudBackup(): Promise<{ success: boolean; message: string }> {
+export async function uploadCloudBackup(options?: {
+  force?: boolean;
+}): Promise<{ success: boolean; message: string; needsForce?: boolean }> {
   if (!isSupabaseConfigured()) {
     return { success: false, message: 'Cloud backup is not configured on this build.' };
+  }
+  if (!options?.force) {
+    try {
+      if (await isRemoteCloudNewerThanLocal()) {
+        return {
+          success: false,
+          needsForce: true,
+          message:
+            'Remote backup is newer than this device’s last upload. Restore from cloud first, or force upload to overwrite.',
+        };
+      }
+    } catch {
+      // If metadata check fails, allow upload (same as before).
+    }
   }
   const result = await uploadCloudBackupLocked();
   if (result.success) {
@@ -526,14 +645,21 @@ export async function uploadCloudBackup(): Promise<{ success: boolean; message: 
 
 /** Restore local DB from the account’s latest cloud snapshot. */
 export async function restoreDatabaseFromCloud(): Promise<{ success: boolean; message: string }> {
+  return restoreDatabaseFromCloudFile(CLOUD_LATEST_OBJECT);
+}
+
+/** Restore from a specific cloud object name (latest or dated). */
+export async function restoreDatabaseFromCloudFile(
+  fileName: string
+): Promise<{ success: boolean; message: string }> {
   if (!isSupabaseConfigured()) {
     return { success: false, message: 'Cloud backup is not configured on this build.' };
   }
-  const downloaded = await downloadLatestCloudBackupToCache();
+  const downloaded = await downloadCloudBackupToCache(fileName);
   if (!downloaded.success || !downloaded.uri) {
     return { success: false, message: downloaded.message };
   }
-  const result = await restoreDatabaseFromUri(downloaded.uri, CLOUD_LATEST_OBJECT);
+  const result = await restoreDatabaseFromUri(downloaded.uri, fileName);
   try {
     await FileSystem.deleteAsync(downloaded.uri, { idempotent: true });
   } catch {
@@ -553,6 +679,10 @@ export async function runCloudDailyBackupIfDue(): Promise<{ ran: boolean; messag
   if ((await getLastCloudBackupDate()) === today) return { ran: false };
 
   const result = await uploadCloudBackup();
+  if (result.success) {
+    const { notifyAutoBackupDone } = await import('./localNotifications');
+    await notifyAutoBackupDone('cloud').catch(() => {});
+  }
   return { ran: result.success, message: result.message };
 }
 

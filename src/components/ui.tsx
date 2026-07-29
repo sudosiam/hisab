@@ -13,8 +13,9 @@ import {
   TextInputProps,
 } from 'react-native';
 import { NumericKeyboardAccessory, NUMERIC_KEYBOARD_ACCESSORY_ID } from './NumericKeyboardAccessory';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import type { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 import type { ThemeColors } from '../constants/theme';
 import { spacing, radius, typography } from '../constants/theme';
@@ -25,6 +26,7 @@ import type { DashboardStats } from '../types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedPressable, ACTIVE_OPACITY } from './ThemedPressable';
 import { AnimatedScreenBody } from './AnimatedPresence';
+import { navigateFromDashboard } from '../navigation/fromDashboard';
 
 export { ThemedPressable, ACTIVE_OPACITY };
 export const ICON = { nav: 20, inline: 18, chevron: 16 } as const;
@@ -36,6 +38,13 @@ export function createScreenStyles(colors: ThemeColors, isDark: boolean) {
 
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
+    formStickyFooter: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 5,
+    },
     content: {
       paddingHorizontal: spacing.md,
       paddingTop: spacing.md,
@@ -636,9 +645,12 @@ export function FormInput({
 export function FormScreen({
   children,
   contentStyle,
+  stickyFooter,
 }: {
   children: React.ReactNode;
   contentStyle?: ViewStyle;
+  /** Floats above the bottom of the scroll area (e.g. draft chip) without shifting fields. */
+  stickyFooter?: React.ReactNode;
 }) {
   const styles = useScreenStyles();
   const insets = useSafeAreaInsets();
@@ -648,22 +660,32 @@ export function FormScreen({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 56 : 0}
     >
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={[
-          styles.content,
-          { paddingBottom: spacing.xxl + Math.max(insets.bottom, spacing.md) },
-          contentStyle,
-        ]}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        // Avoid double-inset with KeyboardAvoidingView padding on iOS.
-        automaticallyAdjustKeyboardInsets={Platform.OS === 'android'}
-        showsVerticalScrollIndicator={false}
-      >
-        <AnimatedScreenBody>{children}</AnimatedScreenBody>
-        <NumericKeyboardAccessory />
-      </ScrollView>
+      <View style={styles.container}>
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={[
+            styles.content,
+            {
+              paddingBottom:
+                spacing.xxl + Math.max(insets.bottom, spacing.md) + (stickyFooter ? 52 : 0),
+            },
+            contentStyle,
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          // Avoid double-inset with KeyboardAvoidingView padding on iOS.
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'android'}
+          showsVerticalScrollIndicator={false}
+        >
+          <AnimatedScreenBody>{children}</AnimatedScreenBody>
+          <NumericKeyboardAccessory />
+        </ScrollView>
+        {stickyFooter ? (
+          <View style={styles.formStickyFooter} pointerEvents="box-none">
+            {stickyFooter}
+          </View>
+        ) : null}
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -1347,22 +1369,23 @@ export function Fab({
 
 interface ShortcutItem {
   label: string;
-  route: string;
+  drawer: string;
+  screen?: string;
   icon: React.ComponentProps<typeof Ionicons>['name'];
 }
 
 const FINANCE_SHORTCUTS: ShortcutItem[] = [
-  { label: 'P & L', route: '/(drawer)/reports/profit-loss', icon: 'trending-up-outline' },
-  { label: 'Balance Sheet', route: '/(drawer)/balance-sheet', icon: 'scale-outline' },
-  { label: 'Transfer', route: '/(drawer)/banking/transfer', icon: 'swap-horizontal-outline' },
-  { label: 'Banking', route: '/(drawer)/banking', icon: 'wallet-outline' },
+  { label: 'P & L', drawer: 'reports', screen: 'profit-loss', icon: 'trending-up-outline' },
+  { label: 'Balance Sheet', drawer: 'balance-sheet', icon: 'scale-outline' },
+  { label: 'Transfer', drawer: 'banking', screen: 'transfer', icon: 'swap-horizontal-outline' },
+  { label: 'Banking', drawer: 'banking', screen: 'index', icon: 'wallet-outline' },
 ];
 
 const OPS_SHORTCUTS: ShortcutItem[] = [
-  { label: 'New Sale', route: '/(drawer)/sales/new', icon: 'cart-outline' },
-  { label: 'Purchase', route: '/(drawer)/purchases/new', icon: 'bag-handle-outline' },
-  { label: 'Payment', route: '/(drawer)/payments/new', icon: 'cash-outline' },
-  { label: 'Expense', route: '/(drawer)/expense/new', icon: 'receipt-outline' },
+  { label: 'New Sale', drawer: 'sales', screen: 'new', icon: 'cart-outline' },
+  { label: 'Purchase', drawer: 'purchases', screen: 'new', icon: 'bag-handle-outline' },
+  { label: 'Payment', drawer: 'payments', screen: 'new', icon: 'cash-outline' },
+  { label: 'Expense', drawer: 'expense', screen: 'new', icon: 'receipt-outline' },
 ];
 
 function ShortcutRow({
@@ -1370,13 +1393,13 @@ function ShortcutRow({
   items,
   styles,
   colors,
-  router,
+  navigation,
 }: {
   title: string;
   items: ShortcutItem[];
   styles: ReturnType<typeof createShortcutStyles>;
   colors: ThemeColors;
-  router: ReturnType<typeof useRouter>;
+  navigation: NavigationProp<ParamListBase>;
 }) {
   const rows: ShortcutItem[][] = [];
   for (let i = 0; i < items.length; i += 2) {
@@ -1388,12 +1411,19 @@ function ShortcutRow({
       <SectionHeader title={title} tight />
       <View style={styles.grid}>
         {rows.map((row) => (
-          <View key={row.map((i) => i.route).join('|')} style={styles.row}>
+          <View key={row.map((i) => `${i.drawer}:${i.screen ?? ''}`).join('|')} style={styles.row}>
             {row.map((item) => (
               <ThemedPressable
-                key={item.route}
+                key={`${item.drawer}:${item.screen ?? 'root'}`}
                 style={styles.button}
-                onPress={() => router.push(item.route as never)}
+                onPress={() =>
+                  navigateFromDashboard(
+                    navigation,
+                    item.screen
+                      ? { drawer: item.drawer, screen: item.screen }
+                      : { drawer: item.drawer }
+                  )
+                }
                 activeOpacity={ACTIVE_OPACITY}
                 accessibilityLabel={item.label}
                 accessibilityRole="button"
@@ -1413,7 +1443,7 @@ function ShortcutRow({
 }
 
 export function DashboardShortcuts() {
-  const router = useRouter();
+  const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createShortcutStyles(colors, isDark), [colors, isDark]);
 
@@ -1424,14 +1454,14 @@ export function DashboardShortcuts() {
         items={OPS_SHORTCUTS}
         styles={styles}
         colors={colors}
-        router={router}
+        navigation={navigation}
       />
       <ShortcutRow
         title="Books"
         items={FINANCE_SHORTCUTS}
         styles={styles}
         colors={colors}
-        router={router}
+        navigation={navigation}
       />
     </View>
   );

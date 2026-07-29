@@ -1,15 +1,17 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Alert, FlatList } from 'react-native';
+import { View, Text, StyleSheet, Alert, FlatList, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   EmptyState,
   ErrorState,
+  Fab,
   FormInput,
   PrimaryButton,
   SearchField,
   SectionHeader,
   SummaryHero,
   ThemedPressable,
+  useFabListPadding,
   useScreenStyles,
 } from '../../src/components/ui';
 import { ListItem } from '../../src/components/ListItem';
@@ -40,6 +42,7 @@ type FieldErrors = {
 export default function OthersScreen() {
   const styles = useScreenStyles();
   const insets = useSafeAreaInsets();
+  const fabListPadding = useFabListPadding();
   const { colors, isDark } = useTheme();
   const { refresh } = useDatabaseActions();
   const [assets, setAssets] = useState<FixedAsset[]>([]);
@@ -50,6 +53,7 @@ export default function OthersScreen() {
   const [notes, setNotes] = useState('');
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const savedFormSnapshotRef = useRef<string | null>(null);
@@ -106,14 +110,11 @@ export default function OthersScreen() {
   const formOpenRef = useRef(false);
   formOpenRef.current = showAdd;
 
-  const { booting, error: loadError, retry } = useFocusRefresh(
-    async () => {
-      if (!formOpenRef.current) await load();
-    },
-    []
-  );
+  const { booting, error: loadError, retry } = useFocusRefresh(async () => {
+    if (!formOpenRef.current) await load();
+  }, []);
 
-  const total = assets.reduce((sum, a) => sum + a.value, 0);
+  const total = useMemo(() => assets.reduce((sum, a) => sum + a.value, 0), [assets]);
 
   const filteredAssets = useMemo(
     () => assets.filter((item) => matchesSearch(search, [item.name, item.notes, item.value])),
@@ -131,12 +132,7 @@ export default function OthersScreen() {
   };
 
   const startAdd = () => {
-    const blank = {
-      editingId: null as number | null,
-      name: '',
-      value: '',
-      notes: '',
-    };
+    const blank = { editingId: null as number | null, name: '', value: '', notes: '' };
     setEditingId(blank.editingId);
     setName(blank.name);
     setValue(blank.value);
@@ -163,18 +159,23 @@ export default function OthersScreen() {
   const handleSave = async () => {
     if (saving) return;
     const nextErrors: FieldErrors = {};
-    const val = parsePositiveAmount(value);
+    const parsed = parsePositiveAmount(value);
     if (!name.trim()) nextErrors.name = 'Enter asset name';
-    if (val === null) nextErrors.value = 'Enter a value greater than zero';
+    if (parsed === null) nextErrors.value = 'Enter an amount greater than zero';
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
     setSaving(true);
     try {
+      const payload = {
+        name: name.trim(),
+        value: parsed!,
+        notes: notes.trim() || undefined,
+      };
       if (editingId) {
-        await updateFixedAsset(editingId, { name: name.trim(), value: val!, notes: notes.trim() || undefined });
+        await updateFixedAsset(editingId, payload);
       } else {
-        await addFixedAsset({ name: name.trim(), value: val!, notes: notes.trim() || undefined });
+        await addFixedAsset(payload);
       }
       refresh();
       resetForm();
@@ -186,30 +187,37 @@ export default function OthersScreen() {
     }
   };
 
-  const handleDelete = useCallback((asset: FixedAsset) => {
-    Alert.alert('Delete Asset', `Remove ${asset.name}?\nThis removes ${formatCurrency(asset.value)} from fixed assets on the balance sheet.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteFixedAsset(asset.id);
-            refresh();
-            await load();
-          } catch (e) {
-            Alert.alert('Error', formatSqliteError(e));
-          }
-        },
-      },
-    ]);
-  }, [load, refresh]);
+  const handleDelete = useCallback(
+    (asset: FixedAsset) => {
+      Alert.alert(
+        'Delete Asset',
+        `Remove ${asset.name}?\nThis removes ${formatCurrency(asset.value)} from the balance sheet.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await deleteFixedAsset(asset.id);
+                refresh();
+                await load();
+              } catch (e) {
+                Alert.alert('Error', formatSqliteError(e));
+              }
+            },
+          },
+        ]
+      );
+    },
+    [load, refresh]
+  );
 
   const renderAssetItem = useCallback(
     ({ item: asset }: { item: FixedAsset }) => (
       <ListItem
         title={asset.name}
-        subtitle={`Added ${asset.created_at.slice(0, 10)}`}
+        subtitle={`Value ${formatCurrency(asset.value)} · Added ${asset.created_at.slice(0, 10)}`}
         meta={asset.notes ?? undefined}
         amount={asset.value}
         amountColor={colors.primary}
@@ -237,26 +245,22 @@ export default function OthersScreen() {
       <SummaryHero
         label="Fixed Assets Total"
         amount={total}
-        hint={`${assets.length} asset${assets.length === 1 ? '' : 's'}`}
+        hint={`${assets.length} asset${assets.length === 1 ? '' : 's'} · balance-sheet memos (no depreciation)`}
       />
 
       <View style={localStyles.headerRow}>
         <SectionHeader title="Fixed Assets" />
-        <ThemedPressable
-          onPress={() => {
-            if (showAdd) {
-              resetForm();
-              return;
-            }
-            startAdd();
-          }}
-          accessibilityRole="button"
-          accessibilityLabel={showAdd ? 'Cancel asset form' : 'Add asset'}
-          hitSlop={8}
-          style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.sm }}
-        >
-          <Text style={styles.link}>{showAdd ? 'Cancel' : '+ Add Asset'}</Text>
-        </ThemedPressable>
+        {showAdd ? (
+          <ThemedPressable
+            onPress={resetForm}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel asset form"
+            hitSlop={8}
+            style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.sm }}
+          >
+            <Text style={styles.link}>Cancel</Text>
+          </ThemedPressable>
+        ) : null}
       </View>
 
       <SearchField
@@ -288,8 +292,18 @@ export default function OthersScreen() {
             money
             error={fieldErrors.value}
           />
-          <FormInput label="Notes" value={notes} onChangeText={setNotes} multiline placeholder="Details, purchase date..." />
-          <PrimaryButton title={editingId ? 'Save Changes' : 'Add Asset'} onPress={handleSave} loading={saving} />
+          <FormInput
+            label="Notes"
+            value={notes}
+            onChangeText={setNotes}
+            multiline
+            placeholder="Details, purchase date..."
+          />
+          <PrimaryButton
+            title={editingId ? 'Save Changes' : 'Add Asset'}
+            onPress={handleSave}
+            loading={saving}
+          />
         </View>
       ) : null}
     </>
@@ -308,33 +322,48 @@ export default function OthersScreen() {
   }
 
   return (
-    <FlatList
-      style={styles.container}
-      contentContainerStyle={[
-        styles.content,
-        { paddingBottom: spacing.xxl + Math.max(insets.bottom, spacing.md) },
-      ]}
-      data={filteredAssets}
-      keyExtractor={(item) => String(item.id)}
-      renderItem={renderAssetItem}
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="on-drag"
-      showsVerticalScrollIndicator={false}
-      getItemLayout={listCardGetItemLayout}
-      {...FLATLIST_PERF}
-      ListHeaderComponent={listHeader}
-      ListEmptyComponent={
-        <EmptyState
-          title={search.trim() ? 'No matching assets' : 'No fixed assets yet'}
-          message={
-            search.trim()
-              ? 'Try a different search.'
-              : 'Add vehicles, equipment, property, and other assets.'
-          }
-          actionLabel={search.trim() ? undefined : 'Add Asset'}
-          onAction={search.trim() ? undefined : startAdd}
-        />
-      }
-    />
+    <View style={styles.container}>
+      <FlatList
+        style={styles.container}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: fabListPadding + Math.max(insets.bottom, spacing.md) },
+        ]}
+        data={filteredAssets}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={renderAssetItem}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        showsVerticalScrollIndicator={false}
+        getItemLayout={listCardGetItemLayout}
+        {...FLATLIST_PERF}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              load()
+                .catch((e) => Alert.alert('Refresh failed', formatSqliteError(e)))
+                .finally(() => setRefreshing(false));
+            }}
+            tintColor={colors.primary}
+          />
+        }
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={
+          <EmptyState
+            title={search.trim() ? 'No matching assets' : 'No fixed assets yet'}
+            message={
+              search.trim()
+                ? 'Try a different search.'
+                : 'Add vehicles, equipment, property, and other assets.'
+            }
+            actionLabel={search.trim() ? undefined : 'Add Asset'}
+            onAction={search.trim() ? undefined : startAdd}
+          />
+        }
+      />
+      {!showAdd ? <Fab label="+ Add Asset" onPress={startAdd} /> : null}
+    </View>
   );
 }

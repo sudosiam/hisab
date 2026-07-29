@@ -130,6 +130,39 @@ const BASE_CSS = `
     border-top: 2px solid #0b1731;
   }
   tr.bold td { font-weight: 700; }
+  .bar-chart { margin: 8px 0 14px; }
+  .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+    font-size: 8.5pt;
+  }
+  .bar-label {
+    width: 92px;
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .bar-track {
+    flex: 1;
+    height: 8px;
+    background: #eef2f7;
+    border: 1px solid #cfd6e0;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    background: #3B5B84;
+  }
+  .bar-value {
+    width: 78px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
   .lines {
     width: 100%;
     border: 1px solid #333;
@@ -253,6 +286,30 @@ export function buildTableHtml(
     : '';
 
   return `<table><thead><tr>${head}</tr></thead><tbody>${body}${footer}</tbody></table>`;
+}
+
+/** Lightweight CSS bar strips for PDF (expense mix / growth months). */
+export function buildHtmlBarChart(
+  items: { label: string; value: number }[],
+  options?: { maxBars?: number }
+): string {
+  const maxBars = options?.maxBars ?? 12;
+  const rows = items
+    .filter((item) => Number.isFinite(item.value) && item.value > 0)
+    .slice(0, maxBars);
+  if (rows.length === 0) return '';
+  const max = Math.max(...rows.map((r) => r.value), 1);
+  const bars = rows
+    .map((row) => {
+      const pct = Math.max(4, Math.round((row.value / max) * 100));
+      return `<div class="bar-row">
+        <div class="bar-label">${escapeHtml(row.label)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+        <div class="bar-value">${escapeHtml(pdfMoney(row.value))}</div>
+      </div>`;
+    })
+    .join('');
+  return `<div class="bar-chart">${bars}</div>`;
 }
 
 export function buildLedgerTableHtml(

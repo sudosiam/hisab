@@ -1,9 +1,10 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
-import { getPayablesReport } from '../../../src/services/reports';
+import { getPayablesReport, summarizeAging } from '../../../src/services/reports';
 import { ReportRow } from '../../../src/components/ReportRow';
 import { MoneyText } from '../../../src/components/MoneyText';
+import { DonutChart } from '../../../src/components/DonutChart';
 import { ListSkeleton } from '../../../src/components/Skeleton';
 import { ErrorState, EmptyState, useScreenStyles } from '../../../src/components/ui';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -11,7 +12,7 @@ import { useTheme } from '../../../src/context/ThemeContext';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { sharePayablesPdf } from '../../../src/services/reportPdf';
 import { roundMoney } from '../../../src/utils/money';
-import { formatDisplayDate } from '../../../src/utils/date';
+import { formatDisplayDate, todayISO } from '../../../src/utils/date';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
 import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
@@ -63,6 +64,7 @@ export default function PayablesReportScreen() {
   }, [load]);
 
   const total = roundMoney(rows.reduce((s, r) => s + r.due, 0));
+  const aging = useMemo(() => summarizeAging(rows, todayISO()), [rows]);
 
   const exportPdf = useCallback(async () => sharePayablesPdf(rows, total), [rows, total]);
 
@@ -82,6 +84,18 @@ export default function PayablesReportScreen() {
         <Text style={{ fontWeight: '700', color: colors.warning, marginBottom: 2 }}>Total Payable</Text>
         <MoneyText amount={total} size="lg" color={colors.warning} />
       </View>
+      {rows.length > 0 ? (
+        <View style={{ paddingHorizontal: spacing.md, marginBottom: spacing.sm }}>
+          <DonutChart
+            slices={aging.map((b) => ({
+              key: b.key,
+              label: b.label,
+              value: b.total,
+            }))}
+            emptyLabel="No aging data"
+          />
+        </View>
+      ) : null}
       <FlatList
         data={rows}
         keyExtractor={(item) => String(item.id)}

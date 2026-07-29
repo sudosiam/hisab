@@ -2,14 +2,15 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MonthPicker } from '../../../src/components/MonthPicker';
-import { getSalesReport, sumReportAmounts } from '../../../src/services/reports';
+import { getSalesMixByProduct, getSalesReport, sumReportAmounts } from '../../../src/services/reports';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { StatusBadge } from '../../../src/components/StatusBadge';
 import { ReportRow } from '../../../src/components/ReportRow';
 import { MoneyText } from '../../../src/components/MoneyText';
+import { DonutChart } from '../../../src/components/DonutChart';
 import { ListSkeleton } from '../../../src/components/Skeleton';
-import { ErrorState, EmptyState, useScreenStyles } from '../../../src/components/ui';
+import { ErrorState, EmptyState, SectionHeader, useScreenStyles } from '../../../src/components/ui';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { useReportPdfHeader } from '../../../src/hooks/useReportPdfHeader';
 import { shareSalesReportPdf } from '../../../src/services/reportPdf';
@@ -19,6 +20,7 @@ import { spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import { FLATLIST_PERF, listCardGetItemLayout } from '../../../src/constants/listPerf';
 import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
+import type { SalesMixRow } from '../../../src/services/reports';
 
 export default function SalesReportScreen() {
   const router = useRouter();
@@ -47,11 +49,17 @@ export default function SalesReportScreen() {
   );
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [rows, setRows] = useState<Awaited<ReturnType<typeof getSalesReport>>>([]);
+  const [mix, setMix] = useState<SalesMixRow[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     void refreshKey;
-    setRows(await getSalesReport(monthKey));
+    const [sales, productMix] = await Promise.all([
+      getSalesReport(monthKey),
+      getSalesMixByProduct(monthKey),
+    ]);
+    setRows(sales);
+    setMix(productMix);
   }, [monthKey, refreshKey]);
 
   const { booting, error, retry } = useFocusRefresh(load, [monthKey, refreshKey]);
@@ -92,6 +100,18 @@ export default function SalesReportScreen() {
           <Text style={{ fontWeight: '700', color: colors.text, marginBottom: 2 }}>Total Sales</Text>
           <MoneyText amount={total} size="lg" />
         </View>
+        {mix.length > 0 ? (
+          <View style={{ marginBottom: spacing.sm }}>
+            <SectionHeader title="Sales mix by product" tight />
+            <DonutChart
+              slices={mix.map((m) => ({
+                key: m.key,
+                label: m.label,
+                value: m.total,
+              }))}
+            />
+          </View>
+        ) : null}
       </View>
       <FlatList
         data={rows}

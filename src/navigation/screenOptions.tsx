@@ -47,10 +47,11 @@ export function wantsPopToDrawer(params: unknown): boolean {
 
 function leaveDetailToDrawer(navigation: StackNavigation): void {
   const parent = navigation.getParent();
+  // Prefer drawer history (Dashboard). Fall back to jumping Home if history is empty.
   if (parent?.canGoBack()) {
     parent.goBack();
   } else {
-    parent?.navigate('index');
+    parent?.navigate('index' as never);
   }
   // Reset after leaving so the next drawer open lands on the section list.
   navigation.dispatch(
@@ -110,10 +111,15 @@ function shouldShowDrawerMenu(
   navigation: StackNavigation,
   route?: RouteProp<ParamListBase>
 ): boolean {
+  const state = readNavState(navigation);
+  const stackIndex = state?.index ?? 0;
+  const currentParams = route?.params ?? state?.routes?.[stackIndex]?.params;
+  // Opened from Dashboard — show back so we return to Home, not the section hamburger.
+  if (wantsPopToDrawer(currentParams)) return false;
+
   const name = activeRouteName(navigation, route);
   if (name === LIST_ROUTE) return true;
 
-  const state = readNavState(navigation);
   if (!state?.routes?.length) return name === LIST_ROUTE || name === '';
   return false;
 }
@@ -128,9 +134,6 @@ function resetStackToList(navigation: StackNavigation): void {
 }
 
 function handleStackBack(navigation: StackNavigation, route?: RouteProp<ParamListBase>): void {
-  const name = activeRouteName(navigation, route);
-  if (name === LIST_ROUTE) return;
-
   const state = readNavState(navigation);
   const stackIndex = state?.index ?? 0;
   const currentParams = route?.params ?? state?.routes?.[stackIndex]?.params;
@@ -138,6 +141,9 @@ function handleStackBack(navigation: StackNavigation, route?: RouteProp<ParamLis
     leaveDetailToDrawer(navigation);
     return;
   }
+
+  const name = activeRouteName(navigation, route);
+  if (name === LIST_ROUTE) return;
 
   const previousRouteName = stackIndex > 0 ? state?.routes?.[stackIndex - 1]?.name : undefined;
 
@@ -152,6 +158,12 @@ function handleStackBack(navigation: StackNavigation, route?: RouteProp<ParamLis
   // Prefer real history: pop this stack, or the parent drawer (with backBehavior="history").
   if (navigation.canGoBack()) {
     navigation.goBack();
+    return;
+  }
+
+  const parent = navigation.getParent();
+  if (parent?.canGoBack()) {
+    parent.goBack();
     return;
   }
 
@@ -181,6 +193,15 @@ export function stackDetailBeforeRemove(
     e.preventDefault();
     resetStackToList(navigation);
   }
+}
+
+/** Wire on every drawer stack so Dashboard → screen → back returns Home (gestures / hardware). */
+export function stackScreenListeners({ navigation }: { navigation: StackNavigation }) {
+  return {
+    beforeRemove: (e: { preventDefault: () => void; data: { action: { type: string } } }) => {
+      stackDetailBeforeRemove(navigation, e);
+    },
+  };
 }
 
 function DrawerMenuButton({ tintColor }: { tintColor: string }) {
@@ -246,14 +267,28 @@ export function useStackScreenOptions() {
   };
 }
 
-/** Top-level drawer screens (Dashboard, Settings, etc.). */
+/** Top-level drawer screens (Dashboard, Settings, Balance Sheet, etc.). */
 export function useDrawerScreenOptions() {
   const { colors } = useTheme();
   const base = useHeaderScreenOptions();
 
-  return {
-    ...base,
-    headerLeft: () => <DrawerMenuButton tintColor={colors.headerText} />,
-    headerRight: () => <CalculatorHeaderButton tintColor={colors.headerText} />,
+  return (props: {
+    navigation: NavigationProp<ParamListBase>;
+    route?: RouteProp<ParamListBase>;
+  }) => {
+    const showBack = wantsPopToDrawer(props.route?.params) && props.navigation.canGoBack();
+    return {
+      ...base,
+      headerLeft: showBack
+        ? (backProps: React.ComponentProps<typeof HeaderBackButton>) => (
+            <HeaderBackButton
+              {...backProps}
+              tintColor={colors.headerText}
+              onPress={() => props.navigation.goBack()}
+            />
+          )
+        : () => <DrawerMenuButton tintColor={colors.headerText} />,
+      headerRight: () => <CalculatorHeaderButton tintColor={colors.headerText} />,
+    };
   };
 }

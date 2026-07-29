@@ -21,6 +21,11 @@ interface Props {
   labels: string[];
   series: MultiLineSeries[];
   height?: number;
+  /** Prefix for the scrub chip, e.g. "Day" or "Month". */
+  pointLabel?: string;
+  /** Full label for the selected point (overrides `${pointLabel} ${labels[i]}`). */
+  selectedLabels?: string[];
+  onPointPress?: (index: number) => void;
 }
 
 const X_LABEL_H = 16;
@@ -38,7 +43,14 @@ function indexFromX(x: number, count: number, width: number) {
   return Math.max(0, Math.min(count - 1, Math.round(t * (count - 1))));
 }
 
-export function MultiLineTrendChart({ labels, series, height = 176 }: Props) {
+export function MultiLineTrendChart({
+  labels,
+  series,
+  height = 176,
+  pointLabel = 'Day',
+  selectedLabels,
+  onPointPress,
+}: Props) {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const [plotWidth, setPlotWidth] = useState(0);
@@ -70,10 +82,24 @@ export function MultiLineTrendChart({ labels, series, height = 176 }: Props) {
     [plotWidth, labels.length]
   );
 
+  const confirmAtX = useCallback(
+    (x: number) => {
+      if (plotWidth <= 0 || labels.length === 0) return;
+      const index = indexFromX(x, labels.length, plotWidth);
+      setSelected(index);
+      onPointPress?.(index);
+    },
+    [plotWidth, labels.length, onPointPress]
+  );
+
   const gesture = useMemo(() => {
     const scrub = (x: number) => {
       'worklet';
       runOnJS(selectAtX)(x);
+    };
+    const confirm = (x: number) => {
+      'worklet';
+      runOnJS(confirmAtX)(x);
     };
     // Horizontal scrub only — vertical moves fail so the dashboard ScrollView still scrolls.
     const pan = Gesture.Pan()
@@ -81,9 +107,9 @@ export function MultiLineTrendChart({ labels, series, height = 176 }: Props) {
       .failOffsetY([-14, 14])
       .onBegin((e) => scrub(e.x))
       .onUpdate((e) => scrub(e.x));
-    const tap = Gesture.Tap().maxDuration(220).onEnd((e) => scrub(e.x));
+    const tap = Gesture.Tap().maxDuration(220).onEnd((e) => confirm(e.x));
     return Gesture.Simultaneous(tap, pan);
-  }, [selectAtX]);
+  }, [selectAtX, confirmAtX]);
 
   if (labels.length === 0 || series.length === 0) {
     return <Text style={styles.empty}>No data yet</Text>;
@@ -210,7 +236,9 @@ export function MultiLineTrendChart({ labels, series, height = 176 }: Props) {
             ) : null}
 
             <View style={styles.dayChip} pointerEvents="none">
-              <Text style={styles.dayChipText}>Day {labels[selectedIndex]}</Text>
+              <Text style={styles.dayChipText}>
+                {selectedLabels?.[selectedIndex] ?? `${pointLabel} ${labels[selectedIndex]}`}
+              </Text>
             </View>
           </View>
         </View>

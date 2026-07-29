@@ -7,11 +7,11 @@ import {
   FormScreen,
   PrimaryButton,
   SectionHeader,
+  SummaryHero,
 } from '../../src/components/ui';
 import { getInvestmentInfo, setOwnerInvestment } from '../../src/services/investments';
 import { formatSqliteError } from '../../src/db/database';
 import { formatAmountInput, parseMoneyInput } from '../../src/utils/format';
-import { MoneyText } from '../../src/components/MoneyText';
 import { DetailSkeleton } from '../../src/components/Skeleton';
 import { useDatabaseActions } from '../../src/context/DatabaseContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -20,25 +20,43 @@ import { spacing, typography } from '../../src/constants/theme';
 import { cardSurface } from '../../src/constants/shadows';
 import type { InvestmentInfo } from '../../src/services/investments';
 
+function formatUpdatedAt(iso: string | null): string | null {
+  if (!iso) return null;
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleString(undefined, {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return null;
+  }
+}
+
 export default function InvestmentsScreen() {
   const { refresh } = useDatabaseActions();
   const { colors, isDark } = useTheme();
   const localStyles = useMemo(
     () =>
       StyleSheet.create({
-        hero: {
+        hintCard: {
           ...cardSurface(colors, isDark),
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.md,
+          padding: spacing.md,
           marginBottom: spacing.md,
-          alignItems: 'center',
         },
-        heroLabel: { ...typography.section, color: colors.textSecondary, textTransform: 'uppercase' },
-        heroValue: { ...typography.display, color: colors.text, marginTop: spacing.sm },
-        heroHint: {
-          fontSize: 13,
+        hint: {
+          ...typography.caption,
           color: colors.textSecondary,
-          marginTop: spacing.sm,
+          lineHeight: 18,
+        },
+        updated: {
+          ...typography.micro,
+          color: colors.textMuted,
+          marginTop: spacing.xs,
           textAlign: 'center',
         },
       }),
@@ -61,7 +79,6 @@ export default function InvestmentsScreen() {
     try {
       const data = await getInvestmentInfo();
       setInfo(data);
-      // Don't clobber a value the user is currently typing.
       if (!dirtyRef.current) {
         setAmount(data.isSet ? formatAmountInput(data.amount) : '');
       }
@@ -74,7 +91,11 @@ export default function InvestmentsScreen() {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const handleAmountChange = (value: string) => {
     dirtyRef.current = true;
@@ -96,7 +117,7 @@ export default function InvestmentsScreen() {
       setDirty(false);
       refresh();
       await load();
-      Alert.alert('Saved', 'Your investment amount has been updated.');
+      Alert.alert('Saved', 'Owner capital updated for Growth ROI.');
     } catch (e) {
       Alert.alert('Error', formatSqliteError(e));
     } finally {
@@ -116,17 +137,26 @@ export default function InvestmentsScreen() {
     return <ErrorState message={error ?? 'Failed to load investment info'} onRetry={load} />;
   }
 
+  const updatedLabel = formatUpdatedAt(info.updatedAt);
+
   return (
     <FormScreen>
-      <View style={localStyles.hero}>
-        <Text style={localStyles.heroLabel}>You invested</Text>
-        <MoneyText
-          amount={info.amount}
-          text={info.isSet ? undefined : '—'}
-          size="hero"
-          style={[localStyles.heroValue, { width: '100%', textAlign: 'center' }]}
-        />
-        {!info.isSet ? <Text style={localStyles.heroHint}>Not set</Text> : null}
+      <SummaryHero
+        label="Owner capital"
+        amount={info.isSet ? info.amount : 0}
+        hint={
+          info.isSet
+            ? 'Used on Growth for ahead/behind and ROI'
+            : 'Not set yet — enter total money you put into the business'
+        }
+      />
+      {updatedLabel ? <Text style={localStyles.updated}>Last saved {updatedLabel}</Text> : null}
+
+      <View style={localStyles.hintCard}>
+        <Text style={localStyles.hint}>
+          This is a single owner-capital figure for Growth — not an investment portfolio. It does
+          not create banking transactions.
+        </Text>
       </View>
 
       <SectionHeader title="Set investment" />

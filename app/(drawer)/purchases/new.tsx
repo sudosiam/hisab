@@ -523,8 +523,9 @@ export default function NewPurchaseScreen() {
   };
 
   return (
-    <FormScreen>
-      <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
+    <FormScreen
+      stickyFooter={<DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />}
+    >
       <FormInput
         label="Purchase No"
         value={invoiceNo}

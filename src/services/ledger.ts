@@ -1503,6 +1503,7 @@ export async function getDayBookFromLedger(
   let balance = 0;
   return entries.map((entry) => {
     balance = roundMoney(balance + entry.total_debit - entry.total_credit);
+    const ref = mapDayBookReferenceType(entry.reference_type);
     return {
       id: String(entry.id),
       date: entry.entry_date,
@@ -1510,8 +1511,16 @@ export async function getDayBookFromLedger(
       debit: roundMoney(entry.total_debit),
       credit: roundMoney(entry.total_credit),
       balance,
-      reference_type: 'payment' as const,
+      reference_type: ref,
       reference_id: entry.reference_id ?? entry.id,
     };
   });
+}
+
+function mapDayBookReferenceType(
+  referenceType: string | null
+): PartyStatementLine['reference_type'] {
+  if (referenceType === 'sale' || referenceType === 'sale_payment') return 'sale';
+  if (referenceType === 'purchase' || referenceType === 'purchase_payment') return 'purchase';
+  return 'payment';
 }

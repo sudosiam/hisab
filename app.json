@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hisab",
     "slug": "hisab",
-    "version": "11.3.0",
+    "version": "11.4.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "hisab",
@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hisab.app",
-      "buildNumber": "41"
+      "buildNumber": "42"
     },
     "android": {
       "adaptiveIcon": {
@@ -27,7 +27,7 @@
         "backgroundImage": "./assets/android-icon-background.png"
       },
       "package": "com.hisab.app",
-      "versionCode": 41,
+      "versionCode": 42,
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize"
     },
@@ -76,6 +76,14 @@
       ],
       "expo-build-properties",
       "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#3B5B84",
+          "defaultChannel": "hisab-overdue"
+        }
+      ],
       [
         "react-native-android-widget",
         {

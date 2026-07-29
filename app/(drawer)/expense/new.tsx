@@ -210,8 +210,9 @@ export default function NewExpenseScreen() {
   };
 
   return (
-    <FormScreen>
-      <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
+    <FormScreen
+      stickyFooter={<DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />}
+    >
       <SectionHeader title="New Expense" />
       <CategoryPicker value={category} onChange={setCategory} source={expenseCategorySource} />
       <FormInput label="Description" value={description} onChangeText={setDescription} />

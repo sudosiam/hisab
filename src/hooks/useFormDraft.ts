@@ -10,14 +10,16 @@ export function useFormDraft<T>(
     debounceMs?: number;
   }
 ) {
-  const { enabled = true, isEmpty, debounceMs = 1000 } = options;
+  const { enabled = true, isEmpty, debounceMs = 600 } = options;
   const [ready, setReady] = useState(false);
   const [hasDraft, setHasDraft] = useState(false);
   const skipSave = useRef(true);
   const disposed = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dataRef = useRef(data);
+  const isEmptyRef = useRef(isEmpty);
   dataRef.current = data;
+  isEmptyRef.current = isEmpty;
 
   const cancelPendingSave = useCallback(() => {
     if (timerRef.current !== null) {
@@ -29,14 +31,12 @@ export function useFormDraft<T>(
   const persistDraft = useCallback(async () => {
     if (!enabled || !ready || skipSave.current || disposed.current) return;
     const payload = dataRef.current;
-    if (isEmpty(payload)) {
+    if (isEmptyRef.current(payload)) {
       await clearDraft(key);
-      if (!disposed.current) setHasDraft(false);
       return;
     }
     await saveDraft(key, payload);
-    if (!disposed.current && !skipSave.current) setHasDraft(true);
-  }, [key, enabled, ready, isEmpty]);
+  }, [key, enabled, ready]);
 
   useEffect(() => {
     disposed.current = false;
@@ -45,13 +45,19 @@ export function useFormDraft<T>(
       cancelPendingSave();
       if (!enabled || !ready || skipSave.current) return;
       const payload = dataRef.current;
-      if (isEmpty(payload)) {
+      if (isEmptyRef.current(payload)) {
         clearDraft(key).catch((err) => console.warn('[draft] clear failed', key, err));
       } else {
         saveDraft(key, payload).catch((err) => console.warn('[draft] persist failed', key, err));
       }
     };
-  }, [cancelPendingSave, enabled, isEmpty, key, ready]);
+  }, [cancelPendingSave, enabled, key, ready]);
+
+  // Banner follows form dirtiness immediately — do not wait for debounced save.
+  useEffect(() => {
+    if (!enabled || !ready) return;
+    setHasDraft(!isEmpty(data));
+  }, [data, enabled, ready, isEmpty]);
 
   useEffect(() => {
     if (!enabled || !ready) return;
@@ -71,7 +77,6 @@ export function useFormDraft<T>(
   }, []);
 
   const discardDraft = useCallback(async () => {
-    skipSave.current = true;
     cancelPendingSave();
     await clearDraft(key);
     setHasDraft(false);
@@ -89,6 +94,7 @@ export function useFormDraft<T>(
   }, []);
 
   return {
+    ready,
     markReady,
     discardDraft,
     clearDraftOnSave,

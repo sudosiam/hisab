@@ -9,14 +9,14 @@ const stackGroup = { ...hidden, headerShown: false as const };
 
 export default function DrawerLayout() {
   const { colors } = useTheme();
-  const drawerOptions = useDrawerScreenOptions();
+  const drawerScreenOptions = useDrawerScreenOptions();
 
   return (
     <Drawer
       backBehavior="history"
       drawerContent={(props) => <CustomDrawerContent {...props} />}
-      screenOptions={{
-        ...drawerOptions,
+      screenOptions={(props) => ({
+        ...drawerScreenOptions(props),
         headerShown: true,
         lazy: true,
         freezeOnBlur: true,
@@ -32,7 +32,7 @@ export default function DrawerLayout() {
         },
         sceneStyle: { backgroundColor: colors.background },
         swipeEdgeWidth: 48,
-      }}
+      })}
     >
       <Drawer.Screen name="index" options={{ title: 'Dashboard', ...hidden }} />
       <Drawer.Screen name="growth" options={{ title: 'Growth', ...hidden }} />

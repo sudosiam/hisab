@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Alert, StyleSheet } from 'react-native';
+import { Alert, AppState, StyleSheet } from 'react-native';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -10,6 +10,7 @@ import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { StatusBar } from 'expo-status-bar';
 import { isAppUpdatesEnabled, reloadToApplyUpdate } from '../src/services/appUpdates';
+import { syncOverdueReminders } from '../src/services/overdueReminders';
 
 function ThemedStatusBar() {
   const { isDark } = useTheme();
@@ -46,6 +47,17 @@ function PendingUpdatePrompt() {
   return null;
 }
 
+function OverdueReminderSync() {
+  useEffect(() => {
+    void syncOverdueReminders();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void syncOverdueReminders();
+    });
+    return () => sub.remove();
+  }, []);
+  return null;
+}
+
 function ThemedRoot({ children }: { children: React.ReactNode }) {
   const { colors } = useTheme();
   return (
@@ -79,6 +91,7 @@ export default function RootLayout() {
               <FinancialYearProvider>
                 <ThemedStatusBar />
                 <PendingUpdatePrompt />
+                <OverdueReminderSync />
                 <ErrorBoundary>
                   <ThemedStack />
                 </ErrorBoundary>

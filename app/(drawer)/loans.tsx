@@ -1,16 +1,18 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Alert, FlatList } from 'react-native';
+import { View, Text, StyleSheet, Alert, FlatList, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   DatePickerField,
   EmptyState,
   ErrorState,
+  Fab,
   FormInput,
   PrimaryButton,
   SearchField,
   SectionHeader,
   SummaryHero,
   ThemedPressable,
+  useFabListPadding,
   useScreenStyles,
 } from '../../src/components/ui';
 import { ListItem } from '../../src/components/ListItem';
@@ -40,6 +42,7 @@ type FieldErrors = {
 export default function LoansScreen() {
   const styles = useScreenStyles();
   const insets = useSafeAreaInsets();
+  const fabListPadding = useFabListPadding();
   const { colors, isDark } = useTheme();
   const { refresh } = useDatabaseActions();
   const [loans, setLoans] = useState<Loan[]>([]);
@@ -53,6 +56,7 @@ export default function LoansScreen() {
   const [notes, setNotes] = useState('');
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const savedFormSnapshotRef = useRef<string | null>(null);
@@ -275,7 +279,7 @@ export default function LoansScreen() {
     ({ item: loan }: { item: Loan }) => (
       <ListItem
         title={loan.lender_name}
-        subtitle={`Principal ${formatCurrency(loan.principal_amount)}${loan.interest_rate !== null ? ` · ${loan.interest_rate}%` : ''}${loan.start_date ? ` · ${loan.start_date}` : ''}`}
+        subtitle={`Outstanding ${formatCurrency(loan.outstanding_amount)} · Principal ${formatCurrency(loan.principal_amount)}${loan.interest_rate !== null ? ` · ${loan.interest_rate}%` : ''}${loan.start_date ? ` · from ${loan.start_date}` : ''}`}
         meta={loan.notes ?? undefined}
         amount={loan.outstanding_amount}
         amountColor={colors.danger}
@@ -308,21 +312,17 @@ export default function LoansScreen() {
 
       <View style={localStyles.headerRow}>
         <SectionHeader title="Loans" />
-        <ThemedPressable
-          onPress={() => {
-            if (showForm) {
-              resetForm();
-              return;
-            }
-            startAdd();
-          }}
-          accessibilityRole="button"
-          accessibilityLabel={showForm ? 'Cancel loan form' : 'Add loan'}
-          hitSlop={8}
-          style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.sm }}
-        >
-          <Text style={styles.link}>{showForm ? 'Cancel' : '+ Add Loan'}</Text>
-        </ThemedPressable>
+        {showForm ? (
+          <ThemedPressable
+            onPress={resetForm}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel loan form"
+            hitSlop={8}
+            style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.sm }}
+          >
+            <Text style={styles.link}>Cancel</Text>
+          </ThemedPressable>
+        ) : null}
       </View>
 
       <SearchField
@@ -414,11 +414,12 @@ export default function LoansScreen() {
   }
 
   return (
+    <View style={styles.container}>
     <FlatList
       style={styles.container}
       contentContainerStyle={[
         styles.content,
-        { paddingBottom: spacing.xxl + Math.max(insets.bottom, spacing.md) },
+        { paddingBottom: fabListPadding + Math.max(insets.bottom, spacing.md) },
       ]}
       data={filteredLoans}
       keyExtractor={(item) => String(item.id)}
@@ -428,6 +429,18 @@ export default function LoansScreen() {
       showsVerticalScrollIndicator={false}
       getItemLayout={listCardGetItemLayout}
       {...FLATLIST_PERF}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true);
+            load()
+              .catch((e) => Alert.alert('Refresh failed', formatSqliteError(e)))
+              .finally(() => setRefreshing(false));
+          }}
+          tintColor={colors.primary}
+        />
+      }
       ListHeaderComponent={listHeader}
       ListEmptyComponent={
         <EmptyState
@@ -435,12 +448,14 @@ export default function LoansScreen() {
           message={
             search.trim()
               ? 'Try a different search.'
-              : 'Track lender balances for your balance sheet.'
+              : 'Track lender balances for your balance sheet. Repayments stay memo-only until linked to banking.'
           }
           actionLabel={search.trim() ? undefined : 'Add Loan'}
           onAction={search.trim() ? undefined : startAdd}
         />
       }
     />
+    {!showForm ? <Fab label="+ Add Loan" onPress={startAdd} /> : null}
+    </View>
   );
 }

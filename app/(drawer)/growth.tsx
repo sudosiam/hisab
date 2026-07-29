@@ -114,9 +114,21 @@ export default function GrowthScreen() {
     () => (data ? data.months.map((m) => ({ label: m.shortLabel, value: m.netProfit })) : []),
     [data]
   );
+  const priorBarData = useMemo(
+    () =>
+      data ? data.priorMonths.map((m) => ({ label: m.shortLabel, value: m.netProfit })) : [],
+    [data]
+  );
   const lineData = useMemo(
     () =>
       data ? data.months.map((m) => ({ label: m.shortLabel, value: m.cumulativeSurplus })) : [],
+    [data]
+  );
+  const priorLineData = useMemo(
+    () =>
+      data
+        ? data.priorMonths.map((m) => ({ label: m.shortLabel, value: m.cumulativeSurplus }))
+        : [],
     [data]
   );
 
@@ -201,13 +213,25 @@ export default function GrowthScreen() {
       <SectionHeader title="Equity over time" />
 
       <View style={localStyles.chartBlock}>
-        <Text style={localStyles.chartTitle}>Monthly net profit</Text>
-        <GrowthChart data={barData} variant="bar" />
+        <Text style={localStyles.chartTitle}>
+          Monthly net profit · FY {data.financialYearRangeLabel}
+        </Text>
+        <GrowthChart
+          data={barData}
+          priorData={priorBarData}
+          priorLabel={`FY ${data.priorFinancialYearRangeLabel}`}
+          variant="bar"
+        />
       </View>
 
       <View style={localStyles.chartBlock}>
-        <Text style={localStyles.chartTitle}>Cumulative surplus (trend)</Text>
-        <GrowthChart data={lineData} variant="line" />
+        <Text style={localStyles.chartTitle}>Cumulative surplus (vs prior FY)</Text>
+        <GrowthChart
+          data={lineData}
+          priorData={priorLineData}
+          priorLabel={`FY ${data.priorFinancialYearRangeLabel}`}
+          variant="line"
+        />
       </View>
 
       <SectionHeader title="Month by month" />

@@ -8,7 +8,7 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { FormInput, PrimaryButton, SectionHeader, useScreenStyles } from '../../../src/components/ui';
 import { ThemedSwitch } from '../../../src/components/ThemedSwitch';
 import { formatSqliteError } from '../../../src/db/database';
@@ -50,11 +50,15 @@ import {
   signUpWithEmailPassword,
   uploadCloudBackup,
   deleteCloudBackups,
+  listCloudBackupSnapshots,
+  restoreDatabaseFromCloudFile,
+  type CloudBackupSnapshot,
 } from '../../../src/services/cloudBackup';
 import { isSupabaseConfigured } from '../../../src/services/supabaseClient';
 import { getBackupBackgroundTaskStatusLabel } from '../../../src/services/backupBackgroundTask';
 import { spacing } from '../../../src/constants/theme';
 import { SettingsDivider, useSettingsStyles } from '../../../src/components/settings/settingsUi';
+import { showPostRestoreChecklist } from '../../../src/utils/postRestoreChecklist';
 
 const IMPORT_CONFIRM_TEXT = 'IMPORT';
 
@@ -62,6 +66,7 @@ type RestoreSource = 'file' | 'folder' | 'cloud';
 
 export default function BackupSettingsScreen() {
   const { refresh } = useDatabaseActions();
+  const router = useRouter();
   const styles = useScreenStyles();
   const localStyles = useSettingsStyles();
   const { colors } = useTheme();
@@ -83,6 +88,7 @@ export default function BackupSettingsScreen() {
     null
   );
   const [cloudBackingUp, setCloudBackingUp] = useState(false);
+  const [cloudSnapshots, setCloudSnapshots] = useState<CloudBackupSnapshot[]>([]);
   const [cloudAuthModalOpen, setCloudAuthModalOpen] = useState(false);
   const [cloudAuthEmail, setCloudAuthEmail] = useState('');
   const [cloudAuthPassword, setCloudAuthPassword] = useState('');
@@ -112,10 +118,16 @@ export default function BackupSettingsScreen() {
       setLastCloudBackupAt(await getLastCloudBackupAt());
       setCloudBackupError(await getCloudBackupLastError());
       setOsScheduleLabel(await getBackupBackgroundTaskStatusLabel());
+      if (cloudConfigured && (await getCloudUserEmail())) {
+        const listed = await listCloudBackupSnapshots();
+        setCloudSnapshots(listed.success ? listed.snapshots : []);
+      } else {
+        setCloudSnapshots([]);
+      }
     } catch (e) {
       Alert.alert('Error', formatSqliteError(e));
     }
-  }, [folderSupported]);
+  }, [folderSupported, cloudConfigured]);
 
   useFocusEffect(
     useCallback(() => {
@@ -128,6 +140,94 @@ export default function BackupSettingsScreen() {
     setCloudEmail(await getCloudUserEmail());
     setLastCloudBackupAt(await getLastCloudBackupAt());
     setCloudBackupError(await getCloudBackupLastError());
+    if (await getCloudUserEmail()) {
+      const listed = await listCloudBackupSnapshots();
+      setCloudSnapshots(listed.success ? listed.snapshots : []);
+    } else {
+      setCloudSnapshots([]);
+    }
+  };
+
+  const afterSuccessfulRestore = async (message: string) => {
+    await clearAllDrafts().catch((err) => console.warn('[backup] clear drafts after restore failed', err));
+    refresh();
+    await load();
+    try {
+      const { syncOverdueReminders } = await import('../../../src/services/overdueReminders');
+      await syncOverdueReminders();
+    } catch {
+      // optional
+    }
+    Alert.alert(
+      'Restored',
+      `${message} Unsaved form drafts were cleared. The app data has been reloaded. Backup settings were turned back on.`,
+      [{ text: 'Continue', onPress: () => showPostRestoreChecklist(router) }]
+    );
+  };
+
+  const runCloudUpload = async (force = false) => {
+    const result = await uploadCloudBackup({ force });
+    await refreshCloudStatus();
+    if (result.needsForce) {
+      Alert.alert('Remote backup is newer', result.message, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Force upload',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setCloudBackingUp(true);
+              try {
+                const forced = await uploadCloudBackup({ force: true });
+                await refreshCloudStatus();
+                Alert.alert(
+                  forced.success ? 'Cloud backup complete' : 'Cloud backup failed',
+                  forced.message
+                );
+              } finally {
+                setCloudBackingUp(false);
+              }
+            })();
+          },
+        },
+      ]);
+      return;
+    }
+    Alert.alert(result.success ? 'Cloud backup complete' : 'Cloud backup failed', result.message);
+  };
+
+  const handleRestoreCloudSnapshot = (snap: CloudBackupSnapshot) => {
+    Alert.alert(
+      'Restore this snapshot?',
+      snap.isLatest
+        ? 'Restores the latest cloud backup onto this device.'
+        : `Restores ${snap.dateKey ?? snap.fileName} onto this device.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Restore',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              if (restoring || isDbMaintenanceBusy()) return;
+              setRestoring(true);
+              try {
+                const result = await restoreDatabaseFromCloudFile(snap.fileName);
+                if (result.success) {
+                  await afterSuccessfulRestore(result.message);
+                } else {
+                  Alert.alert('Restore failed', result.message);
+                }
+              } catch (e) {
+                Alert.alert('Restore failed', formatSqliteError(e));
+              } finally {
+                setRestoring(false);
+              }
+            })();
+          },
+        },
+      ]
+    );
   };
 
   const canConfirmImport = importConfirmInput.trim().toUpperCase() === IMPORT_CONFIRM_TEXT;
@@ -146,16 +246,6 @@ export default function BackupSettingsScreen() {
     if (restoring) return;
     setImportModalOpen(false);
     setImportConfirmInput('');
-  };
-
-  const afterSuccessfulRestore = async (message: string) => {
-    await clearAllDrafts().catch((err) => console.warn('[backup] clear drafts after restore failed', err));
-    refresh();
-    await load();
-    Alert.alert(
-      'Restored',
-      `${message} Unsaved form drafts were cleared. The app data has been reloaded. Backup settings were turned back on.`
-    );
   };
 
   const handleConfirmRestore = async () => {
@@ -370,7 +460,27 @@ export default function BackupSettingsScreen() {
         try {
           const result = await uploadCloudBackup();
           await refreshCloudStatus();
-          if (!result.success) {
+          if (result.needsForce) {
+            Alert.alert('Remote backup is newer', result.message, [
+              { text: 'Keep enabled', style: 'cancel' },
+              {
+                text: 'Force upload',
+                style: 'destructive',
+                onPress: () => {
+                  void (async () => {
+                    setCloudBackingUp(true);
+                    try {
+                      const forced = await uploadCloudBackup({ force: true });
+                      await refreshCloudStatus();
+                      if (!forced.success) Alert.alert('Cloud backup failed', forced.message);
+                    } finally {
+                      setCloudBackingUp(false);
+                    }
+                  })();
+                },
+              },
+            ]);
+          } else if (!result.success) {
             Alert.alert('Cloud backup failed', result.message);
           }
         } finally {
@@ -394,9 +504,7 @@ export default function BackupSettingsScreen() {
     }
     setCloudBackingUp(true);
     try {
-      const result = await uploadCloudBackup();
-      await refreshCloudStatus();
-      Alert.alert(result.success ? 'Cloud backup complete' : 'Cloud backup failed', result.message);
+      await runCloudUpload(false);
     } catch (e) {
       Alert.alert('Cloud backup failed', formatSqliteError(e));
     } finally {
@@ -542,6 +650,7 @@ export default function BackupSettingsScreen() {
                   <Text style={localStyles.rowLabel}>Daily auto backup</Text>
                   <Text style={localStyles.rowMeta}>
                     Last: {formatLastBackupLabel(lastBackupAt)}
+                    {'\n'}Shows a device notification when today’s auto backup finishes (native APK).
                   </Text>
                 </View>
                 <ThemedSwitch
@@ -599,15 +708,32 @@ export default function BackupSettingsScreen() {
           <>
             <SectionHeader title="On this device" />
             <View style={localStyles.sectionCard}>
+              <View style={localStyles.rowStack}>
+                <Text style={localStyles.rowLabel}>Files backup</Text>
+                <Text style={localStyles.rowMeta}>
+                  On iOS, export a copy to Files (or share), and restore by picking a backup file.
+                  Daily folder auto-backup is Android-only — use cloud backup for automatic uploads.
+                </Text>
+              </View>
               {!backupPaused ? (
                 <View style={localStyles.buttonStack}>
+                  <TouchableOpacity
+                    style={localStyles.outlineBtn}
+                    onPress={handleExport}
+                    disabled={exporting}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={localStyles.outlineBtnText}>
+                      {exporting ? 'Exporting…' : 'Export to Files'}
+                    </Text>
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={localStyles.outlineBtn}
                     onPress={() => openImportModal('file')}
                     disabled={restoring}
                     activeOpacity={0.7}
                   >
-                    <Text style={localStyles.outlineBtnText}>Import backup file</Text>
+                    <Text style={localStyles.outlineBtnText}>Restore from Files</Text>
                   </TouchableOpacity>
                 </View>
               ) : null}
@@ -629,7 +755,8 @@ export default function BackupSettingsScreen() {
               </Text>
               <Text style={[localStyles.rowMeta, { marginTop: 4 }]}>
                 Full database snapshot only — not multi-device sync. Restore replaces all data on this
-                device (last backup wins).
+                device (last backup wins). A notification appears when the daily cloud auto backup
+                completes (native APK).
               </Text>
             </View>
             <ThemedSwitch
@@ -679,8 +806,33 @@ export default function BackupSettingsScreen() {
                     disabled={restoring || cloudBackingUp}
                     activeOpacity={0.7}
                   >
-                    <Text style={localStyles.outlineBtnText}>Restore from cloud</Text>
+                    <Text style={localStyles.outlineBtnText}>Restore latest from cloud</Text>
                   </TouchableOpacity>
+                  {cloudSnapshots.length > 0 ? (
+                    <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
+                      <Text style={localStyles.rowLabel}>Cloud snapshots</Text>
+                      <Text style={localStyles.rowMeta}>
+                        Dated copies kept for 30 days. Tap to restore a specific day.
+                      </Text>
+                      {cloudSnapshots.slice(0, 10).map((snap) => (
+                        <TouchableOpacity
+                          key={snap.fileName}
+                          style={localStyles.outlineBtn}
+                          onPress={() => handleRestoreCloudSnapshot(snap)}
+                          disabled={restoring}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={localStyles.outlineBtnText}>
+                            {snap.isLatest
+                              ? 'Latest'
+                              : snap.dateKey
+                                ? `Backup ${snap.dateKey}`
+                                : snap.fileName}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ) : null}
                   <TouchableOpacity
                     style={localStyles.outlineBtn}
                     onPress={handleCloudSignOut}

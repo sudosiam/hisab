@@ -177,8 +177,9 @@ export default function NewOtherIncomeScreen() {
   };
 
   return (
-    <FormScreen>
-      <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
+    <FormScreen
+      stickyFooter={<DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />}
+    >
       <SectionHeader title="New Other Income" />
       <CategoryPicker
         value={category}

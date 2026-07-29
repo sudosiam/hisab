@@ -551,7 +551,12 @@ export async function runDailyBackupIfDue(): Promise<{ ran: boolean; message?: s
   const today = todayDateKey();
   if ((await getLastDailyBackupDate()) === today) return { ran: false };
 
-  return runAutoBackup();
+  const result = await runAutoBackup();
+  if (result.ran) {
+    const { notifyAutoBackupDone } = await import('./localNotifications');
+    await notifyAutoBackupDone('device').catch(() => {});
+  }
+  return result;
 }
 
 /** Back up the current session's work when the app goes to the background. */

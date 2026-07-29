@@ -372,6 +372,95 @@ export async function getPayablesReport(): Promise<
   );
 }
 
+export type AgingBucketKey = '0-30' | '31-60' | '61-90' | '90+';
+
+export interface AgingBucket {
+  key: AgingBucketKey;
+  label: string;
+  total: number;
+  count: number;
+}
+
+const AGING_LABELS: Record<AgingBucketKey, string> = {
+  '0-30': '0–30 days',
+  '31-60': '31–60 days',
+  '61-90': '61–90 days',
+  '90+': '90+ days',
+};
+
+/** Age open invoices from document date relative to `today` (ISO). */
+export function bucketAging(date: string, _dueAmount: number, todayISO: string): AgingBucketKey {
+  const start = parseISO(date);
+  const end = parseISO(todayISO);
+  const days = Math.max(
+    0,
+    Math.floor((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000))
+  );
+  if (days <= 30) return '0-30';
+  if (days <= 60) return '31-60';
+  if (days <= 90) return '61-90';
+  return '90+';
+}
+
+export function summarizeAging(
+  rows: { date: string; due: number }[],
+  todayISO: string
+): AgingBucket[] {
+  const map = new Map<AgingBucketKey, { total: number; count: number }>();
+  for (const key of Object.keys(AGING_LABELS) as AgingBucketKey[]) {
+    map.set(key, { total: 0, count: 0 });
+  }
+  for (const row of rows) {
+    const key = bucketAging(row.date, row.due, todayISO);
+    const acc = map.get(key)!;
+    acc.total = roundMoney(acc.total + row.due);
+    acc.count += 1;
+  }
+  return (Object.keys(AGING_LABELS) as AgingBucketKey[]).map((key) => ({
+    key,
+    label: AGING_LABELS[key],
+    total: map.get(key)!.total,
+    count: map.get(key)!.count,
+  }));
+}
+
+export interface SalesMixRow {
+  key: string;
+  label: string;
+  total: number;
+  qty: number;
+}
+
+/** Product sales mix for the period (line totals). */
+export async function getSalesMixByProduct(periodKey: string): Promise<SalesMixRow[]> {
+  const db = await getDatabase();
+  const { start, end } = await resolvePeriodRange(periodKey);
+  const rows = await db.getAllAsync<{
+    product_id: number;
+    name: string;
+    total: number;
+    qty: number;
+  }>(
+    `SELECT si.product_id, COALESCE(p.name, 'Unknown') as name,
+            COALESCE(SUM(si.total), 0) as total,
+            COALESCE(SUM(si.qty), 0) as qty
+     FROM sale_items si
+     JOIN sales s ON s.id = si.sale_id
+     LEFT JOIN products p ON p.id = si.product_id
+     WHERE s.date >= ? AND s.date <= ?
+     GROUP BY si.product_id
+     ORDER BY total DESC
+     LIMIT 12`,
+    [start, end]
+  );
+  return rows.map((row) => ({
+    key: String(row.product_id),
+    label: row.name,
+    total: roundMoney(row.total),
+    qty: row.qty,
+  }));
+}
+
 export interface ExpenseCategoryRow {
   category: string;
   total: number;

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ScrollView, View, Text, Alert, TouchableOpacity, Modal, Pressable } from 'react-native';
-import { FormInput, PrimaryButton, useScreenStyles } from '../../../src/components/ui';
-import { resetDatabase } from '../../../src/db/database';
+import { FormInput, PrimaryButton, SectionHeader, useScreenStyles } from '../../../src/components/ui';
+import { getDatabase, resetDatabase, formatSqliteError } from '../../../src/db/database';
 import { useDatabaseActions } from '../../../src/context/DatabaseContext';
 import { clearAllDrafts } from '../../../src/services/formDrafts';
 import { useSettingsStyles } from '../../../src/components/settings/settingsUi';
@@ -16,6 +16,7 @@ export default function DataSettingsScreen() {
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [resetConfirmInput, setResetConfirmInput] = useState('');
   const [resetting, setResetting] = useState(false);
+  const [optimizing, setOptimizing] = useState(false);
 
   const canConfirmReset = resetConfirmInput.trim().toUpperCase() === RESET_CONFIRM_TEXT;
 
@@ -28,6 +29,21 @@ export default function DataSettingsScreen() {
     if (resetting) return;
     setResetModalOpen(false);
     setResetConfirmInput('');
+  };
+
+  const handleOptimizeDatabase = async () => {
+    if (optimizing) return;
+    setOptimizing(true);
+    try {
+      const db = await getDatabase();
+      await db.execAsync('ANALYZE;');
+      await db.execAsync('VACUUM;');
+      Alert.alert('Done', 'Database optimized (ANALYZE + VACUUM).');
+    } catch (e) {
+      Alert.alert('Optimize failed', formatSqliteError(e));
+    } finally {
+      setOptimizing(false);
+    }
   };
 
   const handleResetDatabase = async () => {
@@ -50,6 +66,24 @@ export default function DataSettingsScreen() {
   return (
     <>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <SectionHeader title="Maintenance" />
+        <View style={localStyles.sectionCard}>
+          <TouchableOpacity
+            style={localStyles.outlineBtn}
+            onPress={handleOptimizeDatabase}
+            disabled={optimizing}
+            activeOpacity={0.7}
+          >
+            <Text style={localStyles.outlineBtnText}>
+              {optimizing ? 'Optimizing…' : 'Optimize database'}
+            </Text>
+          </TouchableOpacity>
+          <Text style={[localStyles.rowMeta, { paddingHorizontal: 16, paddingBottom: 12 }]}>
+            Runs ANALYZE + VACUUM. Safe; may take a moment on large books.
+          </Text>
+        </View>
+
+        <SectionHeader title="Danger zone" />
         <View style={localStyles.sectionCard}>
           <TouchableOpacity style={localStyles.dangerBtn} onPress={openResetModal} activeOpacity={0.7}>
             <Text style={localStyles.dangerText}>Reset database</Text>

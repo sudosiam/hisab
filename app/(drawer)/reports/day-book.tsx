@@ -1,5 +1,6 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, RefreshControl } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { DatePickerField, ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { ListSkeleton } from '../../../src/components/Skeleton';
 import { LedgerTable } from '../../../src/components/LedgerTable';
@@ -12,14 +13,26 @@ import { shareDayBookPdf } from '../../../src/services/reportPdf';
 import { radius, spacing } from '../../../src/constants/theme';
 import { cardSurface } from '../../../src/constants/shadows';
 import { useFocusRefresh } from '../../../src/hooks/useFocusRefresh';
-import { getCurrentMonthKey, getMonthRange, isValidISODate, todayISO } from '../../../src/utils/date';
+import {
+  getCurrentMonthKey,
+  getMonthRange,
+  isValidISODate,
+  todayISO,
+} from '../../../src/utils/date';
 import { MoneyText } from '../../../src/components/MoneyText';
 import { roundMoney } from '../../../src/utils/money';
 import { alertRefreshFailed } from '../../../src/utils/uiFeedback';
 import type { PartyStatementLine } from '../../../src/types';
 
+function firstParam(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
 export default function DayBookReportScreen() {
   const styles = useScreenStyles();
+  const router = useRouter();
+  const params = useLocalSearchParams<{ date?: string; month?: string }>();
   const { refreshKey } = useDatabase();
   const { colors, isDark } = useTheme();
   const monthRange = useMemo(() => getMonthRange(getCurrentMonthKey()), []);
@@ -29,6 +42,21 @@ export default function DayBookReportScreen() {
   const [rows, setRows] = useState<PartyStatementLine[]>([]);
   const [hint, setHint] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    const date = firstParam(params.date);
+    const month = firstParam(params.month);
+    if (date && isValidISODate(date)) {
+      setFromDate(date);
+      setToDate(date);
+      return;
+    }
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      const range = getMonthRange(month);
+      setFromDate(range.start);
+      setToDate(range.end);
+    }
+  }, [params.date, params.month]);
 
   const localStyles = useMemo(
     () =>
@@ -51,7 +79,6 @@ export default function DayBookReportScreen() {
           borderRadius: radius.sm,
         },
         totalLabel: { fontSize: 10, color: colors.textMuted, textTransform: 'uppercase' },
-        totalValue: { fontSize: 14, fontWeight: '700', fontVariant: ['tabular-nums'] },
       }),
     [colors, isDark]
   );
@@ -105,6 +132,21 @@ export default function DayBookReportScreen() {
     }
   }, [load]);
 
+  const onRowPress = useCallback(
+    (row: PartyStatementLine | { id: string; reference_type?: string; reference_id?: number }) => {
+      const full = rows.find((r) => r.id === row.id) ?? (row as PartyStatementLine);
+      if (!full.reference_id) return;
+      if (full.reference_type === 'sale') {
+        router.push(`/(drawer)/sales/${full.reference_id}` as never);
+      } else if (full.reference_type === 'purchase') {
+        router.push(`/(drawer)/purchases/${full.reference_id}` as never);
+      } else {
+        router.push(`/(drawer)/payments/${full.reference_id}` as never);
+      }
+    },
+    [router, rows]
+  );
+
   const totalDebit = roundMoney(rows.reduce((sum, row) => sum + row.debit, 0));
   const totalCredit = roundMoney(rows.reduce((sum, row) => sum + row.credit, 0));
 
@@ -129,6 +171,7 @@ export default function DayBookReportScreen() {
       contentContainerStyle={styles.content}
       rows={hint ? [] : rows}
       emptyText={hint ?? 'No journal entries in this date range.'}
+      onRowPress={onRowPress}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
       }

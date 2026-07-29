@@ -14,6 +14,7 @@ import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useSyncedPeriodKey } from '../../../src/hooks/useSyncedPeriodKey';
 import { formatCurrency, formatSignedCurrency } from '../../../src/utils/format';
 import { MoneyText, moneyRowStyles } from '../../../src/components/MoneyText';
+import { SimpleBarChart } from '../../../src/components/SimpleBarChart';
 import { ErrorState, SectionHeader, useScreenStyles } from '../../../src/components/ui';
 import { ListSkeleton } from '../../../src/components/Skeleton';
 import { useTheme } from '../../../src/context/ThemeContext';
@@ -134,6 +135,17 @@ export default function CashFlowReportScreen() {
         <Text style={localStyles.heroSub} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
           Opening {formatCurrency(data.openingCash)} → Closing {formatCurrency(data.closingCash)}
         </Text>
+      </View>
+
+      <SectionHeader title="Cash by activity" />
+      <View style={localStyles.card}>
+        <SimpleBarChart
+          items={[
+            { key: 'op', label: 'Operating', value: data.operating.net },
+            { key: 'inv', label: 'Investing', value: data.investing.net },
+            { key: 'fin', label: 'Financing', value: data.financing.net },
+          ]}
+        />
       </View>
 
       <SectionHeader title="Operating Activities" />

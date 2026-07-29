@@ -5,6 +5,7 @@ import { MonthPicker } from '../../../src/components/MonthPicker';
 import { getExpensesByCategoryReport } from '../../../src/services/reports';
 import { ReportRow } from '../../../src/components/ReportRow';
 import { MoneyText } from '../../../src/components/MoneyText';
+import { DonutChart } from '../../../src/components/DonutChart';
 import { ListSkeleton } from '../../../src/components/Skeleton';
 import { EmptyState, ErrorState, useScreenStyles } from '../../../src/components/ui';
 import { useDatabase } from '../../../src/context/DatabaseContext';
@@ -86,6 +87,17 @@ export default function ExpenseCategoriesReportScreen() {
         <Text style={{ fontWeight: '700', color: colors.danger, marginBottom: 2 }}>Total Expenses</Text>
         <MoneyText amount={total} size="lg" color={colors.danger} />
       </View>
+      {rows.length > 0 ? (
+        <View style={{ paddingHorizontal: spacing.md, marginBottom: spacing.sm }}>
+          <DonutChart
+            slices={rows.map((r) => ({
+              key: r.category,
+              label: r.category,
+              value: r.total,
+            }))}
+          />
+        </View>
+      ) : null}
       <FlatList
         data={rows}
         keyExtractor={(item) => item.category}

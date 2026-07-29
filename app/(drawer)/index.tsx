@@ -8,8 +8,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { DashboardSkeleton } from '../../src/components/Skeleton';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation, useRouter } from 'expo-router';
+import { useFocusEffect, useNavigation } from 'expo-router';
 import type { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { formatSqliteError } from '../../src/db/database';
 import { MonthPicker } from '../../src/components/MonthPicker';
@@ -31,8 +30,18 @@ import {
   getDashboardDailyTrend,
   getDashboardStats,
   type AccountingBasis,
-  type DashboardDailyTrend,
+  type DashboardTrend,
 } from '../../src/services/dashboard';
+import {
+  DEFAULT_DASHBOARD_PREFERENCES,
+  getDashboardPreferences,
+  setDashboardAccountingBasis,
+  setDashboardAmountsHidden,
+  visibleSectionOrder,
+  type DashboardPreferences,
+  type DashboardSectionId,
+} from '../../src/services/dashboardPreferences';
+import { navigateFromDashboard } from '../../src/navigation/fromDashboard';
 import { refreshHomeWidgets } from '../../src/services/widgetSnapshot';
 import { getPeriodSectionTitle } from '../../src/utils/date';
 import { useDatabase } from '../../src/context/DatabaseContext';
@@ -40,15 +49,11 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
 import { useSyncedPeriodKey } from '../../src/hooks/useSyncedPeriodKey';
 import { useFinancialYear } from '../../src/context/FinancialYearContext';
-import { radius, spacing, typography } from '../../src/constants/theme';
+import { radius, spacing } from '../../src/constants/theme';
 import type { GroupedRecentActivity } from '../../src/services/activity';
 import type { DashboardStats } from '../../src/types';
 
-const AMOUNTS_HIDDEN_KEY = '@hisab/dashboard_amounts_hidden';
-const ACCOUNTING_BASIS_KEY = '@hisab/dashboard_accounting_basis';
-
 export default function DashboardScreen() {
-  const router = useRouter();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { refreshKey } = useDatabase();
   const { fyRevision } = useFinancialYear();
@@ -57,15 +62,19 @@ export default function DashboardScreen() {
   const [monthKey, setMonthKey] = useSyncedPeriodKey();
   const [debouncedRefreshKey, setDebouncedRefreshKey] = useState(refreshKey);
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [trend, setTrend] = useState<DashboardDailyTrend | null>(null);
+  const [trend, setTrend] = useState<DashboardTrend | null>(null);
   const [activities, setActivities] = useState<GroupedRecentActivity>({
     sales: [],
     purchases: [],
     expenses: [],
   });
   const [refreshing, setRefreshing] = useState(false);
-  const [amountsHidden, setAmountsHidden] = useState(false);
-  const [basis, setBasis] = useState<AccountingBasis>('accrual');
+  const [prefs, setPrefs] = useState<DashboardPreferences>(DEFAULT_DASHBOARD_PREFERENCES);
+  const [prefsReady, setPrefsReady] = useState(false);
+
+  const amountsHidden = prefs.amountsHidden;
+  const basis = prefs.accountingBasis;
+  const sectionOrder = useMemo(() => visibleSectionOrder(prefs), [prefs]);
 
   const local = useMemo(
     () =>
@@ -84,19 +93,19 @@ export default function DashboardScreen() {
         seg: {
           flexDirection: 'row',
           backgroundColor: colors.surfaceContainerHigh,
-          borderRadius: radius.md,
+          borderRadius: radius.sm,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: colors.border,
-          padding: 2,
-          minHeight: 44,
+          padding: 1,
+          minHeight: 28,
           alignItems: 'center',
         },
         opt: {
-          paddingHorizontal: 14,
-          paddingVertical: 8,
-          borderRadius: radius.sm,
-          minHeight: 40,
-          minWidth: 72,
+          paddingHorizontal: 8,
+          paddingVertical: 4,
+          borderRadius: radius.sm - 1,
+          minHeight: 26,
+          minWidth: 44,
           justifyContent: 'center',
           alignItems: 'center',
         },
@@ -104,7 +113,8 @@ export default function DashboardScreen() {
           backgroundColor: colors.primaryContainer,
         },
         optText: {
-          ...typography.caption,
+          fontSize: 11,
+          lineHeight: 14,
           fontWeight: '500',
           color: colors.textSecondary,
           textAlign: 'center',
@@ -123,17 +133,21 @@ export default function DashboardScreen() {
     [colors]
   );
 
-  useEffect(() => {
-    void Promise.all([
-      AsyncStorage.getItem(AMOUNTS_HIDDEN_KEY),
-      AsyncStorage.getItem(ACCOUNTING_BASIS_KEY),
-    ])
-      .then(([hidden, storedBasis]) => {
-        if (hidden === '1') setAmountsHidden(true);
-        if (storedBasis === 'cash' || storedBasis === 'accrual') setBasis(storedBasis);
-      })
-      .catch((err) => console.warn('[dashboard] prefs load failed', err));
+  const loadPrefs = useCallback(async () => {
+    try {
+      setPrefs(await getDashboardPreferences());
+    } catch (err) {
+      console.warn('[dashboard] prefs load failed', err);
+    } finally {
+      setPrefsReady(true);
+    }
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadPrefs();
+    }, [loadPrefs])
+  );
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedRefreshKey(refreshKey), 250);
@@ -141,18 +155,18 @@ export default function DashboardScreen() {
   }, [refreshKey]);
 
   const toggleAmountsHidden = useCallback(() => {
-    setAmountsHidden((prev) => {
-      const next = !prev;
-      void AsyncStorage.setItem(AMOUNTS_HIDDEN_KEY, next ? '1' : '0').catch((err) =>
+    setPrefs((prev) => {
+      const next = !prev.amountsHidden;
+      void setDashboardAmountsHidden(next).catch((err) =>
         console.warn('[dashboard] hide amounts save failed', err)
       );
-      return next;
+      return { ...prev, amountsHidden: next };
     });
   }, []);
 
   const setAccountingBasis = useCallback((next: AccountingBasis) => {
-    setBasis(next);
-    void AsyncStorage.setItem(ACCOUNTING_BASIS_KEY, next).catch((err) =>
+    setPrefs((prev) => ({ ...prev, accountingBasis: next }));
+    void setDashboardAccountingBasis(next).catch((err) =>
       console.warn('[dashboard] basis save failed', err)
     );
   }, []);
@@ -161,56 +175,68 @@ export default function DashboardScreen() {
     navigation.setOptions({
       headerRight: () => (
         <View style={local.headerRight}>
-          <View
-            style={local.seg}
-            accessibilityRole="tablist"
-            accessibilityLabel="Accounting basis"
-          >
-            {(
-              [
-                { key: 'accrual', label: 'Accrual' },
-                { key: 'cash', label: 'Cash' },
-              ] as const
-            ).map((opt) => {
-              const active = basis === opt.key;
-              return (
-                <ThemedPressable
-                  key={opt.key}
-                  style={[local.opt, active && local.optActive]}
-                  onPress={() => setAccountingBasis(opt.key)}
-                  activeOpacity={ACTIVE_OPACITY}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={`${opt.label} mode`}
-                >
-                  <Text style={[local.optText, active && local.optTextActive]}>{opt.label}</Text>
-                </ThemedPressable>
-              );
-            })}
-          </View>
+          {prefs.showBasisToggle ? (
+            <View
+              style={local.seg}
+              accessibilityRole="tablist"
+              accessibilityLabel="Accounting basis"
+            >
+              {(
+                [
+                  { key: 'accrual', label: 'Accrual' },
+                  { key: 'cash', label: 'Cash' },
+                ] as const
+              ).map((opt) => {
+                const active = basis === opt.key;
+                return (
+                  <ThemedPressable
+                    key={opt.key}
+                    style={[local.opt, active && local.optActive]}
+                    onPress={() => setAccountingBasis(opt.key)}
+                    activeOpacity={ACTIVE_OPACITY}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`${opt.label} mode`}
+                    hitSlop={6}
+                  >
+                    <Text style={[local.optText, active && local.optTextActive]}>{opt.label}</Text>
+                  </ThemedPressable>
+                );
+              })}
+            </View>
+          ) : null}
           <CalculatorHeaderButton tintColor={colors.headerText} />
         </View>
       ),
     });
-  }, [navigation, basis, local, colors.headerText, setAccountingBasis]);
+  }, [
+    navigation,
+    basis,
+    local,
+    colors.headerText,
+    setAccountingBasis,
+    prefs.showBasisToggle,
+  ]);
 
   const load = useCallback(async () => {
     const [data, recent, monthly] = await Promise.all([
       getDashboardStats(monthKey, basis),
-      getRecentActivitiesGrouped(5, monthKey),
+      getRecentActivitiesGrouped(prefs.recentActivityLimit, monthKey),
       getDashboardDailyTrend(monthKey, basis),
     ]);
     setStats(data);
     setActivities(recent);
     setTrend(monthly);
     void refreshHomeWidgets();
-  }, [monthKey, basis]);
+  }, [monthKey, basis, prefs.recentActivityLimit]);
 
   const { booting, error, retry } = useFocusRefresh(load, [
     debouncedRefreshKey,
     monthKey,
     basis,
     fyRevision,
+    prefs.recentActivityLimit,
+    prefsReady,
   ]);
 
   const periodTitle =
@@ -218,11 +244,78 @@ export default function DashboardScreen() {
       ? `${getPeriodSectionTitle(monthKey)} · Cash`
       : getPeriodSectionTitle(monthKey);
 
+  const renderSection = (id: DashboardSectionId, index: number) => {
+    switch (id) {
+      case 'hero':
+        return stats ? (
+          <AnimatedSection key={id} index={index} style={local.sectionBlock}>
+            <FinanceHero
+              stats={stats}
+              amountsHidden={amountsHidden}
+              periodLabel={periodTitle}
+              onToggleAmountsHidden={toggleAmountsHidden}
+              onProfitPress={() =>
+                navigateFromDashboard(navigation, { drawer: 'reports', screen: 'profit-loss' })
+              }
+              onRevenuePress={() =>
+                navigateFromDashboard(navigation, { drawer: 'sales', screen: 'index' })
+              }
+              onPurchasedPress={() =>
+                navigateFromDashboard(navigation, { drawer: 'purchases', screen: 'index' })
+              }
+              onOtherIncomePress={() =>
+                navigateFromDashboard(navigation, { drawer: 'other-income', screen: 'index' })
+              }
+              onExpensesPress={() =>
+                navigateFromDashboard(navigation, { drawer: 'expense', screen: 'index' })
+              }
+              onNetWorthPress={() =>
+                navigateFromDashboard(navigation, { drawer: 'balance-sheet' })
+              }
+              onCashPress={() =>
+                navigateFromDashboard(navigation, { drawer: 'banking', screen: 'index' })
+              }
+              onReceivablePress={() =>
+                navigateFromDashboard(navigation, { drawer: 'reports', screen: 'receivables' })
+              }
+              onPayablePress={() =>
+                navigateFromDashboard(navigation, { drawer: 'reports', screen: 'payables' })
+              }
+              onInventoryPress={() =>
+                navigateFromDashboard(navigation, { drawer: 'inventory', screen: 'index' })
+              }
+            />
+          </AnimatedSection>
+        ) : null;
+      case 'trend':
+        return (
+          <AnimatedSection key={id} index={index} style={local.sectionBlock}>
+            <DashboardTrendPanel trend={trend} amountsHidden={amountsHidden} />
+          </AnimatedSection>
+        );
+      case 'shortcuts':
+        return (
+          <AnimatedSection key={id} index={index} style={local.sectionBlock}>
+            <DashboardShortcuts />
+          </AnimatedSection>
+        );
+      case 'activity':
+        return (
+          <AnimatedSection key={id} index={index} style={local.sectionBlock}>
+            <SectionHeader title="Recent in period" tight />
+            <RecentActivityList grouped={activities} amountsHidden={amountsHidden} />
+          </AnimatedSection>
+        );
+      default:
+        return null;
+    }
+  };
+
   if (error) {
     return <ErrorState message={error} onRetry={retry} />;
   }
 
-  if (booting && !stats) {
+  if ((booting || !prefsReady) && !stats) {
     return <DashboardSkeleton />;
   }
 
@@ -244,43 +337,13 @@ export default function DashboardScreen() {
         />
       }
     >
-      <AnimatedSection index={0} style={local.periodBlock}>
-        <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
-      </AnimatedSection>
-
-      {stats ? (
-        <AnimatedSection index={1} style={local.sectionBlock}>
-          <FinanceHero
-            stats={stats}
-            amountsHidden={amountsHidden}
-            periodLabel={periodTitle}
-            onToggleAmountsHidden={toggleAmountsHidden}
-            onProfitPress={() => router.push('/(drawer)/reports/profit-loss' as never)}
-            onRevenuePress={() => router.push('/(drawer)/sales' as never)}
-            onPurchasedPress={() => router.push('/(drawer)/purchases' as never)}
-            onOtherIncomePress={() => router.push('/(drawer)/other-income' as never)}
-            onExpensesPress={() => router.push('/(drawer)/expense' as never)}
-            onNetWorthPress={() => router.push('/(drawer)/balance-sheet')}
-            onCashPress={() => router.push('/(drawer)/banking' as never)}
-            onReceivablePress={() => router.push('/(drawer)/reports/receivables' as never)}
-            onPayablePress={() => router.push('/(drawer)/reports/payables' as never)}
-            onInventoryPress={() => router.push('/(drawer)/inventory' as never)}
-          />
+      {prefs.showPeriodPicker ? (
+        <AnimatedSection index={0} style={local.periodBlock}>
+          <MonthPicker monthKey={monthKey} onChange={setMonthKey} />
         </AnimatedSection>
       ) : null}
 
-      <AnimatedSection index={2} style={local.sectionBlock}>
-        <DashboardShortcuts />
-      </AnimatedSection>
-
-      <AnimatedSection index={3} style={local.sectionBlock}>
-        <DashboardTrendPanel trend={trend} amountsHidden={amountsHidden} />
-      </AnimatedSection>
-
-      <AnimatedSection index={4} style={local.sectionBlock}>
-        <SectionHeader title="Recent in period" tight />
-        <RecentActivityList grouped={activities} amountsHidden={amountsHidden} />
-      </AnimatedSection>
+      {sectionOrder.map((id, index) => renderSection(id, index + 1))}
     </ScrollView>
   );
 }

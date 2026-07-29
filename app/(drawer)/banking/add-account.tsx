@@ -144,8 +144,9 @@ export default function AddAccountScreen() {
   };
 
   return (
-    <FormScreen>
-      <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
+    <FormScreen
+      stickyFooter={<DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />}
+    >
       <FormInput label="Account Name" value={name} onChangeText={setName} placeholder="Petty Cash, HDFC..." />
       <Text style={styles.label}>Account Type</Text>
       {(['cash', 'bank'] as const).map((t) => (

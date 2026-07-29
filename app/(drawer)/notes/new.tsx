@@ -473,8 +473,9 @@ export default function NewNoteScreen() {
   const partyLabel = direction === 'sale' ? 'Customer' : 'Vendor';
 
   return (
-    <FormScreen>
-      <DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />
+    <FormScreen
+      stickyFooter={<DraftBanner visible={hasDraft} onDiscard={handleDiscardDraft} />}
+    >
       <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: spacing.sm }}>
         Adjusts party ledger (AR/AP and revenue/purchases). Does not change stock or the linked
         invoice due amount — record a stock adjustment or payment separately if needed.
