@@ -107,13 +107,10 @@ export default function PurchaseDetailScreen() {
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: spacing.sm,
-          marginTop: spacing.xs,
-          paddingTop: spacing.sm,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: colors.border,
         },
         gstLabel: {
           ...typography.bodyMedium,
+          fontWeight: '600',
           color: colors.text,
           flex: 1,
           minWidth: 0,
@@ -489,7 +486,22 @@ export default function PurchaseDetailScreen() {
             <Text style={localStyles.invoice} numberOfLines={1}>
               {purchase.invoice_no}
             </Text>
-            <StatusBadge status={purchase.status} />
+            <View style={{ alignItems: 'flex-end', gap: 4 }}>
+              <StatusBadge status={purchase.status} />
+              <Text
+                style={[
+                  localStyles.meta,
+                  {
+                    fontWeight: '700',
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.3,
+                    color: purchase.is_gst ? colors.primary : colors.textMuted,
+                  },
+                ]}
+              >
+                {purchase.is_gst ? 'GST' : 'Non-GST'}
+              </Text>
+            </View>
           </View>
           <View style={localStyles.partyRow}>
             <Text style={localStyles.party} numberOfLines={2}>
@@ -513,6 +525,9 @@ export default function PurchaseDetailScreen() {
               {formatCurrency(purchase.discount_amount)}
             </Text>
           ) : null}
+        </View>
+
+        <View style={localStyles.panel}>
           <View style={localStyles.gstRow}>
             <View style={{ flex: 1, minWidth: 0, marginRight: spacing.sm }}>
               <Text style={localStyles.gstLabel}>GST purchase</Text>

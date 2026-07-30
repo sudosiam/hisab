@@ -318,6 +318,8 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
         'Your data could not be verified. Please restore from a backup in Settings.'
       );
     }
+    // Idempotent additive columns (e.g. is_gst via OTA) even when already at current version.
+    await ensurePurchaseIsGstColumn(db);
     await seedDefaultAccounts(db);
     // Full integrity repair is deferred until after first paint (see DatabaseContext)
     // so large books do not ANR on cold start.
@@ -1111,6 +1113,13 @@ async function addMissingColumns(
   }
 }
 
+/** Label-only GST flag on purchases (schema v30). Safe to call every launch. */
+async function ensurePurchaseIsGstColumn(db: SQLite.SQLiteDatabase): Promise<void> {
+  await addMissingColumns(db, 'purchases', [
+    { name: 'is_gst', ddl: 'is_gst INTEGER NOT NULL DEFAULT 0' },
+  ]);
+}
+
 /** Legacy tax columns retained for backup compatibility (added schema v25; GST UI removed in v28). */
 async function ensureGstColumns(db: SQLite.SQLiteDatabase): Promise<void> {
   await addMissingColumns(db, 'parties', [
@@ -1153,9 +1162,8 @@ async function ensureGstColumns(db: SQLite.SQLiteDatabase): Promise<void> {
     { name: 'igst_amount', ddl: 'igst_amount INTEGER NOT NULL DEFAULT 0' },
     { name: 'is_inter_state', ddl: 'is_inter_state INTEGER NOT NULL DEFAULT 0' },
     { name: 'is_reverse_charge', ddl: 'is_reverse_charge INTEGER NOT NULL DEFAULT 0' },
-    // Label-only GST flag (no tax math) — schema v30
-    { name: 'is_gst', ddl: 'is_gst INTEGER NOT NULL DEFAULT 0' },
   ]);
+  await ensurePurchaseIsGstColumn(db);
 
   await addMissingColumns(db, 'purchase_items', [
     { name: 'hsn_sac', ddl: 'hsn_sac TEXT' },
