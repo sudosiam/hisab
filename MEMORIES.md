@@ -7,6 +7,7 @@
 | 2026-07-09 | Backup and restore could run concurrently; WAL snapshot race | https://github.com/sudosiam/hisab/pull/3 | **fixed in v8.0.0** (`withDbMaintenanceLock` unified semaphore + `invalidateDatabase`) |
 | 2026-07-09 | Orphan invoice cleanup could mass-delete on partial restore | https://github.com/sudosiam/hisab/pull/4 | **fixed in v8.0.0** (empty item-table guard in `cleanupOrphanInvoiceHeaders`) |
 | 2026-07-29 | Cash COGS integer÷, fractional qty, voucher FK deletes, v29 money idempotency, edit save guard | — | **fixed in v11.4.1** |
+| 2026-07-31 | deleteLoan dropped borrow liability when fixed assets linked; recurring borrow expenses skipped; ledger v9 stale on upgrade | — | **fixed in v11.4.4** |
 
 ## Ledger refresh
 

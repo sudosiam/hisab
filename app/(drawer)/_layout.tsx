@@ -50,7 +50,7 @@ export default function DrawerLayout() {
       <Drawer.Screen name="more" options={{ title: 'Capital', ...hidden }} />
       <Drawer.Screen name="other-income" options={{ title: 'Other Income', ...stackGroup }} />
       <Drawer.Screen name="investments" options={{ title: 'Investments', ...hidden }} />
-      <Drawer.Screen name="loans" options={{ title: 'Loans', ...hidden }} />
+      <Drawer.Screen name="loans" options={{ title: 'Lent & Borrowed', ...hidden }} />
       <Drawer.Screen name="settings" options={{ title: 'Settings', ...stackGroup }} />
     </Drawer>
   );

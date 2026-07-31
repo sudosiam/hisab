@@ -15,7 +15,9 @@ import { AccountPicker } from '../../../src/components/AccountPicker';
 import { CategoryPicker } from '../../../src/components/CategoryPicker';
 import { expenseCategorySource } from '../../../src/components/categorySources';
 import { DraftBanner } from '../../../src/components/DraftBanner';
+import { InlineDropdown } from '../../../src/components/InlineDropdown';
 import { createExpense, getPaymentAccounts } from '../../../src/services/banking';
+import { getOpenBorrowedLoans } from '../../../src/services/loans';
 import { DRAFT_KEYS, loadDraft, type ExpenseFormDraft } from '../../../src/services/formDrafts';
 import { useFormDraft } from '../../../src/hooks/useFormDraft';
 import { useUnsavedChangesGuard } from '../../../src/hooks/useUnsavedChangesGuard';
@@ -23,14 +25,19 @@ import { formatSqliteError } from '../../../src/db/database';
 import { useDatabase } from '../../../src/context/DatabaseContext';
 import { useTheme } from '../../../src/context/ThemeContext';
 import { todayISO, isValidISODate } from '../../../src/utils/date';
-import { parsePositiveAmount } from '../../../src/utils/format';
+import { formatCurrency, parsePositiveAmount } from '../../../src/utils/format';
 import { spacing } from '../../../src/constants/theme';
-import type { Account } from '../../../src/types';
+import type { Account, Loan } from '../../../src/types';
 
 const RECURRENCE_OPTIONS: { value: 'Monthly' | 'Weekly' | 'Yearly'; label: string }[] = [
   { value: 'Monthly', label: 'Monthly' },
   { value: 'Weekly', label: 'Weekly' },
   { value: 'Yearly', label: 'Yearly' },
+];
+
+const FUNDING_OPTIONS: { value: 'account' | 'borrowed'; label: string }[] = [
+  { value: 'account', label: 'Cash/Bank' },
+  { value: 'borrowed', label: 'Borrowed' },
 ];
 
 function isExpenseDraftEmpty(d: ExpenseFormDraft): boolean {
@@ -52,7 +59,11 @@ export default function NewExpenseScreen() {
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(todayISO());
   const [accounts, setAccounts] = React.useState<Account[]>([]);
+  const [borrowedLoans, setBorrowedLoans] = React.useState<Loan[]>([]);
   const [accountId, setAccountId] = useState(0);
+  const [loanId, setLoanId] = useState(0);
+  const [fundingMode, setFundingMode] = useState<'account' | 'borrowed'>('account');
+  const [loanPickerOpen, setLoanPickerOpen] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrence, setRecurrence] = useState('Monthly');
   const [loading, setLoading] = useState(false);
@@ -65,10 +76,12 @@ export default function NewExpenseScreen() {
       amount,
       date,
       accountId,
+      fundingMode,
+      loanId,
       isRecurring,
       recurrence,
     }),
-    [category, description, amount, date, accountId, isRecurring, recurrence]
+    [category, description, amount, date, accountId, fundingMode, loanId, isRecurring, recurrence]
   );
 
   const { markReady, discardDraft, clearDraftOnSave, hasDraft, noteDraftLoaded } = useFormDraft(
@@ -88,6 +101,8 @@ export default function NewExpenseScreen() {
     setAmount('');
     setDate(todayISO());
     setAccountId(defaultAccountId);
+    setLoanId(0);
+    setFundingMode('account');
     setIsRecurring(false);
     setRecurrence('Monthly');
   };
@@ -98,24 +113,18 @@ export default function NewExpenseScreen() {
       {
         text: 'Discard',
         style: 'destructive',
-        onPress: async () => {
-          await discardDraft();
-          resetForm(accountId || accounts[0]?.id || 0);
+        onPress: () => {
+          discardDraft();
+          resetForm(accounts[0]?.id ?? 0);
         },
       },
     ]);
   };
 
   const reloadAccounts = React.useCallback(async () => {
-    try {
-      const a = await getPaymentAccounts();
-      setAccounts(a);
-      setAccountId((current) =>
-        current && a.some((acc) => acc.id === current) ? current : a[0]?.id ?? 0
-      );
-    } catch (e) {
-      Alert.alert('Error', formatSqliteError(e));
-    }
+    const [a, loans] = await Promise.all([getPaymentAccounts(), getOpenBorrowedLoans()]);
+    setAccounts(a);
+    setBorrowedLoans(loans);
   }, []);
 
   useFocusEffect(
@@ -129,9 +138,10 @@ export default function NewExpenseScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const a = await getPaymentAccounts();
+        const [a, loans] = await Promise.all([getPaymentAccounts(), getOpenBorrowedLoans()]);
         if (cancelled) return;
         setAccounts(a);
+        setBorrowedLoans(loans);
         const defaultAccount = a[0]?.id ?? 0;
         const draft = await loadDraft<ExpenseFormDraft>(DRAFT_KEYS.expenseNew);
         if (cancelled) return;
@@ -144,6 +154,10 @@ export default function NewExpenseScreen() {
             draft.accountId && a.some((acc) => acc.id === draft.accountId)
               ? draft.accountId
               : defaultAccount
+          );
+          setFundingMode(draft.fundingMode === 'borrowed' ? 'borrowed' : 'account');
+          setLoanId(
+            draft.loanId && loans.some((l) => l.id === draft.loanId) ? draft.loanId : 0
           );
           setIsRecurring(draft.isRecurring ?? false);
           setRecurrence(draft.recurrence || 'Monthly');
@@ -161,6 +175,8 @@ export default function NewExpenseScreen() {
       cancelled = true;
     };
   }, [markReady, noteDraftLoaded]);
+
+  const selectedLoan = borrowedLoans.find((l) => l.id === loanId);
 
   const handleSave = async () => {
     if (loading) return;
@@ -181,10 +197,22 @@ export default function NewExpenseScreen() {
       Alert.alert('Invalid date', 'Select a valid expense date');
       return;
     }
-    if (!accountId) {
-      Alert.alert('Error', accounts.length === 0
-        ? 'Add a bank or cash account in Banking first.'
-        : 'Select a bank/cash account');
+    if (fundingMode === 'account' && !accountId) {
+      Alert.alert(
+        'Error',
+        accounts.length === 0
+          ? 'Add a bank or cash account in Banking first.'
+          : 'Select a bank/cash account'
+      );
+      return;
+    }
+    if (fundingMode === 'borrowed' && !loanId) {
+      Alert.alert(
+        'Error',
+        borrowedLoans.length === 0
+          ? 'Add a borrowed entry in Lent & Borrowed first.'
+          : 'Select a borrowed loan'
+      );
       return;
     }
     setLoading(true);
@@ -193,7 +221,8 @@ export default function NewExpenseScreen() {
         category: category.trim(),
         description: description.trim(),
         amount: amt!,
-        account_id: accountId,
+        account_id: fundingMode === 'account' ? accountId : null,
+        loan_id: fundingMode === 'borrowed' ? loanId : null,
         date,
         is_recurring: isRecurring,
         recurrence: isRecurring ? recurrence : undefined,
@@ -218,12 +247,45 @@ export default function NewExpenseScreen() {
       <FormInput label="Description" value={description} onChangeText={setDescription} />
       <FormInput label="Amount (₹)" value={amount} onChangeText={setAmount} money />
       <DatePickerField label="Date" value={date} onChange={setDate} />
-      {accounts.length === 0 ? (
-        <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: spacing.sm }}>
+
+      <Text style={[styles.label, { marginBottom: spacing.xs }]}>Paid from</Text>
+      <SegmentedControl options={FUNDING_OPTIONS} value={fundingMode} onChange={setFundingMode} />
+      {fundingMode === 'borrowed' ? (
+        <Text style={{ color: colors.textSecondary, fontSize: 13, marginVertical: spacing.sm }}>
+          Cash unchanged; loan outstanding increases.
+        </Text>
+      ) : accounts.length === 0 ? (
+        <Text style={{ color: colors.textSecondary, fontSize: 13, marginVertical: spacing.sm }}>
           Add a bank or cash account in Banking before recording expenses.
         </Text>
-      ) : null}
-      <AccountPicker accounts={accounts} value={accountId} onChange={setAccountId} />
+      ) : (
+        <View style={{ height: spacing.sm }} />
+      )}
+
+      {fundingMode === 'account' ? (
+        <AccountPicker accounts={accounts} value={accountId} onChange={setAccountId} />
+      ) : (
+        <InlineDropdown
+          label="Borrowed loan"
+          placeholder="Select borrowed loan"
+          valueLabel={
+            selectedLoan
+              ? `${selectedLoan.lender_name} (${formatCurrency(selectedLoan.outstanding_amount)})`
+              : undefined
+          }
+          open={loanPickerOpen}
+          onOpenChange={setLoanPickerOpen}
+          options={borrowedLoans.map((l) => ({
+            key: String(l.id),
+            value: l.id,
+            label: l.lender_name,
+            meta: formatCurrency(l.outstanding_amount),
+          }))}
+          selectedValue={loanId || null}
+          onSelect={setLoanId}
+          emptyText="No open borrowed loans"
+        />
+      )}
 
       <View style={[styles.row, { marginVertical: spacing.sm }]}>
         <Text style={styles.label}>Recurring Expense</Text>
@@ -243,12 +305,7 @@ export default function NewExpenseScreen() {
         </View>
       ) : null}
 
-      <PrimaryButton
-        title="Save Expense"
-        onPress={handleSave}
-        loading={loading}
-        disabled={accounts.length === 0}
-      />
+      <PrimaryButton title="Save Expense" onPress={handleSave} loading={loading} />
     </FormScreen>
   );
 }

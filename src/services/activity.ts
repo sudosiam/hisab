@@ -87,8 +87,11 @@ async function queryRecentByType(
       `SELECT 'expense' as act_type, e.id, e.category as ref, e.description as party,
               e.amount, e.date, e.created_at, NULL as invoice_type
        FROM expenses e
-       JOIN accounts a ON a.id = e.account_id
-       WHERE COALESCE(a.is_excluded, 0) = 0
+       LEFT JOIN accounts a ON a.id = e.account_id
+       WHERE (
+           e.loan_id IS NOT NULL
+           OR (e.account_id IS NOT NULL AND COALESCE(a.is_excluded, 0) = 0)
+         )
          ${expensePeriod}
        ORDER BY e.date DESC, e.created_at DESC
        LIMIT ?`,

@@ -3,7 +3,7 @@ import { waitForDatabaseAccess } from '../services/dbMaintenance';
 import { PAID_TOLERANCE_PAISE, roundMoney, roundQty } from '../utils/money';
 
 export const DB_NAME = 'hisab.db';
-const SCHEMA_VERSION = 30;
+const SCHEMA_VERSION = 31;
 
 /** Removes the legacy attachment media folder left over from the removed attachments feature. */
 async function clearLegacyMediaFolder(): Promise<void> {
@@ -320,6 +320,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     }
     // Idempotent additive columns (e.g. is_gst via OTA) even when already at current version.
     await ensurePurchaseIsGstColumn(db);
+    await ensureMoneyIouSchema(db);
     await seedDefaultAccounts(db);
     // Full integrity repair is deferred until after first paint (see DatabaseContext)
     // so large books do not ANR on cold start.
@@ -378,6 +379,7 @@ async function runMigrations(db: SQLite.SQLiteDatabase, fromVersion: number): Pr
   await ensureTransferReferenceLinks(db);
   await dropAttachmentsTable(db);
   await ensureLoansTable(db);
+  await ensureMoneyIouSchema(db);
   await ensureProductsIsHiddenColumn(db);
   await ensureProductsUniqueVisibleName(db);
   await ensureExpenseCategoriesTable(db);
@@ -986,6 +988,7 @@ async function ensureLoansTable(db: SQLite.SQLiteDatabase): Promise<void> {
     CREATE TABLE loans (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       lender_name TEXT NOT NULL,
+      direction TEXT NOT NULL DEFAULT 'borrowed',
       principal_amount INTEGER NOT NULL DEFAULT 0,
       outstanding_amount INTEGER NOT NULL DEFAULT 0,
       interest_rate REAL,
@@ -994,6 +997,81 @@ async function ensureLoansTable(db: SQLite.SQLiteDatabase): Promise<void> {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+}
+
+/** Lent/borrowed directions, expense/FA funding links, loan_movements (schema v31). */
+async function ensureMoneyIouSchema(db: SQLite.SQLiteDatabase): Promise<void> {
+  await addMissingColumns(db, 'loans', [
+    { name: 'direction', ddl: "direction TEXT NOT NULL DEFAULT 'borrowed'" },
+  ]);
+
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS loan_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      loan_id INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      account_id INTEGER,
+      reference_type TEXT,
+      reference_id INTEGER,
+      date TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (loan_id) REFERENCES loans(id) ON DELETE CASCADE,
+      FOREIGN KEY (account_id) REFERENCES accounts(id)
+    );
+  `);
+  await db.execAsync(
+    'CREATE INDEX IF NOT EXISTS idx_loan_movements_loan ON loan_movements(loan_id)'
+  );
+
+  await addMissingColumns(db, 'expenses', [
+    { name: 'loan_id', ddl: 'loan_id INTEGER' },
+  ]);
+
+  // Allow NULL account_id for borrow-funded expenses.
+  const expInfo = await db.getAllAsync<{ name: string; notnull: number }>(
+    `PRAGMA table_info(expenses)`
+  );
+  const accountCol = expInfo.find((c) => c.name === 'account_id');
+  if (accountCol && accountCol.notnull === 1) {
+    await db.execAsync(`
+      CREATE TABLE expenses_v31 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL,
+        description TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        account_id INTEGER,
+        loan_id INTEGER,
+        date TEXT NOT NULL,
+        is_recurring INTEGER NOT NULL DEFAULT 0,
+        recurrence TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id) REFERENCES accounts(id),
+        FOREIGN KEY (loan_id) REFERENCES loans(id)
+      );
+    `);
+    await db.execAsync(`
+      INSERT INTO expenses_v31 (
+        id, category, description, amount, account_id, loan_id, date, is_recurring, recurrence, created_at
+      )
+      SELECT id, category, description, amount, account_id, loan_id, date, is_recurring, recurrence, created_at
+      FROM expenses;
+    `);
+    await db.execAsync('DROP TABLE expenses');
+    await db.execAsync('ALTER TABLE expenses_v31 RENAME TO expenses');
+    await db.execAsync('CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date)');
+    await db.execAsync(
+      'CREATE INDEX IF NOT EXISTS idx_expenses_date_created ON expenses(date, created_at)'
+    );
+  }
+
+  await addMissingColumns(db, 'fixed_assets', [
+    { name: 'paid_from', ddl: "paid_from TEXT NOT NULL DEFAULT 'memo'" },
+    { name: 'account_id', ddl: 'account_id INTEGER' },
+    { name: 'loan_id', ddl: 'loan_id INTEGER' },
+    { name: 'date', ddl: 'date TEXT' },
+  ]);
 }
 
 async function ensurePerformanceIndexes(db: SQLite.SQLiteDatabase): Promise<void> {
@@ -1717,10 +1795,17 @@ async function verifySchema(db: SQLite.SQLiteDatabase): Promise<boolean> {
     );
     await db.getFirstAsync('SELECT unit_cost FROM inventory_movements LIMIT 1');
     await db.getFirstAsync('SELECT type, amount, payment_id FROM transactions LIMIT 1');
-    await db.getFirstAsync('SELECT is_recurring FROM expenses LIMIT 1');
+    await db.getFirstAsync('SELECT is_recurring, loan_id, account_id FROM expenses LIMIT 1');
     await db.getFirstAsync('SELECT category, amount FROM other_income LIMIT 1');
-    await db.getFirstAsync('SELECT value FROM fixed_assets LIMIT 1');
-    await db.getFirstAsync('SELECT lender_name, outstanding_amount FROM loans LIMIT 1');
+    await db.getFirstAsync(
+      'SELECT value, paid_from, account_id, loan_id, date FROM fixed_assets LIMIT 1'
+    );
+    await db.getFirstAsync(
+      'SELECT lender_name, outstanding_amount, direction FROM loans LIMIT 1'
+    );
+    await db.getFirstAsync(
+      'SELECT loan_id, kind, amount FROM loan_movements LIMIT 1'
+    );
     await db.getFirstAsync('SELECT name, type, phone, notes, gstin, state, address FROM parties LIMIT 1');
     await db.getFirstAsync('SELECT name FROM product_categories LIMIT 1');
     await db.getFirstAsync('SELECT name FROM expense_categories LIMIT 1');
@@ -1870,18 +1955,38 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       name TEXT NOT NULL,
       value INTEGER NOT NULL DEFAULT 0,
       notes TEXT,
+      paid_from TEXT NOT NULL DEFAULT 'memo',
+      account_id INTEGER,
+      loan_id INTEGER,
+      date TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE loans (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       lender_name TEXT NOT NULL,
+      direction TEXT NOT NULL DEFAULT 'borrowed',
       principal_amount INTEGER NOT NULL DEFAULT 0,
       outstanding_amount INTEGER NOT NULL DEFAULT 0,
       interest_rate REAL,
       start_date TEXT,
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE loan_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      loan_id INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      account_id INTEGER,
+      reference_type TEXT,
+      reference_id INTEGER,
+      date TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (loan_id) REFERENCES loans(id) ON DELETE CASCADE,
+      FOREIGN KEY (account_id) REFERENCES accounts(id)
     );
 
     CREATE TABLE sales (
@@ -2042,12 +2147,14 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       category TEXT NOT NULL,
       description TEXT NOT NULL,
       amount INTEGER NOT NULL,
-      account_id INTEGER NOT NULL,
+      account_id INTEGER,
+      loan_id INTEGER,
       date TEXT NOT NULL,
       is_recurring INTEGER NOT NULL DEFAULT 0,
       recurrence TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (account_id) REFERENCES accounts(id)
+      FOREIGN KEY (account_id) REFERENCES accounts(id),
+      FOREIGN KEY (loan_id) REFERENCES loans(id)
     );
 
     CREATE TABLE other_income (

@@ -124,6 +124,8 @@ export interface ExpenseFormDraft {
   amount: string;
   date: string;
   accountId: number;
+  fundingMode?: 'account' | 'borrowed';
+  loanId?: number;
   isRecurring: boolean;
   recurrence: string;
 }

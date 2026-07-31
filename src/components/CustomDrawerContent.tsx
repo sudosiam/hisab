@@ -97,7 +97,7 @@ const NAV_SECTIONS: NavSection[] = [
         match: ['/others'],
       },
       {
-        label: 'Loans',
+        label: 'Lent & Borrowed',
         route: '/loans',
         icon: 'card-outline',
         activeIcon: 'card',

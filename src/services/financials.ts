@@ -93,8 +93,12 @@ export async function getPeriodFinancials(
         ),
     db.getFirstAsync<{ total: number }>(
       `SELECT COALESCE(SUM(e.amount), 0) as total FROM expenses e
-       JOIN accounts a ON a.id = e.account_id
-       WHERE e.date >= ? AND e.date <= ? AND COALESCE(a.is_excluded, 0) = 0`,
+       LEFT JOIN accounts a ON a.id = e.account_id
+       WHERE e.date >= ? AND e.date <= ?
+         AND (
+           e.loan_id IS NOT NULL
+           OR (e.account_id IS NOT NULL AND COALESCE(a.is_excluded, 0) = 0)
+         )`,
       [start, end]
     ),
     db.getFirstAsync<{ total: number }>(

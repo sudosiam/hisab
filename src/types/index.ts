@@ -259,12 +259,14 @@ export interface Expense {
   category: string;
   description: string;
   amount: number;
-  account_id: number;
+  account_id: number | null;
+  loan_id?: number | null;
   date: string;
   is_recurring: number;
   recurrence: string | null;
   created_at: string;
-  account_name?: string;
+  account_name?: string | null;
+  loan_name?: string | null;
 }
 
 export interface OtherIncome {
@@ -317,6 +319,7 @@ export interface BalanceSheet {
     cashAndBank: number;
     inventory: number;
     receivables: number;
+    moneyLent: number;
     inputTaxCredit: number;
     fixedAssets: number;
     total: number;
@@ -339,16 +342,38 @@ export interface FixedAsset {
   name: string;
   value: number;
   notes: string | null;
+  paid_from?: 'memo' | 'account' | 'borrowed';
+  account_id?: number | null;
+  loan_id?: number | null;
+  date?: string | null;
   created_at: string;
+  account_name?: string | null;
+  loan_name?: string | null;
 }
+
+export type LoanDirection = 'borrowed' | 'lent';
 
 export interface Loan {
   id: number;
   lender_name: string;
+  direction: LoanDirection;
   principal_amount: number;
   outstanding_amount: number;
   interest_rate: number | null;
   start_date: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface LoanMovement {
+  id: number;
+  loan_id: number;
+  kind: string;
+  amount: number;
+  account_id: number | null;
+  reference_type: string | null;
+  reference_id: number | null;
+  date: string;
   notes: string | null;
   created_at: string;
 }

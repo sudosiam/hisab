@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Alert, FlatList, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  DatePickerField,
   EmptyState,
   ErrorState,
   Fab,
@@ -9,21 +10,27 @@ import {
   PrimaryButton,
   SearchField,
   SectionHeader,
+  SegmentedControl,
   SummaryHero,
   ThemedPressable,
   useFabListPadding,
   useScreenStyles,
 } from '../../src/components/ui';
+import { AccountPicker } from '../../src/components/AccountPicker';
+import { InlineDropdown } from '../../src/components/InlineDropdown';
 import { ListItem } from '../../src/components/ListItem';
 import { ListSkeleton } from '../../src/components/Skeleton';
 import {
   addFixedAsset,
   deleteFixedAsset,
   getFixedAssets,
+  getPaymentAccounts,
   updateFixedAsset,
 } from '../../src/services/banking';
+import { getOpenBorrowedLoans } from '../../src/services/loans';
 import { formatAmountInput, formatCurrency, parsePositiveAmount } from '../../src/utils/format';
 import { matchesSearch } from '../../src/utils/search';
+import { todayISO, isValidISODate } from '../../src/utils/date';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useDatabaseActions, useRefreshKey } from '../../src/context/DatabaseContext';
 import { useFocusRefresh } from '../../src/hooks/useFocusRefresh';
@@ -32,12 +39,23 @@ import { formatSqliteError } from '../../src/db/database';
 import { spacing } from '../../src/constants/theme';
 import { FLATLIST_PERF, listCardGetItemLayout } from '../../src/constants/listPerf';
 import { cardSurface } from '../../src/constants/shadows';
-import type { FixedAsset } from '../../src/types';
+import type { Account, FixedAsset, Loan } from '../../src/types';
+
+type PaidFrom = 'memo' | 'account' | 'borrowed';
 
 type FieldErrors = {
   name?: string;
   value?: string;
+  accountId?: string;
+  loanId?: string;
+  date?: string;
 };
+
+const PAID_FROM_OPTIONS: { value: PaidFrom; label: string }[] = [
+  { value: 'memo', label: 'Memo only' },
+  { value: 'account', label: 'Cash/Bank' },
+  { value: 'borrowed', label: 'Borrowed' },
+];
 
 export default function OthersScreen() {
   const styles = useScreenStyles();
@@ -47,11 +65,18 @@ export default function OthersScreen() {
   const { refresh } = useDatabaseActions();
   const refreshKey = useRefreshKey();
   const [assets, setAssets] = useState<FixedAsset[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [borrowedLoans, setBorrowedLoans] = useState<Loan[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
   const [notes, setNotes] = useState('');
+  const [paidFrom, setPaidFrom] = useState<PaidFrom>('memo');
+  const [accountId, setAccountId] = useState(0);
+  const [loanId, setLoanId] = useState(0);
+  const [assetDate, setAssetDate] = useState(todayISO());
+  const [loanPickerOpen, setLoanPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -66,8 +91,12 @@ export default function OthersScreen() {
         name,
         value,
         notes,
+        paidFrom,
+        accountId,
+        loanId,
+        assetDate,
       }),
-    [editingId, name, value, notes]
+    [editingId, name, value, notes, paidFrom, accountId, loanId, assetDate]
   );
   const formDirty =
     showAdd &&
@@ -99,14 +128,23 @@ export default function OthersScreen() {
           gap: spacing.sm,
           marginBottom: spacing.xs,
         },
+        hint: { color: colors.textSecondary, fontSize: 13, marginBottom: spacing.sm },
       }),
     [colors, isDark]
   );
 
   const load = useCallback(async () => {
-    setAssets(await getFixedAssets());
+    const [rows, paymentAccounts, loans] = await Promise.all([
+      getFixedAssets(),
+      getPaymentAccounts(),
+      getOpenBorrowedLoans(),
+    ]);
+    setAssets(rows);
+    setAccounts(paymentAccounts);
+    setBorrowedLoans(loans);
+    if (!accountId && paymentAccounts[0]) setAccountId(paymentAccounts[0].id);
     setError(null);
-  }, []);
+  }, [accountId]);
 
   const formOpenRef = useRef(false);
   formOpenRef.current = showAdd;
@@ -126,6 +164,9 @@ export default function OthersScreen() {
     setName('');
     setValue('');
     setNotes('');
+    setPaidFrom('memo');
+    setLoanId(0);
+    setAssetDate(todayISO());
     setEditingId(null);
     setShowAdd(false);
     setFieldErrors({});
@@ -133,29 +174,50 @@ export default function OthersScreen() {
   };
 
   const startAdd = () => {
-    const blank = { editingId: null as number | null, name: '', value: '', notes: '' };
+    const blank = {
+      editingId: null as number | null,
+      name: '',
+      value: '',
+      notes: '',
+      paidFrom: 'memo' as PaidFrom,
+      accountId: accounts[0]?.id ?? 0,
+      loanId: 0,
+      assetDate: todayISO(),
+    };
     setEditingId(blank.editingId);
     setName(blank.name);
     setValue(blank.value);
     setNotes(blank.notes);
+    setPaidFrom(blank.paidFrom);
+    setAccountId(blank.accountId);
+    setLoanId(blank.loanId);
+    setAssetDate(blank.assetDate);
     setShowAdd(true);
     savedFormSnapshotRef.current = JSON.stringify(blank);
   };
 
-  const startEdit = (asset: FixedAsset) => {
+  const startEdit = useCallback((asset: FixedAsset) => {
     const next = {
       editingId: asset.id as number | null,
       name: asset.name,
       value: formatAmountInput(asset.value),
       notes: asset.notes ?? '',
+      paidFrom: (asset.paid_from ?? 'memo') as PaidFrom,
+      accountId: asset.account_id ?? accounts[0]?.id ?? 0,
+      loanId: asset.loan_id ?? 0,
+      assetDate: asset.date ?? todayISO(),
     };
     setEditingId(next.editingId);
     setName(next.name);
     setValue(next.value);
     setNotes(next.notes);
+    setPaidFrom(next.paidFrom);
+    setAccountId(next.accountId);
+    setLoanId(next.loanId);
+    setAssetDate(next.assetDate);
     setShowAdd(true);
     savedFormSnapshotRef.current = JSON.stringify(next);
-  };
+  }, [accounts]);
 
   const handleSave = async () => {
     if (saving) return;
@@ -163,20 +225,34 @@ export default function OthersScreen() {
     const parsed = parsePositiveAmount(value);
     if (!name.trim()) nextErrors.name = 'Enter asset name';
     if (parsed === null) nextErrors.value = 'Enter an amount greater than zero';
+    if (!editingId) {
+      if (paidFrom === 'account' && !accountId) nextErrors.accountId = 'Select a cash/bank account';
+      if (paidFrom === 'borrowed' && !loanId) nextErrors.loanId = 'Select a borrowed loan';
+      if ((paidFrom === 'account' || paidFrom === 'borrowed') && !isValidISODate(assetDate)) {
+        nextErrors.date = 'Select a valid date';
+      }
+    }
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
     setSaving(true);
     try {
-      const payload = {
-        name: name.trim(),
-        value: parsed!,
-        notes: notes.trim() || undefined,
-      };
       if (editingId) {
-        await updateFixedAsset(editingId, payload);
+        await updateFixedAsset(editingId, {
+          name: name.trim(),
+          value: parsed!,
+          notes: notes.trim() || undefined,
+        });
       } else {
-        await addFixedAsset(payload);
+        await addFixedAsset({
+          name: name.trim(),
+          value: parsed!,
+          notes: notes.trim() || undefined,
+          paid_from: paidFrom,
+          account_id: paidFrom === 'account' ? accountId : null,
+          loan_id: paidFrom === 'borrowed' ? loanId : null,
+          date: assetDate,
+        });
       }
       refresh();
       resetForm();
@@ -214,11 +290,19 @@ export default function OthersScreen() {
     [load, refresh]
   );
 
+  const paidFromLabel = (asset: FixedAsset): string => {
+    if (asset.paid_from === 'account') return asset.account_name ? `Cash · ${asset.account_name}` : 'Cash/Bank';
+    if (asset.paid_from === 'borrowed') {
+      return asset.loan_name ? `Borrowed · ${asset.loan_name}` : 'Borrowed';
+    }
+    return 'Memo';
+  };
+
   const renderAssetItem = useCallback(
     ({ item: asset }: { item: FixedAsset }) => (
       <ListItem
         title={asset.name}
-        subtitle={`Value ${formatCurrency(asset.value)} · Added ${asset.created_at.slice(0, 10)}`}
+        subtitle={`Value ${formatCurrency(asset.value)} · ${paidFromLabel(asset)} · ${(asset.date || asset.created_at).slice(0, 10)}`}
         meta={asset.notes ?? undefined}
         amount={asset.value}
         amountColor={colors.primary}
@@ -238,15 +322,17 @@ export default function OthersScreen() {
         accessibilityLabel={`Edit asset ${asset.name}`}
       />
     ),
-    [colors.danger, colors.primary, handleDelete, localStyles.actionTap]
+    [colors.danger, colors.primary, handleDelete, localStyles.actionTap, startEdit]
   );
+
+  const selectedLoan = borrowedLoans.find((l) => l.id === loanId);
 
   const listHeader = (
     <>
       <SummaryHero
         label="Fixed Assets Total"
         amount={total}
-        hint={`${assets.length} asset${assets.length === 1 ? '' : 's'} · balance-sheet memos (no depreciation)`}
+        hint={`${assets.length} asset${assets.length === 1 ? '' : 's'}`}
       />
 
       <View style={localStyles.headerRow}>
@@ -293,12 +379,93 @@ export default function OthersScreen() {
             money
             error={fieldErrors.value}
           />
+          {!editingId ? (
+            <>
+              <Text style={[styles.label, { marginBottom: spacing.xs }]}>Paid from</Text>
+              <SegmentedControl
+                options={PAID_FROM_OPTIONS}
+                value={paidFrom}
+                onChange={setPaidFrom}
+              />
+              <Text style={localStyles.hint}>
+                {paidFrom === 'memo'
+                  ? 'Register only — cash and loans unchanged.'
+                  : paidFrom === 'account'
+                    ? 'Cash/bank decreases; asset increases.'
+                    : 'Cash unchanged; loan outstanding increases.'}
+              </Text>
+              {(paidFrom === 'account' || paidFrom === 'borrowed') ? (
+                <DatePickerField
+                  label="Date"
+                  value={assetDate}
+                  onChange={(v) => {
+                    setAssetDate(v);
+                    if (fieldErrors.date) setFieldErrors((e) => ({ ...e, date: undefined }));
+                  }}
+                  error={fieldErrors.date}
+                />
+              ) : null}
+              {paidFrom === 'account' ? (
+                <>
+                  <AccountPicker accounts={accounts} value={accountId} onChange={setAccountId} />
+                  {fieldErrors.accountId ? (
+                    <Text style={{ color: colors.danger, fontSize: 12 }}>{fieldErrors.accountId}</Text>
+                  ) : null}
+                </>
+              ) : null}
+              {paidFrom === 'borrowed' ? (
+                <>
+                  <InlineDropdown
+                    label="Borrowed loan"
+                    placeholder="Select borrowed loan"
+                    valueLabel={
+                      selectedLoan
+                        ? `${selectedLoan.lender_name} (${formatCurrency(selectedLoan.outstanding_amount)})`
+                        : undefined
+                    }
+                    open={loanPickerOpen}
+                    onOpenChange={setLoanPickerOpen}
+                    options={borrowedLoans.map((l) => ({
+                      key: String(l.id),
+                      value: l.id,
+                      label: l.lender_name,
+                      meta: formatCurrency(l.outstanding_amount),
+                    }))}
+                    selectedValue={loanId || null}
+                    onSelect={(id) => {
+                      setLoanId(id);
+                      if (fieldErrors.loanId) setFieldErrors((e) => ({ ...e, loanId: undefined }));
+                    }}
+                    emptyText="No open borrowed loans"
+                  />
+                  {fieldErrors.loanId ? (
+                    <Text style={{ color: colors.danger, fontSize: 12 }}>{fieldErrors.loanId}</Text>
+                  ) : null}
+                </>
+              ) : null}
+            </>
+          ) : (
+            <Text style={localStyles.hint}>
+              Funding source stays as recorded ({paidFromLabel({
+                id: 0,
+                name: '',
+                value: 0,
+                notes: null,
+                paid_from: paidFrom,
+                account_id: accountId,
+                loan_id: loanId,
+                created_at: '',
+                account_name: accounts.find((a) => a.id === accountId)?.name,
+                loan_name: borrowedLoans.find((l) => l.id === loanId)?.lender_name,
+              })}). Changing value adjusts cash or borrowed outstanding.
+            </Text>
+          )}
           <FormInput
             label="Notes"
             value={notes}
             onChangeText={setNotes}
             multiline
-            placeholder="Details, purchase date..."
+            placeholder="Optional details..."
           />
           <PrimaryButton
             title={editingId ? 'Save Changes' : 'Add Asset'}
@@ -357,7 +524,7 @@ export default function OthersScreen() {
             message={
               search.trim()
                 ? 'Try a different search.'
-                : 'Add vehicles, equipment, property, and other assets.'
+                : 'Track equipment and property. Pay from cash, borrow, or keep as a memo.'
             }
             actionLabel={search.trim() ? undefined : 'Add Asset'}
             onAction={search.trim() ? undefined : startAdd}

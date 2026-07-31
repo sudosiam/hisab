@@ -295,77 +295,91 @@ export async function createExpense(params: {
   category: string;
   description: string;
   amount: number;
-  account_id: number;
+  account_id?: number | null;
+  loan_id?: number | null;
   date: string;
   is_recurring?: boolean;
   recurrence?: string;
 }): Promise<number> {
-  if (!params.account_id) {
-    throw new Error('Please select a valid bank/cash account');
-  }
   const amount = assertPositiveAmount(params.amount);
-  await assertActiveAccount(params.account_id, 'expenses');
+  const loanId = params.loan_id ?? null;
+  const accountId = params.account_id ?? null;
+
+  if (loanId && accountId) {
+    throw new Error('Choose either cash/bank or borrowed funding, not both');
+  }
+  if (!loanId && !accountId) {
+    throw new Error('Please select a bank/cash account or a borrowed loan');
+  }
+  if (accountId) await assertActiveAccount(accountId, 'expenses');
 
   const db = await getDatabase();
-
   let expenseId = 0;
+
   await db.withTransactionAsync(async () => {
     const category = await ensureExpenseCategory(db, params.category);
     const result = await db.runAsync(
-      `INSERT INTO expenses (category, description, amount, account_id, date, is_recurring, recurrence) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO expenses (
+         category, description, amount, account_id, loan_id, date, is_recurring, recurrence
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         category,
         params.description,
         amount,
-        params.account_id,
+        accountId,
+        loanId,
         params.date,
         params.is_recurring ? 1 : 0,
         params.recurrence ?? null,
       ]
     );
     expenseId = result.lastInsertRowId;
-    await recordTransaction(db, {
-      account_id: params.account_id,
-      type: 'expense',
-      amount: -amount,
-      reference_type: 'expense',
-      reference_id: expenseId,
-      description: `${category}: ${params.description}`,
-      date: params.date,
-    });
+
+    if (loanId) {
+      const { increaseBorrowedOutstanding } = await import('./loans');
+      await increaseBorrowedOutstanding(db, loanId, amount, 'expense', params.date, {
+        type: 'expense',
+        id: expenseId,
+      });
+    } else if (accountId) {
+      await recordTransaction(db, {
+        account_id: accountId,
+        type: 'expense',
+        amount: -amount,
+        reference_type: 'expense',
+        reference_id: expenseId,
+        description: `${category}: ${params.description}`,
+        date: params.date,
+      });
+    }
   });
 
   await syncGeneralLedgerAfterWrite();
   return expenseId;
 }
 
+const EXPENSE_SELECT = `SELECT e.*, a.name as account_name, l.lender_name as loan_name
+  FROM expenses e
+  LEFT JOIN accounts a ON a.id = e.account_id
+  LEFT JOIN loans l ON l.id = e.loan_id`;
+
 export async function getExpenses(periodKey?: string): Promise<Expense[]> {
   const db = await getDatabase();
   if (periodKey) {
     const { start, end } = await resolvePeriodRange(periodKey);
     return db.getAllAsync<Expense>(
-      `SELECT e.*, a.name as account_name FROM expenses e
-       JOIN accounts a ON a.id = e.account_id
+      `${EXPENSE_SELECT}
        WHERE e.date >= ? AND e.date <= ?
        ORDER BY e.date DESC`,
       [start, end]
     );
   }
-  return db.getAllAsync<Expense>(
-    `SELECT e.*, a.name as account_name FROM expenses e
-     JOIN accounts a ON a.id = e.account_id
-     ORDER BY e.date DESC`
-  );
+  return db.getAllAsync<Expense>(`${EXPENSE_SELECT} ORDER BY e.date DESC`);
 }
 
 export async function getExpenseById(id: number): Promise<Expense | null> {
   const db = await getDatabase();
-  return db.getFirstAsync<Expense>(
-    `SELECT e.*, a.name as account_name FROM expenses e
-     JOIN accounts a ON a.id = e.account_id
-     WHERE e.id = ?`,
-    [id]
-  );
+  return db.getFirstAsync<Expense>(`${EXPENSE_SELECT} WHERE e.id = ?`, [id]);
 }
 
 export async function updateExpense(
@@ -374,17 +388,24 @@ export async function updateExpense(
     category: string;
     description: string;
     amount: number;
-    account_id: number;
+    account_id?: number | null;
+    loan_id?: number | null;
     date: string;
     is_recurring?: boolean;
     recurrence?: string;
   }
 ): Promise<void> {
-  if (!params.account_id) {
-    throw new Error('Please select a valid bank/cash account');
-  }
   const amount = assertPositiveAmount(params.amount);
-  await assertActiveAccount(params.account_id, 'expenses');
+  const loanId = params.loan_id ?? null;
+  const accountId = params.account_id ?? null;
+
+  if (loanId && accountId) {
+    throw new Error('Choose either cash/bank or borrowed funding, not both');
+  }
+  if (!loanId && !accountId) {
+    throw new Error('Please select a bank/cash account or a borrowed loan');
+  }
+  if (accountId) await assertActiveAccount(accountId, 'expenses');
 
   const db = await getDatabase();
   const existing = await getExpenseById(id);
@@ -400,14 +421,25 @@ export async function updateExpense(
       await updateAccountBalance(db, tx.account_id, -tx.amount);
       await db.runAsync('DELETE FROM transactions WHERE id = ?', [tx.id]);
     }
+    if (existing.loan_id) {
+      const { decreaseBorrowedOutstanding } = await import('./loans');
+      await decreaseBorrowedOutstanding(
+        db,
+        existing.loan_id,
+        existing.amount,
+        params.date,
+        'Expense edit reversal'
+      );
+    }
 
     await db.runAsync(
-      `UPDATE expenses SET category = ?, description = ?, amount = ?, account_id = ?, date = ?, is_recurring = ?, recurrence = ? WHERE id = ?`,
+      `UPDATE expenses SET category = ?, description = ?, amount = ?, account_id = ?, loan_id = ?, date = ?, is_recurring = ?, recurrence = ? WHERE id = ?`,
       [
         category,
         params.description,
         amount,
-        params.account_id,
+        accountId,
+        loanId,
         params.date,
         params.is_recurring ? 1 : 0,
         params.recurrence ?? null,
@@ -415,15 +447,23 @@ export async function updateExpense(
       ]
     );
 
-    await recordTransaction(db, {
-      account_id: params.account_id,
-      type: 'expense',
-      amount: -amount,
-      reference_type: 'expense',
-      reference_id: id,
-      description: `${category}: ${params.description}`,
-      date: params.date,
-    });
+    if (loanId) {
+      const { increaseBorrowedOutstanding } = await import('./loans');
+      await increaseBorrowedOutstanding(db, loanId, amount, 'expense', params.date, {
+        type: 'expense',
+        id,
+      });
+    } else if (accountId) {
+      await recordTransaction(db, {
+        account_id: accountId,
+        type: 'expense',
+        amount: -amount,
+        reference_type: 'expense',
+        reference_id: id,
+        description: `${category}: ${params.description}`,
+        date: params.date,
+      });
+    }
   });
 
   await syncGeneralLedgerAfterWrite();
@@ -431,6 +471,7 @@ export async function updateExpense(
 
 export async function deleteExpense(id: number): Promise<void> {
   const db = await getDatabase();
+  const existing = await getExpenseById(id);
   const tx = await db.getFirstAsync<Transaction>(
     `SELECT * FROM transactions WHERE reference_type = 'expense' AND reference_id = ? LIMIT 1`,
     [id]
@@ -440,6 +481,16 @@ export async function deleteExpense(id: number): Promise<void> {
     if (tx) {
       await updateAccountBalance(db, tx.account_id, -tx.amount);
       await db.runAsync('DELETE FROM transactions WHERE id = ?', [tx.id]);
+    }
+    if (existing?.loan_id) {
+      const { decreaseBorrowedOutstanding } = await import('./loans');
+      await decreaseBorrowedOutstanding(
+        db,
+        existing.loan_id,
+        existing.amount,
+        existing.date,
+        'Expense deleted'
+      );
     }
     await db.runAsync('DELETE FROM expenses WHERE id = ?', [id]);
   });
@@ -473,8 +524,13 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
      WHERE total_amount - paid_amount > 0
        AND EXISTS (SELECT 1 FROM purchase_items pi WHERE pi.purchase_id = purchases.id)`
   );
-  const loans = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(outstanding_amount), 0) as total FROM loans`
+  const borrowed = await db.getFirstAsync<{ total: number }>(
+    `SELECT COALESCE(SUM(outstanding_amount), 0) as total FROM loans
+     WHERE COALESCE(direction, 'borrowed') = 'borrowed'`
+  );
+  const moneyLent = await db.getFirstAsync<{ total: number }>(
+    `SELECT COALESCE(SUM(outstanding_amount), 0) as total FROM loans
+     WHERE direction = 'lent'`
   );
 
   const fixedAssets = await db.getFirstAsync<{ total: number }>(
@@ -486,18 +542,20 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
   const cash = roundMoney(cashBank?.total ?? 0);
   const inv = roundMoney(inventory?.total ?? 0);
   const recv = roundMoney(receivables?.total ?? 0);
+  const lent = roundMoney(moneyLent?.total ?? 0);
   const fixed = roundMoney(fixedAssets?.total ?? 0);
   const inputTax = roundMoney(inputTaxCredit);
   const pay = roundMoney(payables?.total ?? 0);
-  const loan = roundMoney(loans?.total ?? 0);
+  const loan = roundMoney(borrowed?.total ?? 0);
   const outTax = roundMoney(outputTax);
 
   const currentAssets: BalanceSheet['assets']['currentAssets'] = [
     { key: 'cash_bank', label: 'Cash & Bank', amount: cash },
     { key: 'receivables', label: 'Accounts Receivable', amount: recv },
+    { key: 'money_lent', label: 'Money Lent', amount: lent },
     { key: 'inventory', label: 'Inventory', amount: inv },
     { key: 'input_tax', label: 'Input Tax Credit', amount: inputTax },
-  ].filter((line) => Math.abs(line.amount) > 0 || line.key !== 'input_tax');
+  ].filter((line) => Math.abs(line.amount) > 0 || (line.key !== 'input_tax' && line.key !== 'money_lent'));
 
   const nonCurrentAssets: BalanceSheet['assets']['nonCurrentAssets'] = [
     { key: 'fixed_assets', label: 'Fixed Assets', amount: fixed },
@@ -509,10 +567,10 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
   ].filter((line) => Math.abs(line.amount) > 0 || line.key !== 'output_tax');
 
   const nonCurrentLiabilities: BalanceSheet['liabilities']['nonCurrentLiabilities'] = [
-    { key: 'loans', label: 'Loans', amount: loan },
+    { key: 'loans', label: 'Loans Borrowed', amount: loan },
   ].filter((line) => Math.abs(line.amount) > 0 || line.key === 'loans');
 
-  const totalAssets = addMoney(cash, inv, recv, fixed, inputTax);
+  const totalAssets = addMoney(cash, inv, recv, lent, fixed, inputTax);
   const totalLiabilities = addMoney(pay, loan, outTax);
   const equity = subMoney(totalAssets, totalLiabilities);
 
@@ -521,6 +579,7 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
       cashAndBank: cash,
       inventory: inv,
       receivables: recv,
+      moneyLent: lent,
       inputTaxCredit: inputTax,
       fixedAssets: fixed,
       total: totalAssets,
@@ -551,25 +610,81 @@ async function getGstBalancesForSheet(
 
 export async function getFixedAssets(): Promise<FixedAsset[]> {
   const db = await getDatabase();
-  return db.getAllAsync<FixedAsset>('SELECT * FROM fixed_assets ORDER BY name ASC');
+  return db.getAllAsync<FixedAsset>(
+    `SELECT f.*, a.name as account_name, l.lender_name as loan_name
+     FROM fixed_assets f
+     LEFT JOIN accounts a ON a.id = f.account_id
+     LEFT JOIN loans l ON l.id = f.loan_id
+     ORDER BY f.name ASC`
+  );
 }
 
 export async function addFixedAsset(params: {
   name: string;
   value: number;
   notes?: string;
+  paid_from?: 'memo' | 'account' | 'borrowed';
+  account_id?: number | null;
+  loan_id?: number | null;
+  date?: string;
 }): Promise<number> {
   if (!params.name.trim()) throw new Error('Asset name is required');
   if (!Number.isFinite(params.value) || params.value < 0) {
     throw new Error('Asset value cannot be negative');
   }
+  const value = roundMoney(params.value);
+  const paidFrom = params.paid_from ?? 'memo';
+  const date = params.date?.trim() || todayISO();
+  const accountId = params.account_id ?? null;
+  const loanId = params.loan_id ?? null;
+
+  if (paidFrom === 'account') {
+    if (!accountId) throw new Error('Select a cash/bank account');
+    await assertActiveAccount(accountId, 'fixed assets');
+  } else if (paidFrom === 'borrowed') {
+    if (!loanId) throw new Error('Select a borrowed loan');
+  }
+
   const db = await getDatabase();
-  const result = await db.runAsync(
-    `INSERT INTO fixed_assets (name, value, notes) VALUES (?, ?, ?)`,
-    [params.name.trim(), roundMoney(params.value), params.notes ?? null]
-  );
+  let assetId = 0;
+
+  await db.withTransactionAsync(async () => {
+    const result = await db.runAsync(
+      `INSERT INTO fixed_assets (name, value, notes, paid_from, account_id, loan_id, date)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        params.name.trim(),
+        value,
+        params.notes ?? null,
+        paidFrom,
+        paidFrom === 'account' ? accountId : null,
+        paidFrom === 'borrowed' ? loanId : null,
+        date,
+      ]
+    );
+    assetId = result.lastInsertRowId;
+
+    if (paidFrom === 'account' && accountId && value > 0) {
+      await recordTransaction(db, {
+        account_id: accountId,
+        type: 'withdrawal',
+        amount: -value,
+        reference_type: 'fixed_asset',
+        reference_id: assetId,
+        description: `Fixed asset — ${params.name.trim()}`,
+        date,
+      });
+    } else if (paidFrom === 'borrowed' && loanId && value > 0) {
+      const { increaseBorrowedOutstanding } = await import('./loans');
+      await increaseBorrowedOutstanding(db, loanId, value, 'fixed_asset', date, {
+        type: 'fixed_asset',
+        id: assetId,
+      });
+    }
+  });
+
   await syncGeneralLedgerAfterWrite();
-  return result.lastInsertRowId;
+  return assetId;
 }
 
 export async function updateFixedAsset(
@@ -581,18 +696,102 @@ export async function updateFixedAsset(
     throw new Error('Asset value cannot be negative');
   }
   const db = await getDatabase();
-  await db.runAsync(`UPDATE fixed_assets SET name = ?, value = ?, notes = ? WHERE id = ?`, [
-    params.name.trim(),
-    roundMoney(params.value),
-    params.notes ?? null,
+  const existing = await db.getFirstAsync<FixedAsset>('SELECT * FROM fixed_assets WHERE id = ?', [
     id,
   ]);
+  if (!existing) throw new Error('Fixed asset not found');
+
+  const nextValue = roundMoney(params.value);
+  const delta = subMoney(nextValue, existing.value);
+  const entryDate = existing.date?.trim() || todayISO();
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(`UPDATE fixed_assets SET name = ?, value = ?, notes = ? WHERE id = ?`, [
+      params.name.trim(),
+      nextValue,
+      params.notes ?? null,
+      id,
+    ]);
+
+    if (delta !== 0 && existing.paid_from === 'account' && existing.account_id) {
+      await recordTransaction(db, {
+        account_id: existing.account_id,
+        type: 'withdrawal',
+        amount: -delta,
+        reference_type: 'fixed_asset',
+        reference_id: id,
+        description: `Fixed asset adjust — ${params.name.trim()}`,
+        date: entryDate,
+      });
+    } else if (delta !== 0 && existing.paid_from === 'borrowed' && existing.loan_id) {
+      const { increaseBorrowedOutstanding, decreaseBorrowedOutstanding } = await import('./loans');
+      if (delta > 0) {
+        await increaseBorrowedOutstanding(db, existing.loan_id, delta, 'fixed_asset', entryDate, {
+          type: 'fixed_asset',
+          id,
+        });
+      } else {
+        await decreaseBorrowedOutstanding(
+          db,
+          existing.loan_id,
+          Math.abs(delta),
+          entryDate,
+          'Fixed asset edit'
+        );
+      }
+    }
+  });
+
   await syncGeneralLedgerAfterWrite();
 }
 
 export async function deleteFixedAsset(id: number): Promise<void> {
   const db = await getDatabase();
-  await db.runAsync('DELETE FROM fixed_assets WHERE id = ?', [id]);
+  const existing = await db.getFirstAsync<FixedAsset>('SELECT * FROM fixed_assets WHERE id = ?', [
+    id,
+  ]);
+  if (!existing) return;
+
+  const entryDate = existing.date?.trim() || todayISO();
+
+  await db.withTransactionAsync(async () => {
+    if (existing.paid_from === 'account' && existing.account_id && existing.value > 0) {
+      const txs = await db.getAllAsync<Transaction>(
+        `SELECT * FROM transactions WHERE reference_type = 'fixed_asset' AND reference_id = ?`,
+        [id]
+      );
+      if (txs.length > 0) {
+        for (const tx of txs) {
+          await updateAccountBalance(db, tx.account_id, -tx.amount);
+        }
+        await db.runAsync(
+          `DELETE FROM transactions WHERE reference_type = 'fixed_asset' AND reference_id = ?`,
+          [id]
+        );
+      } else {
+        await recordTransaction(db, {
+          account_id: existing.account_id,
+          type: 'deposit',
+          amount: existing.value,
+          reference_type: 'fixed_asset',
+          reference_id: id,
+          description: `Reversed fixed asset — ${existing.name}`,
+          date: entryDate,
+        });
+      }
+    } else if (existing.paid_from === 'borrowed' && existing.loan_id && existing.value > 0) {
+      const { decreaseBorrowedOutstanding } = await import('./loans');
+      await decreaseBorrowedOutstanding(
+        db,
+        existing.loan_id,
+        existing.value,
+        entryDate,
+        'Fixed asset deleted'
+      );
+    }
+    await db.runAsync('DELETE FROM fixed_assets WHERE id = ?', [id]);
+  });
+
   await syncGeneralLedgerAfterWrite();
 }
 
@@ -880,55 +1079,102 @@ export async function processRecurringExpenses(): Promise<number> {
   const db = await getDatabase();
   let created = 0;
 
-  // Skip templates tied to deactivated accounts — new outflows must never
-  // post to an excluded account.
+  // Account-funded: skip templates tied to deactivated accounts.
+  // Borrow-funded: include open borrowed loans (no cash account).
   const templates = await db.getAllAsync<Expense>(
     `SELECT e.* FROM expenses e
-     JOIN accounts a ON a.id = e.account_id
-     WHERE e.is_recurring = 1 AND COALESCE(a.is_excluded, 0) = 0`
+     LEFT JOIN accounts a ON a.id = e.account_id
+     LEFT JOIN loans l ON l.id = e.loan_id
+     WHERE e.is_recurring = 1
+       AND (
+         (e.account_id IS NOT NULL AND COALESCE(a.is_excluded, 0) = 0)
+         OR (e.loan_id IS NOT NULL AND l.direction = 'borrowed')
+       )`
   );
 
   for (const template of templates) {
+    const isBorrowed = !!template.loan_id;
+    if (!isBorrowed && !template.account_id) continue;
+    if (isBorrowed && !template.loan_id) continue;
+    const templateAccountId = template.account_id;
+    const templateLoanId = template.loan_id as number;
     let nextDate = advanceByRecurrence(template.date, template.recurrence ?? 'Monthly');
     const recurrence = template.recurrence ?? 'Monthly';
     let periods = 0;
 
     while (nextDate <= today && periods < MAX_RECURRING_PER_RUN) {
-      const existing = await db.getFirstAsync<{ id: number }>(
-        `SELECT id FROM expenses
-         WHERE category = ? AND description = ? AND amount = ? AND account_id = ?
-         AND date = ? AND is_recurring = 0`,
-        [
-          template.category,
-          template.description,
-          template.amount,
-          template.account_id,
-          nextDate,
-        ]
-      );
-
-      if (!existing) {
-        await db.withTransactionAsync(async () => {
-          const result = await db.runAsync(
-            `INSERT INTO expenses (category, description, amount, account_id, date, is_recurring, recurrence)
-             VALUES (?, ?, ?, ?, ?, 0, NULL)`,
+      const existing = isBorrowed
+        ? await db.getFirstAsync<{ id: number }>(
+            `SELECT id FROM expenses
+             WHERE category = ? AND description = ? AND amount = ? AND loan_id = ?
+             AND date = ? AND is_recurring = 0`,
             [
               template.category,
               template.description,
               template.amount,
-              template.account_id,
+              templateLoanId,
+              nextDate,
+            ]
+          )
+        : await db.getFirstAsync<{ id: number }>(
+            `SELECT id FROM expenses
+             WHERE category = ? AND description = ? AND amount = ? AND account_id = ?
+             AND date = ? AND is_recurring = 0`,
+            [
+              template.category,
+              template.description,
+              template.amount,
+              templateAccountId,
               nextDate,
             ]
           );
-          await recordTransaction(db, {
-            account_id: template.account_id,
-            type: 'expense',
-            amount: -template.amount,
-            reference_type: 'expense',
-            reference_id: result.lastInsertRowId,
-            description: `${template.category}: ${template.description}`,
-            date: nextDate,
-          });
+
+      if (!existing) {
+        await db.withTransactionAsync(async () => {
+          const result = isBorrowed
+            ? await db.runAsync(
+                `INSERT INTO expenses (category, description, amount, loan_id, date, is_recurring, recurrence)
+                 VALUES (?, ?, ?, ?, ?, 0, NULL)`,
+                [
+                  template.category,
+                  template.description,
+                  template.amount,
+                  templateLoanId,
+                  nextDate,
+                ]
+              )
+            : await db.runAsync(
+                `INSERT INTO expenses (category, description, amount, account_id, date, is_recurring, recurrence)
+                 VALUES (?, ?, ?, ?, ?, 0, NULL)`,
+                [
+                  template.category,
+                  template.description,
+                  template.amount,
+                  templateAccountId,
+                  nextDate,
+                ]
+              );
+          if (isBorrowed) {
+            const { increaseBorrowedOutstanding } = await import('./loans');
+            await increaseBorrowedOutstanding(
+              db,
+              templateLoanId,
+              template.amount,
+              'expense',
+              nextDate,
+              { type: 'expense', id: result.lastInsertRowId }
+            );
+          } else if (templateAccountId) {
+            await recordTransaction(db, {
+              account_id: templateAccountId,
+              type: 'expense',
+              amount: -template.amount,
+              reference_type: 'expense',
+              reference_id: result.lastInsertRowId,
+              description: `${template.category}: ${template.description}`,
+              date: nextDate,
+            });
+          }
         });
         created += 1;
       }

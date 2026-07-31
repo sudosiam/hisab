@@ -639,6 +639,7 @@ export async function getTrialBalanceReport(): Promise<{
   const rows: TrialBalanceRow[] = [
     { account: 'Cash & Bank', debit: sheet.assets.cashAndBank, credit: 0 },
     { account: 'Receivables', debit: sheet.assets.receivables, credit: 0 },
+    { account: 'Money Lent', debit: sheet.assets.moneyLent, credit: 0 },
     { account: 'Inventory', debit: sheet.assets.inventory, credit: 0 },
     { account: 'Input Tax Credit', debit: sheet.assets.inputTaxCredit, credit: 0 },
     { account: 'Fixed Assets', debit: sheet.assets.fixedAssets, credit: 0 },

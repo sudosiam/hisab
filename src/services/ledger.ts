@@ -34,6 +34,7 @@ const SYSTEM_ACCOUNTS: {
   { system_key: 'inventory', name: 'Inventory', account_type: 'asset' },
   { system_key: 'fixed_assets', name: 'Fixed Assets', account_type: 'asset' },
   { system_key: 'loans', name: 'Loans Payable', account_type: 'liability' },
+  { system_key: 'money_lent', name: 'Money Lent', account_type: 'asset' },
   { system_key: 'input_cgst', name: 'Input CGST', account_type: 'asset' },
   { system_key: 'input_sgst', name: 'Input SGST', account_type: 'asset' },
   { system_key: 'input_igst', name: 'Input IGST', account_type: 'asset' },
@@ -178,7 +179,7 @@ export async function hasGeneralLedger(db?: SQLite.SQLiteDatabase): Promise<bool
   return (row?.count ?? 0) > 0;
 }
 
-const LEDGER_CODE_VERSION = '9';
+const LEDGER_CODE_VERSION = '10';
 let rebuildInFlight: Promise<void> | null = null;
 /** Set when a rebuild is requested while another is already running. */
 let rebuildQueued = false;
@@ -551,6 +552,7 @@ async function performGeneralLedgerRebuild(
   const equityAccount = accounts.get('equity');
   const fixedAssetsAccount = accounts.get('fixed_assets');
   const loansAccount = accounts.get('loans');
+  const moneyLentAccount = accounts.get('money_lent');
   if (
     !salesAccount ||
     !cogsAccount ||
@@ -560,7 +562,8 @@ async function performGeneralLedgerRebuild(
     !otherIncomeAccount ||
     !equityAccount ||
     !fixedAssetsAccount ||
-    !loansAccount
+    !loansAccount ||
+    !moneyLentAccount
   ) {
     return;
   }
@@ -892,29 +895,44 @@ async function performGeneralLedgerRebuild(
     category: string;
     description: string;
     amount: number;
-    account_id: number;
+    account_id: number | null;
+    loan_id: number | null;
     date: string;
   }>(
-    `SELECT id, category, description, amount, account_id, date FROM expenses
+    `SELECT id, category, description, amount, account_id, loan_id, date FROM expenses
      WHERE amount > 0 AND (${expenseFilter.clause})`,
     expenseFilter.params
   );
 
   for (const expense of expenses) {
-    const cashAccount = accounts.get(`cash:${expense.account_id}`);
-    if (!cashAccount) continue;
     const expenseAccount = await getOrCreateExpenseLedgerAccount(database, expense.category);
     const amount = roundMoney(expense.amount);
-    await postJournalEntry(database, {
-      date: expense.date,
-      description: `${expense.category}: ${expense.description}`,
-      referenceType: 'expense',
-      referenceId: expense.id,
-      lines: [
-        { ledgerAccountId: expenseAccount, debit: amount, credit: 0 },
-        { ledgerAccountId: cashAccount, debit: 0, credit: amount },
-      ],
-    });
+    if (expense.account_id) {
+      const cashAccount = accounts.get(`cash:${expense.account_id}`);
+      if (!cashAccount) continue;
+      await postJournalEntry(database, {
+        date: expense.date,
+        description: `${expense.category}: ${expense.description}`,
+        referenceType: 'expense',
+        referenceId: expense.id,
+        lines: [
+          { ledgerAccountId: expenseAccount, debit: amount, credit: 0 },
+          { ledgerAccountId: cashAccount, debit: 0, credit: amount },
+        ],
+      });
+    } else if (expense.loan_id) {
+      // Borrow-funded: Dr expense / Cr equity; loan outstanding posts Cr Loans Payable.
+      await postJournalEntry(database, {
+        date: expense.date,
+        description: `${expense.category}: ${expense.description} (borrowed)`,
+        referenceType: 'expense',
+        referenceId: expense.id,
+        lines: [
+          { ledgerAccountId: expenseAccount, debit: amount, credit: 0 },
+          { ledgerAccountId: equityAccount, debit: 0, credit: amount },
+        ],
+      });
+    }
   }
 
   const otherIncomeFilter = sqlIdIn('id', filter?.otherIncomeIds, full);
@@ -1116,13 +1134,15 @@ async function performGeneralLedgerRebuild(
     id: number;
     name: string;
     value: number;
+    date: string | null;
     created_at: string;
-  }>(`SELECT id, name, value, created_at FROM fixed_assets WHERE value > 0`);
+  }>(`SELECT id, name, value, date, created_at FROM fixed_assets WHERE value > 0`);
 
   for (const asset of fixedAssetRows) {
     const amount = roundMoney(asset.value);
+    const entryDate = asset.date?.trim() || asset.created_at.slice(0, 10);
     await postJournalEntry(database, {
-      date: asset.created_at.slice(0, 10),
+      date: entryDate,
       description: `Fixed asset — ${asset.name}`,
       referenceType: 'fixed_asset',
       referenceId: asset.id,
@@ -1136,27 +1156,41 @@ async function performGeneralLedgerRebuild(
   const loanRows = await database.getAllAsync<{
     id: number;
     lender_name: string;
+    direction: string | null;
     outstanding_amount: number;
     start_date: string | null;
     created_at: string;
   }>(
-    `SELECT id, lender_name, outstanding_amount, start_date, created_at
+    `SELECT id, lender_name, direction, outstanding_amount, start_date, created_at
      FROM loans WHERE outstanding_amount > 0`
   );
 
   for (const loan of loanRows) {
     const amount = roundMoney(loan.outstanding_amount);
     const entryDate = loan.start_date?.trim() || loan.created_at.slice(0, 10);
-    await postJournalEntry(database, {
-      date: entryDate,
-      description: `Loan — ${loan.lender_name}`,
-      referenceType: 'loan',
-      referenceId: loan.id,
-      lines: [
-        { ledgerAccountId: equityAccount, debit: amount, credit: 0 },
-        { ledgerAccountId: loansAccount, debit: 0, credit: amount },
-      ],
-    });
+    if (loan.direction === 'lent') {
+      await postJournalEntry(database, {
+        date: entryDate,
+        description: `Money lent — ${loan.lender_name}`,
+        referenceType: 'loan',
+        referenceId: loan.id,
+        lines: [
+          { ledgerAccountId: moneyLentAccount, debit: amount, credit: 0 },
+          { ledgerAccountId: equityAccount, debit: 0, credit: amount },
+        ],
+      });
+    } else {
+      await postJournalEntry(database, {
+        date: entryDate,
+        description: `Loan — ${loan.lender_name}`,
+        referenceType: 'loan',
+        referenceId: loan.id,
+        lines: [
+          { ledgerAccountId: equityAccount, debit: amount, credit: 0 },
+          { ledgerAccountId: loansAccount, debit: 0, credit: amount },
+        ],
+      });
+    }
   }
   });
 }

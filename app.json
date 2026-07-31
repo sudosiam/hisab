@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hisab",
     "slug": "hisab",
-    "version": "11.4.3",
+    "version": "11.4.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "hisab",
@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hisab.app",
-      "buildNumber": "45"
+      "buildNumber": "46"
     },
     "android": {
       "adaptiveIcon": {
@@ -27,7 +27,7 @@
         "backgroundImage": "./assets/android-icon-background.png"
       },
       "package": "com.hisab.app",
-      "versionCode": 45,
+      "versionCode": 46,
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize"
     },

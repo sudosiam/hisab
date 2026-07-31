@@ -4,7 +4,17 @@ Android-first offline accounting app built with **Expo SDK 54** and **SQLite**. 
 
 Copyright (c) 2026 Biswa. All rights reserved.
 
-**Current version:** `11.4.3` (Android `versionCode` 45 · schema v30)
+**Current version:** `11.4.4` (Android `versionCode` 46 · schema v31)
+
+## What's new in 11.4.4
+
+- **Lent & Borrowed:** track money you lend out (cash down, receivable up) and borrow in (memo liability)
+- Expenses and fixed assets can be funded from a borrowed loan — cash unchanged, outstanding goes up
+- Repay borrowed / collect lent with cash/bank account; movement history per loan
+- Balance sheet: **Money Lent** asset + **Loans** liability reflect direction and funding
+- General ledger v10 rebuild on upgrade for borrow-funded postings
+- Recurring expenses work for both cash/bank and borrowed funding
+- Delete loan blocked when linked to expenses or fixed assets
 
 ## What's new in 11.4.3
 
@@ -136,8 +146,8 @@ Copy into `releases/` for handoff (APKs are gitignored):
 
 ```powershell
 New-Item -ItemType Directory -Force releases | Out-Null
-Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-11.4.3.apk" -Force
-adb install -r "releases\hisab-11.4.3.apk"
+Copy-Item "android\app\build\outputs\apk\release\app-release.apk" "releases\hisab-11.4.4.apk" -Force
+adb install -r "releases\hisab-11.4.4.apk"
 ```
 
 ## Build APK (EAS cloud)
